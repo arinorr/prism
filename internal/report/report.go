@@ -59,11 +59,16 @@ func Markdown(d *Data) string {
 
 			// Details for warnings and criticals.
 			for _, f := range group.findings {
-				if f.Severity == "info" {
+				if f.Severity == severityInfo {
 					continue
 				}
-				fmt.Fprintf(&b, "**%s** (line %d, %s) — %s\n\n",
-					severityBadge(f.Severity), f.Line, f.Role, f.Summary)
+				if f.Line > 0 {
+					fmt.Fprintf(&b, "**%s** (line %d, %s) — %s\n\n",
+						severityBadge(f.Severity), f.Line, f.Role, f.Summary)
+				} else {
+					fmt.Fprintf(&b, "**%s** (%s) — %s\n\n",
+						severityBadge(f.Severity), f.Role, f.Summary)
+				}
 				b.WriteString(f.Detail)
 				b.WriteString("\n\n")
 			}
@@ -252,6 +257,20 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 
 // JSON outputs the review result as structured JSON.
 func JSON(d *Data) (string, error) {
+	// Ensure slices serialize as [] not null.
+	findings := d.Result.Findings
+	if findings == nil {
+		findings = []agents.Finding{}
+	}
+	suggestions := toSuggestionJSON(d.Result.Suggestions)
+	if suggestions == nil {
+		suggestions = []suggestionJSON{}
+	}
+	roles := d.Roles
+	if roles == nil {
+		roles = []string{}
+	}
+
 	output := struct {
 		PR          prSummary        `json:"pr"`
 		Summary     string           `json:"summary"`
@@ -266,9 +285,9 @@ func JSON(d *Data) (string, error) {
 			Files:  len(d.PR.Files),
 		},
 		Summary:     d.Result.Summary,
-		Findings:    d.Result.Findings,
-		Suggestions: toSuggestionJSON(d.Result.Suggestions),
-		Roles:       d.Roles,
+		Findings:    findings,
+		Suggestions: suggestions,
+		Roles:       roles,
 		Duration:    d.Duration,
 	}
 
@@ -338,6 +357,7 @@ func groupByFile(findings []agents.Finding) []fileGroup {
 const (
 	severityCritical = "critical"
 	severityWarning  = "warning"
+	severityInfo     = "info"
 )
 
 func severityOrder(s string) int {

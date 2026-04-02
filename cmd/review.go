@@ -100,22 +100,22 @@ func runReview(args []string) error {
 	}
 	elapsed := time.Since(start)
 
-	// Build report data.
-	roleNames := make([]string, len(roles))
-	for i, r := range roles {
-		roleNames[i] = r.Name
-	}
-	data := &report.Data{
-		PR:       pr,
-		Result:   result,
-		Roles:    roleNames,
-		Duration: elapsed.Round(time.Second).String(),
-	}
-
 	// If no format specified, print summary to terminal and we're done.
 	if formatFlag == "" {
 		fmt.Println(result.Summary)
 	} else {
+		// Build report data only when a format is requested.
+		roleNames := make([]string, len(roles))
+		for i, r := range roles {
+			roleNames[i] = r.Name
+		}
+		data := &report.Data{
+			PR:       pr,
+			Result:   result,
+			Roles:    roleNames,
+			Duration: elapsed.Round(time.Second).String(),
+		}
+
 		var output string
 		ext := formatFlag
 		if ext == "markdown" {
@@ -144,7 +144,7 @@ func runReview(args []string) error {
 		if toStdout {
 			fmt.Print(output)
 		} else {
-			outPath := filepath.Join(defaultResultsDir, fmt.Sprintf("shinobi-pr-%s.%s", pr.Number, ext))
+			outPath := filepath.Join(defaultResultsDir, fmt.Sprintf("shinobi-pr-%s.%s", sanitizeFilename(pr.Number), ext))
 			if err := writeToFile(output, outPath); err != nil {
 				return err
 			}
@@ -164,6 +164,17 @@ func runReview(args []string) error {
 	}
 
 	return nil
+}
+
+// sanitizeFilename strips characters that could cause path traversal or invalid filenames.
+func sanitizeFilename(s string) string {
+	// Extract just the numeric part if it's a URL-style ref.
+	if idx := strings.LastIndex(s, "/"); idx != -1 {
+		s = s[idx+1:]
+	}
+	// Remove any remaining path separators or suspicious characters.
+	replacer := strings.NewReplacer("/", "-", "\\", "-", "..", "", "~", "")
+	return replacer.Replace(s)
 }
 
 func writeToFile(content, path string) error {

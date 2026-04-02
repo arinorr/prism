@@ -166,6 +166,7 @@ func (c *Client) PostComments(pr *PR, suggestions []Suggestion) error {
 		return fmt.Errorf("cannot post comments: HEAD SHA is not available")
 	}
 
+	var errs []error
 	for _, s := range suggestions {
 		body := fmt.Sprintf("**[%s]** %s", s.Role, s.Body)
 		err := exec.Command("gh", "api",
@@ -176,10 +177,13 @@ func (c *Client) PostComments(pr *PR, suggestions []Suggestion) error {
 			"-f", fmt.Sprintf("commit_id=%s", pr.HeadSHA),
 		).Run()
 		if err != nil {
-			return fmt.Errorf("failed to post comment on %s:%d: %w", s.File, s.Line, err)
+			errs = append(errs, fmt.Errorf("failed to post comment on %s:%d: %w", s.File, s.Line, err))
 		}
 	}
 
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to post %d/%d comments: %w", len(errs), len(suggestions), errs[0])
+	}
 	return nil
 }
 

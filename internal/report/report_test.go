@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -140,5 +141,113 @@ func TestSeverityBadge(t *testing.T) {
 	}
 	if !strings.Contains(severityBadge("info"), "info") {
 		t.Error("info badge should contain 'info'")
+	}
+}
+
+func TestMarkdown_NoLine0InDetails(t *testing.T) {
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "Test summary.",
+			Findings: []agents.Finding{
+				{File: "a.go", Line: 0, Severity: "warning", Summary: "General issue", Detail: "This is a general warning.", Role: "editor"},
+				{File: "a.go", Line: 10, Severity: "critical", Summary: "Specific issue", Detail: "This is on line 10.", Role: "solver"},
+			},
+		},
+		Roles: []string{"Editor", "Solver"},
+	}
+	md := Markdown(d)
+	// The detail for line 0 should NOT contain "line 0".
+	if strings.Contains(md, "line 0") {
+		t.Error("markdown detail should not print 'line 0' for findings without a line number")
+	}
+	// The detail for line 10 should contain "line 10".
+	if !strings.Contains(md, "line 10") {
+		t.Error("markdown detail should print 'line 10' for findings with a line number")
+	}
+}
+
+func TestJSON_NilSlicesSerializeAsEmptyArrays(t *testing.T) {
+	d := &Data{
+		PR:     &gh.PR{Number: "1", Title: "Test"},
+		Result: &agents.ReviewResult{Summary: "ok"},
+		// Roles, Findings, Suggestions are all nil.
+	}
+	j, err := JSON(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(j), &parsed); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	for _, key := range []string{"findings", "suggestions", "roles"} {
+		raw, ok := parsed[key]
+		if !ok {
+			t.Errorf("JSON missing key %q", key)
+			continue
+		}
+		if string(raw) == "null" {
+			t.Errorf("JSON key %q should be [] not null", key)
+		}
+	}
+}
+
+func TestHTML_ContainsSeverityStats(t *testing.T) {
+	html, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(html, "stat-critical") {
+		t.Error("HTML should contain critical stat")
+	}
+	if !strings.Contains(html, "stat-warning") {
+		t.Error("HTML should contain warning stat")
+	}
+	if !strings.Contains(html, "stat-info") {
+		t.Error("HTML should contain info stat")
+	}
+}
+
+func TestHTML_ContainsFileGroups(t *testing.T) {
+	html, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(html, "file-group") {
+		t.Error("HTML should contain file group elements")
+	}
+	if !strings.Contains(html, "widget.go") {
+		t.Error("HTML should contain file names")
+	}
+}
+
+func TestGroupByFile_EmptyFile(t *testing.T) {
+	findings := []agents.Finding{
+		{File: "", Severity: "info", Summary: "general note"},
+	}
+	groups := groupByFile(findings)
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	if groups[0].file != "(general)" {
+		t.Errorf("expected file name '(general)', got %q", groups[0].file)
+	}
+}
+
+func TestGroupByFile_MultipleFiles(t *testing.T) {
+	findings := []agents.Finding{
+		{File: "b.go", Severity: "info", Summary: "b note"},
+		{File: "a.go", Severity: "warning", Summary: "a note"},
+	}
+	groups := groupByFile(findings)
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// Groups should be sorted alphabetically by file.
+	if groups[0].file != "a.go" {
+		t.Errorf("expected first group 'a.go', got %q", groups[0].file)
 	}
 }

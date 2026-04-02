@@ -257,14 +257,15 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 		summary = response.Result
 	}
 
-	// Collect all findings and derive inline suggestions from them.
+	// Collect all findings and derive inline suggestions from warning+ findings.
 	var allFindings []Finding
 	var suggestions []gh.Suggestion
 	for _, fb := range feedbacks {
 		for _, f := range fb.Findings {
 			f.Role = fb.Role
 			allFindings = append(allFindings, f)
-			if f.File != "" && f.Line > 0 {
+			// Only create PR comments for warning and critical — info would flood the PR.
+			if f.File != "" && f.Line > 0 && f.Severity != "info" {
 				suggestions = append(suggestions, gh.Suggestion{
 					File: f.File,
 					Line: f.Line,

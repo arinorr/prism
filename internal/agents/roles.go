@@ -87,7 +87,11 @@ func ParseRoles(input string) ([]Role, error) {
 		slug := strings.TrimSpace(strings.ToLower(p))
 		role, ok := roleMap[slug]
 		if !ok {
-			return nil, fmt.Errorf("unknown role: %q (available: know-it-all, architect, solver, editor, optimizer, sentinel)", slug)
+			available := make([]string, 0, len(roleMap))
+			for k := range roleMap {
+				available = append(available, k)
+			}
+			return nil, fmt.Errorf("unknown role: %q (available: %s)", slug, strings.Join(available, ", "))
 		}
 		roles = append(roles, role)
 	}

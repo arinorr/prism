@@ -67,8 +67,9 @@ jobs:
 
       - name: Check coverage threshold
         continue-on-error: true
+        env:
+          TOTAL: ${{ steps.coverage.outputs.total_num }}
         run: |
-          TOTAL=${{ steps.coverage.outputs.total_num }}
           THRESHOLD=90
           echo "Coverage: ${TOTAL}% (threshold: ${THRESHOLD}%)"
           if (( $(echo "$TOTAL < $THRESHOLD" | bc -l) )); then
