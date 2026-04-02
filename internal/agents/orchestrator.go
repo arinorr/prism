@@ -96,12 +96,12 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 		}
 	}
 
-	fmt.Println("\nPrompt that would be sent to each agent:")
+	fmt.Printf("\nSample prompt (for %s):\n", o.roles[0].Name)
 	fmt.Println("───────────────────────────────────────")
 	prompt := buildAgentPrompt(o.roles[0], pr)
 	const previewMaxBytes = 500
 	if len(prompt) > previewMaxBytes {
-		fmt.Printf("%s\n... (%d bytes total)\n", prompt[:previewMaxBytes], len(prompt))
+		fmt.Printf("%s\n... (%d bytes total)\n", truncateUTF8(prompt, previewMaxBytes), len(prompt))
 	} else {
 		fmt.Println(prompt)
 	}
@@ -113,6 +113,13 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 }
 
 func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
+	// Pre-load all skills before spawning goroutines to avoid concurrent map writes.
+	for _, r := range o.roles {
+		if _, err := o.loadSkill(r); err != nil {
+			return nil, fmt.Errorf("failed to pre-load skill for %s: %w", r.Name, err)
+		}
+	}
+
 	var (
 		mu        sync.Mutex
 		wg        sync.WaitGroup
@@ -175,15 +182,24 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 		"-p", prompt,
 	)
 
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
 	out, err := cmd.Output()
 	elapsed := time.Since(start)
 
-	if o.opts.Verbose {
-		fmt.Printf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(out))
+	if err != nil {
+		if o.opts.Verbose {
+			fmt.Fprintf(os.Stderr, "   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
+			if s := stderr.String(); s != "" {
+				fmt.Fprintf(os.Stderr, "   📋 [%s] stderr: %s\n", role.Name, truncateUTF8(s, 300))
+			}
+		}
+		return nil, fmt.Errorf("claude command failed: %w", err)
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("claude command failed: %w", err)
+	if o.opts.Verbose {
+		fmt.Printf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(out))
 	}
 
 	// Parse the agent's JSON response.
@@ -343,8 +359,8 @@ func parseFeedback(role string, response string) (*Feedback, error) {
 		}
 	}
 
-	// Last resort: find the first { and last } and try to parse that.
-	if start := strings.Index(response, "{"); start != -1 {
+	// Last resort: find {"findings" marker and extract from there to the last }.
+	if start := strings.Index(response, `{"findings"`); start != -1 {
 		if end := strings.LastIndex(response, "}"); end > start {
 			candidate := response[start : end+1]
 			if err := json.Unmarshal([]byte(candidate), &result); err == nil {
