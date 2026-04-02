@@ -80,42 +80,174 @@ func Markdown(d *Data) string {
 	return b.String()
 }
 
-// HTML converts the markdown report to HTML with basic styling.
+// HTML generates a styled HTML report directly from the review data.
 func HTML(d *Data) (string, error) {
-	md := Markdown(d)
-
-	var buf bytes.Buffer
-	if err := goldmark.Convert([]byte(md), &buf); err != nil {
+	// Convert the synthesis summary from markdown to HTML.
+	var summaryHTML bytes.Buffer
+	if err := goldmark.Convert([]byte(d.Result.Summary), &summaryHTML); err != nil {
 		return "", fmt.Errorf("markdown to HTML conversion failed: %w", err)
 	}
 
-	var out strings.Builder
-	out.WriteString(`<!DOCTYPE html>
+	// Count severities for the stats bar.
+	var critCount, warnCount, infoCount int
+	for _, f := range d.Result.Findings {
+		switch f.Severity {
+		case severityCritical:
+			critCount++
+		case severityWarning:
+			warnCount++
+		default:
+			infoCount++
+		}
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shinobi Review: PR #` + d.PR.Number + `</title>
+<title>Shinobi Review: PR #%s</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #24292e; }
-  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-  th, td { border: 1px solid #d0d7de; padding: 6px 13px; text-align: left; }
-  th { background: #f6f8fa; font-weight: 600; }
-  tr:nth-child(even) { background: #f6f8fa; }
-  code { background: #f6f8fa; padding: 0.2em 0.4em; border-radius: 3px; font-size: 85%; }
-  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; }
-  hr { border: none; border-top: 1px solid #d0d7de; margin: 2rem 0; }
-  h1 { border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
-  h2 { border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
-  h3 { margin-top: 1.5rem; }
+:root { --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de; --surface: #f6f8fa; --red: #cf222e; --red-bg: #ffebe9; --yellow: #9a6700; --yellow-bg: #fff8c5; --blue: #0969da; --blue-bg: #ddf4ff; --green: #1a7f37; --green-bg: #dafbe1; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.6; color: var(--fg); background: var(--bg); }
+h1 { font-size: 1.5rem; margin: 0; }
+h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bottom: 1px solid var(--border); }
+.header { border-bottom: 2px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.5rem; }
+.header .pr-title { color: var(--muted); font-size: 1rem; margin: 0.25rem 0 0.75rem; }
+.meta { display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
+.stats { display: flex; gap: 0.75rem; margin: 1.5rem 0; }
+.stat { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; }
+.stat-critical { background: var(--red-bg); color: var(--red); }
+.stat-warning { background: var(--yellow-bg); color: var(--yellow); }
+.stat-info { background: var(--blue-bg); color: var(--blue); }
+.stat-suggestions { background: var(--green-bg); color: var(--green); }
+.stat .num { font-size: 1.25rem; }
+.summary { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; margin: 1.5rem 0; }
+.summary h1, .summary h2, .summary h3 { font-size: 1.1rem; border: none; margin: 1rem 0 0.5rem; padding: 0; }
+.summary p { margin: 0.5rem 0; }
+.summary ul, .summary ol { padding-left: 1.5rem; }
+.summary table { border-collapse: collapse; width: 100%%; margin: 0.75rem 0; font-size: 0.85rem; }
+.summary th, .summary td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
+.summary th { background: var(--bg); }
+.summary pre { background: var(--bg); border: 1px solid var(--border); padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; }
+.summary code { background: var(--bg); padding: 0.15em 0.35em; border-radius: 3px; font-size: 0.85em; }
+.summary hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+.file-group { border: 1px solid var(--border); border-radius: 8px; margin: 1rem 0; overflow: hidden; }
+.file-header { background: var(--surface); padding: 0.6rem 1rem; font-weight: 600; font-family: SFMono-Regular, Consolas, monospace; font-size: 0.9rem; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.file-header:hover { background: #eaeef2; }
+.file-header .counts { display: flex; gap: 0.5rem; font-size: 0.75rem; font-weight: normal; font-family: -apple-system, sans-serif; }
+.file-header .counts span { padding: 0.15rem 0.5rem; border-radius: 10px; }
+.badge-critical { background: var(--red-bg); color: var(--red); }
+.badge-warning { background: var(--yellow-bg); color: var(--yellow); }
+.badge-info { background: var(--blue-bg); color: var(--blue); }
+.finding { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+.finding:last-child { border-bottom: none; }
+.finding-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+.finding-header .severity { font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+.finding-header .line { font-size: 0.8rem; color: var(--muted); font-family: SFMono-Regular, Consolas, monospace; }
+.finding-header .role { font-size: 0.8rem; color: var(--muted); }
+.finding-summary { font-weight: 600; margin-bottom: 0.25rem; }
+.finding-detail { font-size: 0.9rem; color: var(--muted); line-height: 1.5; }
+.finding-detail code { background: var(--surface); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.85em; }
+.footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); text-align: center; }
+.footer a { color: var(--blue); text-decoration: none; }
 </style>
 </head>
 <body>
-`)
-	out.WriteString(buf.String())
-	out.WriteString("\n</body>\n</html>\n")
 
-	return out.String(), nil
+<div class="header">
+  <h1>Shinobi Review: PR #%s</h1>
+  <div class="pr-title">%s</div>
+  <div class="meta">
+    <span>%d files changed</span>
+    <span>%d agents</span>
+    <span>%d findings</span>
+`, d.PR.Number, d.PR.Number, d.PR.Title, len(d.PR.Files), len(d.Roles), len(d.Result.Findings))
+
+	if d.Duration != "" {
+		fmt.Fprintf(&b, "    <span>%s</span>\n", d.Duration)
+	}
+	b.WriteString("  </div>\n</div>\n\n")
+
+	// Stats bar.
+	b.WriteString("<div class=\"stats\">\n")
+	fmt.Fprintf(&b, "  <div class=\"stat stat-critical\"><span class=\"num\">%d</span> critical</div>\n", critCount)
+	fmt.Fprintf(&b, "  <div class=\"stat stat-warning\"><span class=\"num\">%d</span> warning</div>\n", warnCount)
+	fmt.Fprintf(&b, "  <div class=\"stat stat-info\"><span class=\"num\">%d</span> info</div>\n", infoCount)
+	fmt.Fprintf(&b, "  <div class=\"stat stat-suggestions\"><span class=\"num\">%d</span> suggestions</div>\n", len(d.Result.Suggestions))
+	b.WriteString("</div>\n\n")
+
+	// Synthesis summary.
+	b.WriteString("<h2>Summary</h2>\n")
+	b.WriteString("<div class=\"summary\">\n")
+	b.WriteString(summaryHTML.String())
+	b.WriteString("</div>\n\n")
+
+	// Findings grouped by file.
+	if len(d.Result.Findings) > 0 {
+		b.WriteString("<h2>Findings by File</h2>\n\n")
+		grouped := groupByFile(d.Result.Findings)
+		for _, group := range grouped {
+			// Count per-file severities.
+			var fc, fw, fi int
+			for _, f := range group.findings {
+				switch f.Severity {
+				case severityCritical:
+					fc++
+				case severityWarning:
+					fw++
+				default:
+					fi++
+				}
+			}
+
+			b.WriteString("<div class=\"file-group\">\n")
+			fmt.Fprintf(&b, "  <div class=\"file-header\"><span>%s</span><div class=\"counts\">", group.file)
+			if fc > 0 {
+				fmt.Fprintf(&b, "<span class=\"badge-critical\">%d critical</span>", fc)
+			}
+			if fw > 0 {
+				fmt.Fprintf(&b, "<span class=\"badge-warning\">%d warning</span>", fw)
+			}
+			if fi > 0 {
+				fmt.Fprintf(&b, "<span class=\"badge-info\">%d info</span>", fi)
+			}
+			b.WriteString("</div></div>\n")
+
+			for _, f := range group.findings {
+				severityClass := "badge-info"
+				switch f.Severity {
+				case severityCritical:
+					severityClass = "badge-critical"
+				case severityWarning:
+					severityClass = "badge-warning"
+				}
+
+				b.WriteString("  <div class=\"finding\">\n")
+				b.WriteString("    <div class=\"finding-header\">\n")
+				fmt.Fprintf(&b, "      <span class=\"severity %s\">%s</span>\n", severityClass, f.Severity)
+				if f.Line > 0 {
+					fmt.Fprintf(&b, "      <span class=\"line\">line %d</span>\n", f.Line)
+				}
+				fmt.Fprintf(&b, "      <span class=\"role\">%s</span>\n", f.Role)
+				b.WriteString("    </div>\n")
+				fmt.Fprintf(&b, "    <div class=\"finding-summary\">%s</div>\n", f.Summary)
+				if f.Detail != "" {
+					fmt.Fprintf(&b, "    <div class=\"finding-detail\">%s</div>\n", f.Detail)
+				}
+				b.WriteString("  </div>\n")
+			}
+			b.WriteString("</div>\n\n")
+		}
+	}
+
+	// Footer.
+	b.WriteString("<div class=\"footer\">Generated by <a href=\"https://github.com/arinorr/shinobi\">Shinobi</a></div>\n")
+	b.WriteString("\n</body>\n</html>\n")
+
+	return b.String(), nil
 }
 
 // JSON outputs the review result as structured JSON.

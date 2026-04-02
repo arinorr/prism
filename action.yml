@@ -39,9 +39,9 @@ runs:
       with:
         go-version: "1.24"
 
-    - name: Install shinobi
+    - name: Build shinobi
       shell: bash
-      run: go install github.com/arinorr/shinobi@latest
+      run: go build -o "$GITHUB_WORKSPACE/shinobi" .
 
     - name: Install Claude Code
       shell: bash
@@ -52,27 +52,31 @@ runs:
       shell: bash
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        INPUT_PR_NUMBER: ${{ github.event.pull_request.number }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_ROLES: ${{ inputs.roles }}
+        INPUT_COMMENT: ${{ inputs.comment }}
       run: |
-        PR_NUMBER="${{ github.event.pull_request.number }}"
-        FORMAT="${{ inputs.format }}"
-        REPORT_FILE="shinobi-review.${FORMAT}"
+        set -euo pipefail
 
-        ARGS="review ${PR_NUMBER} --format ${FORMAT} --output ${REPORT_FILE}"
+        ARGS=(review "${INPUT_PR_NUMBER}" --format "${INPUT_FORMAT}")
 
-        if [ -n "${{ inputs.roles }}" ]; then
-          ARGS="${ARGS} --roles ${{ inputs.roles }}"
+        if [ -n "${INPUT_ROLES}" ]; then
+          ARGS+=(--roles "${INPUT_ROLES}")
         fi
 
-        if [ "${{ inputs.comment }}" = "true" ]; then
-          ARGS="${ARGS} --comment"
+        if [ "${INPUT_COMMENT}" = "true" ]; then
+          ARGS+=(--comment)
         fi
 
-        shinobi ${ARGS}
+        "$GITHUB_WORKSPACE/shinobi" "${ARGS[@]}"
 
+        # The CLI writes to results/shinobi-pr-{N}.{ext} by default.
+        REPORT_FILE="results/shinobi-pr-${INPUT_PR_NUMBER}.${INPUT_FORMAT}"
         echo "report=${REPORT_FILE}" >> "$GITHUB_OUTPUT"
 
         # Extract findings count from JSON if available.
-        if [ "${FORMAT}" = "json" ]; then
+        if [ "${INPUT_FORMAT}" = "json" ]; then
           COUNT=$(jq '.findings | length' "${REPORT_FILE}" 2>/dev/null || echo "0")
         else
           COUNT="n/a"
@@ -80,17 +84,18 @@ runs:
         echo "findings_count=${COUNT}" >> "$GITHUB_OUTPUT"
 
     - name: Upload report artifact
+      if: always() && steps.review.outputs.report != ''
       uses: actions/upload-artifact@v4
       with:
         name: shinobi-review
         path: ${{ steps.review.outputs.report }}
 
     - name: Post summary to PR
-      if: inputs.format == 'md'
+      if: inputs.format == 'md' && steps.review.outputs.report != ''
       shell: bash
       env:
-        GH_TOKEN: ${{ github.token }}
+        REPORT_PATH: ${{ steps.review.outputs.report }}
       run: |
-        if [ -f "${{ steps.review.outputs.report }}" ]; then
-          cat "${{ steps.review.outputs.report }}" >> "$GITHUB_STEP_SUMMARY"
+        if [ -f "${REPORT_PATH}" ]; then
+          cat "${REPORT_PATH}" >> "$GITHUB_STEP_SUMMARY"
         fi

@@ -9,11 +9,12 @@ import (
 
 // PR holds the metadata and diff for a pull request.
 type PR struct {
-	Number string
-	Title  string
-	Body   string
-	Diff   string
-	Files  []FileChange
+	Number  string
+	Title   string
+	Body    string
+	Diff    string
+	HeadSHA string
+	Files   []FileChange
 }
 
 // FileChange represents a single file's changes in the PR.
@@ -52,15 +53,16 @@ func (c *Client) GetPRDiff(prRef string) (*PR, error) {
 
 func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 	// Get PR metadata.
-	out, err := exec.Command("gh", "pr", "view", prRef, "--json", "number,title,body").Output()
+	out, err := exec.Command("gh", "pr", "view", prRef, "--json", "number,title,body,headRefOid").Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view failed: %w", err)
 	}
 
 	var meta struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Body   string `json:"body"`
+		Number     int    `json:"number"`
+		Title      string `json:"title"`
+		Body       string `json:"body"`
+		HeadRefOid string `json:"headRefOid"`
 	}
 	if err := json.Unmarshal(out, &meta); err != nil {
 		return nil, fmt.Errorf("failed to parse PR metadata: %w", err)
@@ -98,11 +100,12 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 	}
 
 	pr := &PR{
-		Number: fmt.Sprintf("%d", meta.Number),
-		Title:  meta.Title,
-		Body:   meta.Body,
-		Diff:   string(diff),
-		Files:  files,
+		Number:  fmt.Sprintf("%d", meta.Number),
+		Title:   meta.Title,
+		Body:    meta.Body,
+		Diff:    string(diff),
+		HeadSHA: meta.HeadRefOid,
+		Files:   files,
 	}
 
 	return pr, nil
@@ -138,11 +141,18 @@ func (c *Client) getPRDiffGit(prRef string) (*PR, error) {
 		}
 	}
 
+	// Get HEAD commit SHA.
+	headSHA := ""
+	if shaOut, shaErr := exec.Command("git", "rev-parse", "HEAD").Output(); shaErr == nil {
+		headSHA = strings.TrimSpace(string(shaOut))
+	}
+
 	return &PR{
-		Number: prRef,
-		Title:  fmt.Sprintf("(local) Changes vs %s", base),
-		Diff:   string(diff),
-		Files:  files,
+		Number:  prRef,
+		Title:   fmt.Sprintf("(local) Changes vs %s", base),
+		Diff:    string(diff),
+		HeadSHA: headSHA,
+		Files:   files,
 	}, nil
 }
 
@@ -152,6 +162,10 @@ func (c *Client) PostComments(pr *PR, suggestions []Suggestion) error {
 		return fmt.Errorf("posting comments requires the gh CLI")
 	}
 
+	if pr.HeadSHA == "" {
+		return fmt.Errorf("cannot post comments: HEAD SHA is not available")
+	}
+
 	for _, s := range suggestions {
 		body := fmt.Sprintf("**[%s]** %s", s.Role, s.Body)
 		err := exec.Command("gh", "api",
@@ -159,7 +173,7 @@ func (c *Client) PostComments(pr *PR, suggestions []Suggestion) error {
 			"-f", fmt.Sprintf("body=%s", body),
 			"-f", fmt.Sprintf("path=%s", s.File),
 			"-F", fmt.Sprintf("line=%d", s.Line),
-			"-f", "commit_id=HEAD",
+			"-f", fmt.Sprintf("commit_id=%s", pr.HeadSHA),
 		).Run()
 		if err != nil {
 			return fmt.Errorf("failed to post comment on %s:%d: %w", s.File, s.Line, err)
