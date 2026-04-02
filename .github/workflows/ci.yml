@@ -86,7 +86,7 @@ jobs:
         with:
           script: |
             const total = '${{ steps.coverage.outputs.total }}';
-            const marker = '<!-- shinobi-coverage -->';
+            const marker = '<!-- prism-coverage -->';
             const body = `${marker}\n## Coverage Report\n\n| Metric | Value |\n|--------|-------|\n| **Total coverage** | ${total} |\n| **Threshold** | 90% |\n| **Status** | ${parseFloat(total) >= 90 ? '✅ Pass' : '❌ Fail'} |\n\n*Updated by CI*`;
 
             const { data: comments } = await github.rest.issues.listComments({

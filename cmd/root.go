@@ -17,23 +17,23 @@ func Execute() error {
 	case "review":
 		return runReview(os.Args[2:])
 	case "version":
-		fmt.Printf("shinobi %s\n", version)
+		fmt.Printf("prism %s\n", version)
 		return nil
 	case "help", "--help", "-h":
 		printUsage()
 		return nil
 	default:
-		return fmt.Errorf("unknown command: %s\nRun 'shinobi help' for usage", os.Args[1])
+		return fmt.Errorf("unknown command: %s\nRun 'prism help' for usage", os.Args[1])
 	}
 }
 
 func printUsage() {
-	fmt.Println(`shinobi - multi-agent PR review orchestrator
+	fmt.Println(`prism - multi-agent PR review orchestrator
 
 Usage:
-  shinobi review <pr-number|pr-url>  Review a pull request
-  shinobi version                    Print version
-  shinobi help                       Show this help
+  prism review <pr-number|pr-url>  Review a pull request
+  prism version                    Print version
+  prism help                       Show this help
 
 Options:
   --comment        Post suggestions as inline PR comments (requires gh cli)

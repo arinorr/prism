@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/arinorr/shinobi/cmd"
+	"github.com/arinorr/prism/cmd"
 )
 
 func main() {

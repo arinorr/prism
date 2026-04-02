@@ -2,7 +2,7 @@
 
 # Build the binary
 build:
-	go build -o shinobi .
+	go build -o prism .
 
 # Run tests with race detector
 test:
@@ -17,8 +17,8 @@ check: lint test build
 
 # Remove build artifacts
 clean:
-	rm -f shinobi coverage.out
+	rm -f prism coverage.out
 
 # Review a PR (usage: make review PR=2 FLAGS="--format md --verbose")
 review: build
-	CLAUDECODE= ./shinobi review $(PR) $(FLAGS)
+	CLAUDECODE= ./prism review $(PR) $(FLAGS)

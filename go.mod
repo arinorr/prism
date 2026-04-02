@@ -1,4 +1,4 @@
-module github.com/arinorr/shinobi
+module github.com/arinorr/prism
 
 go 1.24.0
 

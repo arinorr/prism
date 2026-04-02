@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arinorr/shinobi/internal/gh"
+	"github.com/arinorr/prism/internal/gh"
 )
 
 const previewMaxBytes = 500
@@ -313,7 +313,7 @@ func buildSynthesisPrompt(pr *gh.PR, feedbacks []Feedback) string {
 		parts = append(parts, string(data))
 	}
 
-	return fmt.Sprintf(`You are the Shinobi Council Synthesizer. Multiple specialist agents have reviewed a PR. Your job is to:
+	return fmt.Sprintf(`You are the Prism Synthesizer. Multiple specialist agents have reviewed a PR. Your job is to:
 
 1. Review all feedback from each specialist
 2. Identify the most important suggestions

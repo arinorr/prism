@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arinorr/shinobi/internal/agents"
-	"github.com/arinorr/shinobi/internal/gh"
+	"github.com/arinorr/prism/internal/agents"
+	"github.com/arinorr/prism/internal/gh"
 )
 
 func testData() *Data {
@@ -37,7 +37,7 @@ func testData() *Data {
 
 func TestMarkdown_ContainsHeader(t *testing.T) {
 	md := Markdown(testData())
-	if !strings.Contains(md, "# Shinobi Review: PR #42") {
+	if !strings.Contains(md, "# Prism Review: PR #42") {
 		t.Error("markdown should contain PR header")
 	}
 	if !strings.Contains(md, "Fix the widget") {
