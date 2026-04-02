@@ -114,7 +114,23 @@ func runReview(args []string) error {
 	elapsed := time.Since(start)
 
 	// Output the results.
-	return outputResults(opts, pr, result, roles, elapsed)
+	if err := outputResults(opts, pr, result, roles, elapsed); err != nil {
+		return err
+	}
+
+	// Optionally post comments.
+	if opts.comment {
+		if len(result.Suggestions) == 0 {
+			fmt.Println("\nNo inline suggestions to post.")
+		} else {
+			if err := client.PostComments(pr, result.Suggestions); err != nil {
+				return fmt.Errorf("failed to post comments: %w", err)
+			}
+			fmt.Printf("\n✅ Posted %d inline comments to PR #%s\n", len(result.Suggestions), pr.Number)
+		}
+	}
+
+	return nil
 }
 
 // outputResults handles format selection, report generation, and file output.
@@ -169,15 +185,15 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 	return writeToFile(output, outPath)
 }
 
+var filenameReplacer = strings.NewReplacer("/", "-", "\\", "-", "..", "", "~", "")
+
 // sanitizeFilename strips characters that could cause path traversal or invalid filenames.
 func sanitizeFilename(s string) string {
 	// Extract just the numeric part if it's a URL-style ref.
 	if idx := strings.LastIndex(s, "/"); idx != -1 {
 		s = s[idx+1:]
 	}
-	// Remove any remaining path separators or suspicious characters.
-	replacer := strings.NewReplacer("/", "-", "\\", "-", "..", "", "~", "")
-	return replacer.Replace(s)
+	return filenameReplacer.Replace(s)
 }
 
 func writeToFile(content, path string) error {

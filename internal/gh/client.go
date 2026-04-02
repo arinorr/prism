@@ -128,7 +128,7 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 func (c *Client) getPRDiffGit(prRef string) (*PR, error) {
 	// Fallback: use git diff against main/master.
 	// This is a simplified fallback — assumes the PR branch is checked out.
-	base := detectBaseBranch()
+	base := c.detectBaseBranch()
 
 	diff, err := c.run("git", "diff", base+"...HEAD")
 	if err != nil {
@@ -201,9 +201,9 @@ func (c *Client) PostComments(pr *PR, suggestions []Suggestion) error {
 	return nil
 }
 
-func detectBaseBranch() string {
+func (c *Client) detectBaseBranch() string {
 	for _, branch := range []string{"main", "master"} {
-		if err := exec.Command("git", "rev-parse", "--verify", branch).Run(); err == nil {
+		if _, err := c.run("git", "rev-parse", "--verify", branch); err == nil {
 			return branch
 		}
 	}

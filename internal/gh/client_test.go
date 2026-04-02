@@ -27,9 +27,40 @@ func TestGitStatusToString(t *testing.T) {
 }
 
 func TestDetectBaseBranch(t *testing.T) {
-	branch := detectBaseBranch()
+	client, _ := NewClient()
+	branch := client.detectBaseBranch()
 	if branch != "main" && branch != "master" {
 		t.Errorf("expected 'main' or 'master', got %q", branch)
+	}
+}
+
+func TestDetectBaseBranch_FallsBackToMain(t *testing.T) {
+	client := &Client{
+		run: func(name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("not found")
+		},
+	}
+	branch := client.detectBaseBranch()
+	if branch != "main" {
+		t.Errorf("expected fallback 'main', got %q", branch)
+	}
+}
+
+func TestDetectBaseBranch_FindsMaster(t *testing.T) {
+	client := &Client{
+		run: func(name string, args ...string) ([]byte, error) {
+			// Fail for "main", succeed for "master".
+			for _, a := range args {
+				if a == "main" {
+					return nil, fmt.Errorf("not found")
+				}
+			}
+			return []byte("ok"), nil
+		},
+	}
+	branch := client.detectBaseBranch()
+	if branch != "master" {
+		t.Errorf("expected 'master', got %q", branch)
 	}
 }
 
@@ -198,23 +229,31 @@ func TestGetPRDiffGH_InvalidFilesJSON(t *testing.T) {
 }
 
 func TestGetPRDiffGit(t *testing.T) {
-	callCount := 0
 	client := &Client{
 		useGH: false,
 		run: func(name string, args ...string) ([]byte, error) {
-			callCount++
 			if name != "git" {
 				t.Errorf("expected git command, got %q", name)
 			}
-			switch callCount {
-			case 1: // git diff base...HEAD
-				return []byte("+ added\n- removed\n"), nil
-			case 2: // git diff --name-status
-				return []byte("M\tmain.go\nA\tnew.go\n"), nil
-			case 3: // git rev-parse HEAD
-				return []byte("deadbeef\n"), nil
+			// Route by the git subcommand.
+			if len(args) == 0 {
+				return nil, fmt.Errorf("no args")
 			}
-			return nil, fmt.Errorf("unexpected call %d", callCount)
+			switch args[0] {
+			case "rev-parse":
+				if len(args) >= 3 && args[1] == "--verify" {
+					// detectBaseBranch check
+					return []byte("ok"), nil
+				}
+				// rev-parse HEAD
+				return []byte("deadbeef\n"), nil
+			case "diff":
+				if len(args) >= 2 && args[1] == "--name-status" {
+					return []byte("M\tmain.go\nA\tnew.go\n"), nil
+				}
+				return []byte("+ added\n- removed\n"), nil
+			}
+			return nil, fmt.Errorf("unexpected git subcommand: %s", args[0])
 		},
 	}
 
@@ -243,6 +282,9 @@ func TestGetPRDiffGit_DiffError(t *testing.T) {
 	client := &Client{
 		useGH: false,
 		run: func(name string, args ...string) ([]byte, error) {
+			if len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--verify" {
+				return []byte("ok"), nil // detectBaseBranch
+			}
 			return nil, fmt.Errorf("git error")
 		},
 	}
@@ -256,15 +298,19 @@ func TestGetPRDiffGit_DiffError(t *testing.T) {
 }
 
 func TestGetPRDiffGit_NameStatusError(t *testing.T) {
-	callCount := 0
 	client := &Client{
 		useGH: false,
 		run: func(name string, args ...string) ([]byte, error) {
-			callCount++
-			if callCount == 1 {
-				return []byte("diff"), nil
+			if len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--verify" {
+				return []byte("ok"), nil // detectBaseBranch
 			}
-			return nil, fmt.Errorf("name-status error")
+			if len(args) >= 1 && args[0] == "diff" {
+				if len(args) >= 2 && args[1] == "--name-status" {
+					return nil, fmt.Errorf("name-status error")
+				}
+				return []byte("diff content"), nil
+			}
+			return nil, fmt.Errorf("unexpected")
 		},
 	}
 	_, err := client.GetPRDiff("ref")
