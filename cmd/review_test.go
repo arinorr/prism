@@ -174,8 +174,38 @@ func TestSanitizeFilename_Tilde(t *testing.T) {
 }
 
 func TestSanitizeFilename_Backslash(t *testing.T) {
-	if got := sanitizeFilename(`foo\bar`); got != "foo-bar" {
-		t.Errorf("expected 'foo-bar', got %q", got)
+	if got := sanitizeFilename(`foo\bar`); got != "foobar" {
+		t.Errorf("expected 'foobar', got %q", got)
+	}
+}
+
+func TestSanitizeFilename_SpecialChars(t *testing.T) {
+	if got := sanitizeFilename("PR#42!@$"); got != "PR42" {
+		t.Errorf("expected 'PR42', got %q", got)
+	}
+}
+
+func TestSanitizeFilename_Empty(t *testing.T) {
+	if got := sanitizeFilename(""); got != "unknown" {
+		t.Errorf("expected 'unknown', got %q", got)
+	}
+}
+
+func TestSanitizeFilename_OnlySpecialChars(t *testing.T) {
+	if got := sanitizeFilename("!!!"); got != "unknown" {
+		t.Errorf("expected 'unknown', got %q", got)
+	}
+}
+
+func TestSanitizeFilename_Unicode(t *testing.T) {
+	if got := sanitizeFilename("PR-42-café"); got != "PR-42-caf" {
+		t.Errorf("expected 'PR-42-caf', got %q", got)
+	}
+}
+
+func TestSanitizeFilename_HyphenAndUnderscore(t *testing.T) {
+	if got := sanitizeFilename("my_pr-42"); got != "my_pr-42" {
+		t.Errorf("expected 'my_pr-42', got %q", got)
 	}
 }
 
@@ -210,6 +240,37 @@ func TestWriteToFile_OverwritesExisting(t *testing.T) {
 	}
 	if string(data) != "second" {
 		t.Errorf("expected 'second', got %q", string(data))
+	}
+}
+
+func TestWriteToFile_FilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.md")
+	if err := writeToFile("test", path); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("failed to stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("expected file permissions 0600, got %o", info.Mode().Perm())
+	}
+}
+
+func TestWriteToFile_DirectoryPermissions(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "newdir")
+	path := filepath.Join(subDir, "report.md")
+	if err := writeToFile("test", path); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info, err := os.Stat(subDir)
+	if err != nil {
+		t.Fatalf("failed to stat dir: %v", err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("expected directory permissions 0700, got %o", info.Mode().Perm())
 	}
 }
 

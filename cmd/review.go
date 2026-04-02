@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -185,23 +186,27 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 	return writeToFile(output, outPath)
 }
 
-var filenameReplacer = strings.NewReplacer("/", "-", "\\", "-", "..", "", "~", "")
+var filenameAllowlist = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
-// sanitizeFilename strips characters that could cause path traversal or invalid filenames.
+// sanitizeFilename strips all characters except alphanumeric, underscore, and hyphen.
 func sanitizeFilename(s string) string {
-	// Extract just the numeric part if it's a URL-style ref.
+	// Extract just the last path segment if it's a URL-style ref.
 	if idx := strings.LastIndex(s, "/"); idx != -1 {
 		s = s[idx+1:]
 	}
-	return filenameReplacer.Replace(s)
+	s = filenameAllowlist.ReplaceAllString(s, "")
+	if s == "" {
+		return "unknown"
+	}
+	return s
 }
 
 func writeToFile(content, path string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write output to %s: %w", path, err)
 	}
 	fmt.Printf("📄 Report written to %s\n", path)

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/microcosm-cc/bluemonday"
 	"github.com/yuin/goldmark"
 
 	"github.com/arinorr/prism/internal/agents"
@@ -88,11 +89,15 @@ func Markdown(d *Data) string {
 
 // HTML generates a styled HTML report directly from the review data.
 func HTML(d *Data) (string, error) {
-	// Convert the synthesis summary from markdown to HTML.
-	var summaryHTML bytes.Buffer
-	if err := goldmark.Convert([]byte(d.Result.Summary), &summaryHTML); err != nil {
+	// Convert the synthesis summary from markdown to HTML, then sanitize
+	// to strip any <script>, <iframe>, event handlers, etc. that could
+	// be injected via prompt injection of the LLM output.
+	var rawHTML bytes.Buffer
+	if err := goldmark.Convert([]byte(d.Result.Summary), &rawHTML); err != nil {
 		return "", fmt.Errorf("markdown to HTML conversion failed: %w", err)
 	}
+	sanitizer := bluemonday.UGCPolicy()
+	summaryHTML := sanitizer.Sanitize(rawHTML.String())
 
 	// Count severities for the stats bar.
 	var critCount, warnCount, infoCount int
@@ -188,7 +193,7 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 	// Synthesis summary.
 	b.WriteString("<h2>Summary</h2>\n")
 	b.WriteString("<div class=\"summary\">\n")
-	b.WriteString(summaryHTML.String())
+	b.WriteString(summaryHTML)
 	b.WriteString("</div>\n\n")
 
 	// Findings grouped by file.
