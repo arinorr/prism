@@ -48,7 +48,7 @@ type Options struct {
 type claudeRunner func(args ...string) ([]byte, error)
 
 func defaultClaudeRunner(args ...string) ([]byte, error) {
-	return exec.Command("claude", args...).Output()
+	return exec.Command("claude", args...).Output() // #nosec G204 -- binary is hardcoded "claude", args are internally constructed prompts
 }
 
 // Orchestrator manages the multi-agent review process.
@@ -86,9 +86,9 @@ func NewOrchestrator(roles []Role, opts Options) (*Orchestrator, error) {
 
 // readSkillFile tries to read a skill file, falling back to exe-relative path.
 func readSkillFile(path, exeDir string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- paths are compile-time constants from roles.go, never user input
 	if err != nil && exeDir != "" {
-		data, err = os.ReadFile(filepath.Join(exeDir, path))
+		data, err = os.ReadFile(filepath.Join(exeDir, path)) // #nosec G304 -- same as above, fallback to exe-relative path
 	}
 	return data, err
 }

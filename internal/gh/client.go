@@ -38,11 +38,11 @@ type Suggestion struct {
 type commandRunner func(name string, args ...string) ([]byte, error)
 
 func defaultRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return exec.Command(name, args...).Output() // #nosec G204 -- command name is always "gh" or "git", args validated by ValidatePRRef
 }
 
 func defaultRunnerNoOutput(name string, args ...string) error {
-	return exec.Command(name, args...).Run()
+	return exec.Command(name, args...).Run() // #nosec G204 -- command name is always "gh", args validated by ValidatePRRef
 }
 
 // Client wraps GitHub CLI interactions.
