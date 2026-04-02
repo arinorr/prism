@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"sort"
 	"strings"
 
@@ -169,7 +170,7 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
     <span>%d files changed</span>
     <span>%d agents</span>
     <span>%d findings</span>
-`, d.PR.Number, d.PR.Number, d.PR.Title, len(d.PR.Files), len(d.Roles), len(d.Result.Findings))
+`, esc(d.PR.Number), esc(d.PR.Number), esc(d.PR.Title), len(d.PR.Files), len(d.Roles), len(d.Result.Findings))
 
 	if d.Duration != "" {
 		fmt.Fprintf(&b, "    <span>%s</span>\n", d.Duration)
@@ -209,7 +210,7 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 			}
 
 			b.WriteString("<div class=\"file-group\">\n")
-			fmt.Fprintf(&b, "  <div class=\"file-header\"><span>%s</span><div class=\"counts\">", group.file)
+			fmt.Fprintf(&b, "  <div class=\"file-header\"><span>%s</span><div class=\"counts\">", esc(group.file))
 			if fc > 0 {
 				fmt.Fprintf(&b, "<span class=\"badge-critical\">%d critical</span>", fc)
 			}
@@ -232,15 +233,15 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 
 				b.WriteString("  <div class=\"finding\">\n")
 				b.WriteString("    <div class=\"finding-header\">\n")
-				fmt.Fprintf(&b, "      <span class=\"severity %s\">%s</span>\n", severityClass, f.Severity)
+				fmt.Fprintf(&b, "      <span class=\"severity %s\">%s</span>\n", severityClass, esc(f.Severity))
 				if f.Line > 0 {
 					fmt.Fprintf(&b, "      <span class=\"line\">line %d</span>\n", f.Line)
 				}
-				fmt.Fprintf(&b, "      <span class=\"role\">%s</span>\n", f.Role)
+				fmt.Fprintf(&b, "      <span class=\"role\">%s</span>\n", esc(f.Role))
 				b.WriteString("    </div>\n")
-				fmt.Fprintf(&b, "    <div class=\"finding-summary\">%s</div>\n", f.Summary)
+				fmt.Fprintf(&b, "    <div class=\"finding-summary\">%s</div>\n", esc(f.Summary))
 				if f.Detail != "" {
-					fmt.Fprintf(&b, "    <div class=\"finding-detail\">%s</div>\n", f.Detail)
+					fmt.Fprintf(&b, "    <div class=\"finding-detail\">%s</div>\n", esc(f.Detail))
 				}
 				b.WriteString("  </div>\n")
 			}
@@ -369,6 +370,11 @@ func severityOrder(s string) int {
 	default:
 		return 2
 	}
+}
+
+// esc escapes a string for safe HTML output.
+func esc(s string) string {
+	return html.EscapeString(s)
 }
 
 func severityBadge(s string) string {

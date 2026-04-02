@@ -224,6 +224,37 @@ func TestHTML_ContainsFileGroups(t *testing.T) {
 	}
 }
 
+func TestHTML_EscapesXSSInFindings(t *testing.T) {
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "<script>alert('xss')</script>", Files: []gh.FileChange{{Path: "a.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "Test summary.",
+			Findings: []agents.Finding{
+				{File: "<img src=x>.go", Line: 10, Severity: "critical", Summary: "<b>bold xss</b>", Detail: "<script>alert(1)</script>", Role: "sentinel"},
+			},
+		},
+		Roles: []string{"Sentinel"},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Verify that raw HTML is escaped, not rendered.
+	if strings.Contains(out, "<script>alert") {
+		t.Error("HTML output should escape <script> tags in findings")
+	}
+	if strings.Contains(out, "<img src=x>") {
+		t.Error("HTML output should escape <img> tags in file names")
+	}
+	if strings.Contains(out, "<b>bold xss</b>") {
+		t.Error("HTML output should escape <b> tags in summaries")
+	}
+	// Verify escaped versions are present.
+	if !strings.Contains(out, "&lt;script&gt;") {
+		t.Error("HTML output should contain escaped script tags")
+	}
+}
+
 func TestGroupByFile_EmptyFile(t *testing.T) {
 	findings := []agents.Finding{
 		{File: "", Severity: "info", Summary: "general note"},
