@@ -39,6 +39,6 @@ Options:
   --comment    Post suggestions as inline PR comments (requires gh cli)
   --roles      Comma-separated list of roles to use (default: all)
                Available: know-it-all,architect,solver,editor,optimizer,sentinel
-  --verbose    Show detailed output (prompts, timing, raw responses)
+  -v, --verbose  Show detailed output (prompts, timing, raw responses)
   --dry-run    Show what would happen without calling Claude`)
 }

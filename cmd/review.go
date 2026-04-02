@@ -70,10 +70,13 @@ func runReview(args []string) error {
 	fmt.Printf("   %d files changed\n\n", len(pr.Files))
 
 	// Dispatch agents.
-	orchestrator := agents.NewOrchestrator(roles, agents.Options{
+	orchestrator, err := agents.NewOrchestrator(roles, agents.Options{
 		Verbose: verbose,
 		DryRun:  dryRun,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to initialize orchestrator: %w", err)
+	}
 	result, err := orchestrator.Review(pr)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)

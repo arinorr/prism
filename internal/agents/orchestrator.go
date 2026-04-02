@@ -13,6 +13,8 @@ import (
 	"github.com/arinorr/shinobi/internal/gh"
 )
 
+const previewMaxBytes = 500
+
 // Feedback is the structured output from a single agent review.
 type Feedback struct {
 	Role     string   `json:"role"`
@@ -42,19 +44,42 @@ type Options struct {
 
 // Orchestrator manages the multi-agent review process.
 type Orchestrator struct {
-	roles   []Role
-	opts    Options
-	exeDir  string
-	skills  map[string]string
+	roles  []Role
+	opts   Options
+	skills map[string]string // immutable after construction
 }
 
 // NewOrchestrator creates a new orchestrator with the given roles.
-func NewOrchestrator(roles []Role, opts Options) *Orchestrator {
+// All skill files are loaded eagerly so the map is immutable during review.
+func NewOrchestrator(roles []Role, opts Options) (*Orchestrator, error) {
 	exeDir := ""
 	if exePath, err := os.Executable(); err == nil {
 		exeDir = filepath.Dir(exePath)
 	}
-	return &Orchestrator{roles: roles, opts: opts, exeDir: exeDir, skills: make(map[string]string)}
+
+	skills := make(map[string]string, len(roles))
+	for _, r := range roles {
+		data, err := readSkillFile(r.SkillFile, exeDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load skill for %s: %w", r.Name, err)
+		}
+		skills[r.Slug] = string(data)
+	}
+
+	return &Orchestrator{
+		roles:  roles,
+		opts:   opts,
+		skills: skills,
+	}, nil
+}
+
+// readSkillFile tries to read a skill file, falling back to exe-relative path.
+func readSkillFile(path string, exeDir string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil && exeDir != "" {
+		data, err = os.ReadFile(filepath.Join(exeDir, path))
+	}
+	return data, err
 }
 
 // Review runs all agents in parallel and synthesizes their feedback.
@@ -79,20 +104,13 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 	}
 
 	fmt.Println("🏜️  DRY RUN — no agents will be called")
-	fmt.Printf("\nPR: #%s %s\n", pr.Number, pr.Title)
-	fmt.Printf("Files changed: %d\n", len(pr.Files))
 	fmt.Printf("Diff size: %d bytes\n\n", len(pr.Diff))
 
 	fmt.Printf("Agents that would run (%d):\n", len(o.roles))
 	for _, r := range o.roles {
 		fmt.Printf("   • %s — %s\n", r.Name, r.Description)
 		if o.opts.Verbose {
-			skill, err := o.loadSkill(r)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "     ⚠️  %v\n", err)
-			} else {
-				fmt.Printf("     Skill file: %s (%d bytes)\n", r.SkillFile, len(skill))
-			}
+			fmt.Printf("     Skill file: %s (%d bytes)\n", r.SkillFile, len(o.skill(r)))
 		}
 	}
 
@@ -113,13 +131,6 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 }
 
 func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
-	// Pre-load all skills before spawning goroutines to avoid concurrent map writes.
-	for _, r := range o.roles {
-		if _, err := o.loadSkill(r); err != nil {
-			return nil, fmt.Errorf("failed to pre-load skill for %s: %w", r.Name, err)
-		}
-	}
-
 	var (
 		mu        sync.Mutex
 		wg        sync.WaitGroup
@@ -127,32 +138,40 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 		errs      []error
 	)
 
+	// agentLog collects output per-agent to avoid interleaved printing.
+	type agentLog struct {
+		role   string
+		output string
+	}
+	var logs []agentLog
+
 	for _, role := range o.roles {
 		wg.Add(1)
 		go func(r Role) {
 			defer wg.Done()
 
-			fmt.Printf("   🔍 [%s] reviewing...\n", r.Name)
-			fb, err := o.runAgent(r, pr)
+			var buf strings.Builder
+			fmt.Fprintf(&buf, "   🔍 [%s] reviewing...\n", r.Name)
+			fb, err := o.runAgent(r, pr, &buf)
 
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				errs = append(errs, fmt.Errorf("[%s] %w", r.Name, err))
-				return
+				fmt.Fprintf(&buf, "   ⚠️  [%s] %v\n", r.Name, err)
+			} else {
+				feedbacks = append(feedbacks, *fb)
+				fmt.Fprintf(&buf, "   ✅ [%s] found %d findings\n", r.Name, len(fb.Findings))
 			}
-			feedbacks = append(feedbacks, *fb)
-			fmt.Printf("   ✅ [%s] found %d findings\n", r.Name, len(fb.Findings))
+			logs = append(logs, agentLog{role: r.Name, output: buf.String()})
 		}(role)
 	}
 
 	wg.Wait()
 
-	if len(errs) > 0 {
-		// Report errors but continue with whatever feedback we got.
-		for _, e := range errs {
-			fmt.Fprintf(os.Stderr, "   ⚠️  %v\n", e)
-		}
+	// Print all agent output atomically, one agent at a time.
+	for _, l := range logs {
+		fmt.Print(l.output)
 	}
 
 	if len(feedbacks) == 0 {
@@ -162,15 +181,12 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 	return feedbacks, nil
 }
 
-func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
+func (o *Orchestrator) runAgent(role Role, pr *gh.PR, log *strings.Builder) (*Feedback, error) {
 	prompt := buildAgentPrompt(role, pr)
-	skill, err := o.loadSkill(role)
-	if err != nil {
-		return nil, err
-	}
+	skill := o.skill(role)
 
 	if o.opts.Verbose {
-		fmt.Printf("   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
+		fmt.Fprintf(log, "   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
 	}
 
 	// Run claude with the role's skill and structured output.
@@ -190,16 +206,16 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 
 	if err != nil {
 		if o.opts.Verbose {
-			fmt.Fprintf(os.Stderr, "   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
+			fmt.Fprintf(log, "   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
 			if s := stderr.String(); s != "" {
-				fmt.Fprintf(os.Stderr, "   📋 [%s] stderr: %s\n", role.Name, truncateUTF8(s, 300))
+				fmt.Fprintf(log, "   📋 [%s] stderr: %s\n", role.Name, truncateUTF8(s, 300))
 			}
 		}
 		return nil, fmt.Errorf("claude command failed: %w", err)
 	}
 
 	if o.opts.Verbose {
-		fmt.Printf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(out))
+		fmt.Fprintf(log, "   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(out))
 	}
 
 	// Parse the agent's JSON response.
@@ -208,8 +224,7 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	}
 	if err := json.Unmarshal(out, &response); err != nil {
 		if o.opts.Verbose {
-			preview := truncateUTF8(string(out), 500)
-			fmt.Fprintf(os.Stderr, "   🔬 [%s] raw response: %s\n", role.Name, preview)
+			fmt.Fprintf(log, "   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(string(out), previewMaxBytes))
 		}
 		return nil, fmt.Errorf("failed to parse claude response: %w", err)
 	}
@@ -275,7 +290,7 @@ Output ONLY valid JSON in this format:
 func buildSynthesisPrompt(pr *gh.PR, feedbacks []Feedback) string {
 	var parts []string
 	for _, fb := range feedbacks {
-		data, _ := json.MarshalIndent(fb, "", "  ")
+		data, _ := json.Marshal(fb)
 		parts = append(parts, string(data))
 	}
 
@@ -303,25 +318,8 @@ Produce a well-formatted markdown summary with:
 		pr.Title, strings.Join(parts, "\n\n---\n\n"))
 }
 
-func (o *Orchestrator) loadSkill(role Role) (string, error) {
-	// Return cached skill if available.
-	if s, ok := o.skills[role.Slug]; ok {
-		return s, nil
-	}
-
-	// Try the path as-is first (works when run from repo root).
-	data, err := os.ReadFile(role.SkillFile)
-	if err != nil && o.exeDir != "" {
-		// Fall back to resolving relative to the executable's directory.
-		data, err = os.ReadFile(filepath.Join(o.exeDir, role.SkillFile))
-	}
-	if err != nil {
-		return "", fmt.Errorf("failed to load skill %s: %w", role.SkillFile, err)
-	}
-
-	s := string(data)
-	o.skills[role.Slug] = s
-	return s, nil
+func (o *Orchestrator) skill(role Role) string {
+	return o.skills[role.Slug]
 }
 
 func parseFeedback(role string, response string) (*Feedback, error) {
