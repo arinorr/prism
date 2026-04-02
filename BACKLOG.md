@@ -1,4 +1,4 @@
-# Shinobi Backlog
+# Prism Backlog
 
 ## Up Next
 
@@ -25,10 +25,10 @@
 - Verbose mode shows per-agent breakdown
 
 ### Incremental / follow-up reviews
-- Track previous review results per PR (store in `results/` or `.shinobi/`)
+- Track previous review results per PR (store in `results/` or `.prism/`)
 - On re-review, diff the findings: what's fixed, what's new, what persists
 - Show a delta report: "3 critical issues fixed, 2 new warnings, 5 unchanged"
-- `shinobi review 42 --follow-up` to explicitly compare with last review
+- `prism review 42 --follow-up` to explicitly compare with last review
 - Skip re-reviewing files that haven't changed since last review
 - Useful for the fix-review-fix cycle
 
@@ -44,7 +44,7 @@
 - Let users pick which Claude model agents use
 - Set max token budget per agent
 - Configure agent timeouts
-- Support a `.shinobi.yml` config file per-repo
+- Support a `.prism.yml` config file per-repo
 
 ### Better error recovery
 - Retry failed agents once before giving up
@@ -58,8 +58,8 @@
 
 ## Ideas
 
-### `shinobi init`
-- Generate a `.shinobi.yml` config for a repo
+### `prism init`
+- Generate a `.prism.yml` config for a repo
 - Interactive wizard to pick default roles, format, and behavior
 
 ### Custom roles
@@ -74,7 +74,7 @@
 ### Review history
 - Track reviews over time per-repo
 - Show trends (are reviews getting cleaner?)
-- `shinobi history` command
+- `prism history` command
 
 ### Slack/Discord integration
 - Post review summaries to a channel

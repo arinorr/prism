@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arinorr/shinobi/internal/gh"
+	"github.com/arinorr/prism/internal/gh"
 )
 
 func TestParseFeedback_DirectJSON(t *testing.T) {

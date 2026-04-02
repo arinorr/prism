@@ -7,16 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arinorr/shinobi/internal/agents"
-	"github.com/arinorr/shinobi/internal/gh"
-	"github.com/arinorr/shinobi/internal/report"
+	"github.com/arinorr/prism/internal/agents"
+	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/report"
 )
 
 const defaultResultsDir = "results"
 
 func runReview(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: shinobi review <pr-number|pr-url>")
+		return fmt.Errorf("usage: prism review <pr-number|pr-url>")
 	}
 
 	var (
@@ -57,7 +57,7 @@ func runReview(args []string) error {
 	}
 
 	if prRef == "" {
-		return fmt.Errorf("usage: shinobi review <pr-number|pr-url>")
+		return fmt.Errorf("usage: prism review <pr-number|pr-url>")
 	}
 
 	// Determine which roles to use.
@@ -144,7 +144,7 @@ func runReview(args []string) error {
 		if toStdout {
 			fmt.Print(output)
 		} else {
-			outPath := filepath.Join(defaultResultsDir, fmt.Sprintf("shinobi-pr-%s.%s", sanitizeFilename(pr.Number), ext))
+			outPath := filepath.Join(defaultResultsDir, fmt.Sprintf("prism-pr-%s.%s", sanitizeFilename(pr.Number), ext))
 			if err := writeToFile(output, outPath); err != nil {
 				return err
 			}

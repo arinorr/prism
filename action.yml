@@ -1,5 +1,5 @@
-name: "Shinobi PR Review"
-description: "Multi-agent PR review powered by Claude — 7 specialized reviewers analyze your code"
+name: "Prism PR Review"
+description: "Multi-agent PR review powered by Claude — 7 specialized reviewers analyze your code through distinct lenses"
 author: "arinorr"
 
 branding:
@@ -39,9 +39,9 @@ runs:
       with:
         go-version: "1.24"
 
-    - name: Build shinobi
+    - name: Build prism
       shell: bash
-      run: go build -o "$GITHUB_WORKSPACE/shinobi" .
+      run: go build -o "$GITHUB_WORKSPACE/prism" .
 
     - name: Install Claude Code
       shell: bash
@@ -69,10 +69,10 @@ runs:
           ARGS+=(--comment)
         fi
 
-        "$GITHUB_WORKSPACE/shinobi" "${ARGS[@]}"
+        "$GITHUB_WORKSPACE/prism" "${ARGS[@]}"
 
-        # The CLI writes to results/shinobi-pr-{N}.{ext} by default.
-        REPORT_FILE="results/shinobi-pr-${INPUT_PR_NUMBER}.${INPUT_FORMAT}"
+        # The CLI writes to results/prism-pr-{N}.{ext} by default.
+        REPORT_FILE="results/prism-pr-${INPUT_PR_NUMBER}.${INPUT_FORMAT}"
         echo "report=${REPORT_FILE}" >> "$GITHUB_OUTPUT"
 
         # Extract findings count from JSON if available.
@@ -87,7 +87,7 @@ runs:
       if: always() && steps.review.outputs.report != ''
       uses: actions/upload-artifact@v4
       with:
-        name: shinobi-review
+        name: prism-review
         path: ${{ steps.review.outputs.report }}
 
     - name: Post summary to PR
