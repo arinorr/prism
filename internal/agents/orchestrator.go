@@ -44,11 +44,19 @@ type Options struct {
 	DryRun  bool
 }
 
+// claudeRunner executes a claude command and returns its output.
+type claudeRunner func(args ...string) ([]byte, error)
+
+func defaultClaudeRunner(args ...string) ([]byte, error) {
+	return exec.Command("claude", args...).Output()
+}
+
 // Orchestrator manages the multi-agent review process.
 type Orchestrator struct {
 	roles  []Role
 	opts   Options
 	skills map[string]string // immutable after construction
+	run    claudeRunner
 }
 
 // NewOrchestrator creates a new orchestrator with the given roles.
@@ -72,6 +80,7 @@ func NewOrchestrator(roles []Role, opts Options) (*Orchestrator, error) {
 		roles:  roles,
 		opts:   opts,
 		skills: skills,
+		run:    defaultClaudeRunner,
 	}, nil
 }
 
@@ -187,25 +196,17 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 
 	// Run claude with the role's skill and structured output.
 	start := time.Now()
-	cmd := exec.Command("claude",
+	out, err := o.run(
 		"--print",
 		"--output-format", "json",
 		"--append-system-prompt", skill,
 		"-p", prompt,
 	)
-
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-
-	out, err := cmd.Output()
 	elapsed := time.Since(start)
 
 	if err != nil {
 		if o.opts.Verbose {
 			fmt.Fprintf(os.Stderr, "   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
-			if s := stderr.String(); s != "" {
-				fmt.Fprintf(os.Stderr, "   📋 [%s] stderr: %s\n", role.Name, truncateUTF8(s, 300))
-			}
 		}
 		return nil, fmt.Errorf("claude command failed: %w", err)
 	}
@@ -238,12 +239,7 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 	fmt.Println("   🧠 Synthesizing feedback from all agents...")
 	synthesisPrompt := buildSynthesisPrompt(pr, feedbacks)
 
-	cmd := exec.Command("claude",
-		"--print",
-		"-p", synthesisPrompt,
-	)
-
-	out, err := cmd.Output()
+	out, err := o.run("--print", "-p", synthesisPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("synthesis failed: %w", err)
 	}
