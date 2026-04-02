@@ -32,6 +32,14 @@
 - Skip re-reviewing files that haven't changed since last review
 - Useful for the fix-review-fix cycle
 
+### Agentic review (Agent SDK migration)
+- Migrate from `claude --print` subprocesses to the Claude Agent SDK
+- Enables agents to: read files beyond the diff, search the codebase, browse docs, use web search
+- Prerequisite for Standard/Deep review modes and the Codebase Expert role
+- Would also enable: streaming progress, multi-turn agent conversations, tool use
+- Agents could verify their own findings (e.g. "does this function exist?", "what does this API actually accept?")
+- Significant architectural change — the orchestrator would manage agent sessions instead of one-shot prompts
+
 ### Configurable model and settings
 - Let users pick which Claude model agents use
 - Set max token budget per agent
@@ -49,13 +57,6 @@
 - Confidence scoring based on agent agreement
 
 ## Ideas
-
-### Migrate from CLI shelling to Agent SDK
-- Current approach: `claude --print` subprocess per agent
-- Future: use Claude Agent SDK directly for streaming, tool use, and better control
-- Enables: file reading, web search, multi-turn agent conversations
-- Prerequisite for Standard and Deep review modes
-- Would also enable real-time streaming progress (not just "agent done")
 
 ### `shinobi init`
 - Generate a `.shinobi.yml` config for a repo
