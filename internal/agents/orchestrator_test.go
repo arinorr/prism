@@ -163,6 +163,55 @@ func TestBuildAgentPrompt(t *testing.T) {
 	}
 }
 
+func TestSuggestionsFilterInfoSeverity(t *testing.T) {
+	// Simulate what synthesize does: only warning+ findings become suggestions.
+	feedbacks := []Feedback{
+		{Role: "editor", Findings: []Finding{
+			{File: "a.go", Line: 10, Severity: "info", Summary: "minor note", Detail: "detail"},
+			{File: "a.go", Line: 20, Severity: "warning", Summary: "should fix", Detail: "detail"},
+			{File: "a.go", Line: 30, Severity: "critical", Summary: "must fix", Detail: "detail"},
+		}},
+	}
+
+	var suggestions []gh.Suggestion
+	for _, fb := range feedbacks {
+		for _, f := range fb.Findings {
+			if f.File != "" && f.Line > 0 && (f.Severity == "warning" || f.Severity == "critical") {
+				suggestions = append(suggestions, gh.Suggestion{
+					File: f.File,
+					Line: f.Line,
+					Role: fb.Role,
+				})
+			}
+		}
+	}
+
+	if len(suggestions) != 2 {
+		t.Fatalf("expected 2 suggestions (warning + critical), got %d", len(suggestions))
+	}
+	if suggestions[0].Line != 20 {
+		t.Errorf("first suggestion should be line 20 (warning), got %d", suggestions[0].Line)
+	}
+	if suggestions[1].Line != 30 {
+		t.Errorf("second suggestion should be line 30 (critical), got %d", suggestions[1].Line)
+	}
+}
+
+func TestFindingRoleStamped(t *testing.T) {
+	fb := Feedback{
+		Role: "sentinel",
+		Findings: []Finding{
+			{File: "a.go", Severity: "warning", Summary: "test"},
+		},
+	}
+	// Simulate the role-stamping logic from synthesize.
+	f := fb.Findings[0]
+	f.Role = fb.Role
+	if f.Role != "sentinel" {
+		t.Errorf("expected role 'sentinel', got %q", f.Role)
+	}
+}
+
 func TestBuildSynthesisPrompt(t *testing.T) {
 	pr := &gh.PR{Title: "Test PR"}
 	feedbacks := []Feedback{

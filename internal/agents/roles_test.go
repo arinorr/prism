@@ -58,20 +58,42 @@ func TestParseRoles_Unknown(t *testing.T) {
 	}
 }
 
+func TestParseRoles_UnknownErrorListsTestEngineer(t *testing.T) {
+	_, err := ParseRoles("bogus")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "test-engineer") {
+		t.Errorf("error should list test-engineer in available roles: %v", err)
+	}
+}
+
+func TestParseRoles_ErrorListsAllRoles(t *testing.T) {
+	_, err := ParseRoles("bogus")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	for slug := range roleMap {
+		if !strings.Contains(err.Error(), slug) {
+			t.Errorf("error should list %q in available roles: %v", slug, err)
+		}
+	}
+}
+
 func TestParseRoles_AllRoles(t *testing.T) {
-	input := "know-it-all,architect,solver,editor,optimizer,sentinel"
+	input := "know-it-all,architect,solver,editor,optimizer,sentinel,test-engineer"
 	roles, err := ParseRoles(input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(roles) != 6 {
-		t.Errorf("expected 6 roles, got %d", len(roles))
+	if len(roles) != 7 {
+		t.Errorf("expected 7 roles, got %d", len(roles))
 	}
 }
 
 func TestAllRoles_Count(t *testing.T) {
-	if len(AllRoles) != 6 {
-		t.Errorf("expected 6 roles in AllRoles, got %d", len(AllRoles))
+	if len(AllRoles) != 7 {
+		t.Errorf("expected 7 roles in AllRoles, got %d", len(AllRoles))
 	}
 }
 

@@ -28,11 +28,13 @@ type Finding struct {
 	Severity string `json:"severity"` // info, warning, critical
 	Summary  string `json:"summary"`
 	Detail   string `json:"detail"`
+	Role     string `json:"role,omitempty"`
 }
 
 // ReviewResult is the synthesized output from all agents.
 type ReviewResult struct {
 	Summary     string
+	Findings    []Finding
 	Suggestions []gh.Suggestion
 }
 
@@ -136,43 +138,37 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 		wg        sync.WaitGroup
 		feedbacks []Feedback
 		errs      []error
+		done      int
 	)
 
-	// agentLog collects output per-agent to avoid interleaved printing.
-	type agentLog struct {
-		role   string
-		output string
-	}
-	var logs []agentLog
+	total := len(o.roles)
 
 	for _, role := range o.roles {
 		wg.Add(1)
 		go func(r Role) {
 			defer wg.Done()
 
-			var buf strings.Builder
-			fmt.Fprintf(&buf, "   🔍 [%s] reviewing...\n", r.Name)
-			fb, err := o.runAgent(r, pr, &buf)
+			mu.Lock()
+			fmt.Printf("   🔍 [%s] reviewing...\n", r.Name)
+			mu.Unlock()
+
+			fb, err := o.runAgent(r, pr)
 
 			mu.Lock()
 			defer mu.Unlock()
+			done++
 			if err != nil {
 				errs = append(errs, fmt.Errorf("[%s] %w", r.Name, err))
-				fmt.Fprintf(&buf, "   ⚠️  [%s] %v\n", r.Name, err)
+				fmt.Printf("   ⚠️  [%s] failed (%d/%d done)\n", r.Name, done, total)
 			} else {
 				feedbacks = append(feedbacks, *fb)
-				fmt.Fprintf(&buf, "   ✅ [%s] found %d findings\n", r.Name, len(fb.Findings))
+				fmt.Printf("   ✅ [%s] %d findings (%d/%d done)\n", r.Name, len(fb.Findings), done, total)
 			}
-			logs = append(logs, agentLog{role: r.Name, output: buf.String()})
 		}(role)
 	}
 
 	wg.Wait()
-
-	// Print all agent output atomically, one agent at a time.
-	for _, l := range logs {
-		fmt.Print(l.output)
-	}
+	fmt.Println()
 
 	if len(feedbacks) == 0 {
 		return nil, fmt.Errorf("all agents failed")
@@ -181,12 +177,12 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 	return feedbacks, nil
 }
 
-func (o *Orchestrator) runAgent(role Role, pr *gh.PR, log *strings.Builder) (*Feedback, error) {
+func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	prompt := buildAgentPrompt(role, pr)
 	skill := o.skill(role)
 
 	if o.opts.Verbose {
-		fmt.Fprintf(log, "   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
+		fmt.Printf("   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
 	}
 
 	// Run claude with the role's skill and structured output.
@@ -206,16 +202,16 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR, log *strings.Builder) (*Fe
 
 	if err != nil {
 		if o.opts.Verbose {
-			fmt.Fprintf(log, "   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
+			fmt.Fprintf(os.Stderr, "   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
 			if s := stderr.String(); s != "" {
-				fmt.Fprintf(log, "   📋 [%s] stderr: %s\n", role.Name, truncateUTF8(s, 300))
+				fmt.Fprintf(os.Stderr, "   📋 [%s] stderr: %s\n", role.Name, truncateUTF8(s, 300))
 			}
 		}
 		return nil, fmt.Errorf("claude command failed: %w", err)
 	}
 
 	if o.opts.Verbose {
-		fmt.Fprintf(log, "   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(out))
+		fmt.Printf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(out))
 	}
 
 	// Parse the agent's JSON response.
@@ -224,7 +220,7 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR, log *strings.Builder) (*Fe
 	}
 	if err := json.Unmarshal(out, &response); err != nil {
 		if o.opts.Verbose {
-			fmt.Fprintf(log, "   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(string(out), previewMaxBytes))
+			fmt.Fprintf(os.Stderr, "   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(string(out), previewMaxBytes))
 		}
 		return nil, fmt.Errorf("failed to parse claude response: %w", err)
 	}
@@ -239,6 +235,7 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR, log *strings.Builder) (*Fe
 }
 
 func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResult, error) {
+	fmt.Println("   🧠 Synthesizing feedback from all agents...")
 	synthesisPrompt := buildSynthesisPrompt(pr, feedbacks)
 
 	cmd := exec.Command("claude",
@@ -255,15 +252,34 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 	var response struct {
 		Result string `json:"result"`
 	}
-	if err := json.Unmarshal(out, &response); err != nil {
-		// If not JSON, use raw output.
-		return &ReviewResult{
-			Summary: string(out),
-		}, nil
+	summary := string(out)
+	if err := json.Unmarshal(out, &response); err == nil {
+		summary = response.Result
+	}
+
+	// Collect all findings and derive inline suggestions from warning+ findings.
+	var allFindings []Finding
+	var suggestions []gh.Suggestion
+	for _, fb := range feedbacks {
+		for _, f := range fb.Findings {
+			f.Role = fb.Role
+			allFindings = append(allFindings, f)
+			// Only create PR comments for warning and critical — info would flood the PR.
+			if f.File != "" && f.Line > 0 && f.Severity != "info" {
+				suggestions = append(suggestions, gh.Suggestion{
+					File: f.File,
+					Line: f.Line,
+					Body: fmt.Sprintf("**[%s]** %s\n\n%s", f.Severity, f.Summary, f.Detail),
+					Role: fb.Role,
+				})
+			}
+		}
 	}
 
 	return &ReviewResult{
-		Summary: response.Result,
+		Summary:     summary,
+		Findings:    allFindings,
+		Suggestions: suggestions,
 	}, nil
 }
 

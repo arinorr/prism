@@ -36,9 +36,12 @@ Usage:
   shinobi help                       Show this help
 
 Options:
-  --comment    Post suggestions as inline PR comments (requires gh cli)
-  --roles      Comma-separated list of roles to use (default: all)
-               Available: know-it-all,architect,solver,editor,optimizer,sentinel
-  -v, --verbose  Show detailed output (prompts, timing, raw responses)
-  --dry-run    Show what would happen without calling Claude`)
+  --comment        Post suggestions as inline PR comments (requires gh cli)
+  --roles          Comma-separated list of roles to use (default: all)
+                   Available: know-it-all,architect,solver,editor,optimizer,sentinel,test-engineer
+  --format         Output format: md, html, json (default: terminal summary)
+                   Reports are saved to results/ directory
+  --stdout         Print report to terminal instead of saving to file
+  -v, --verbose    Show detailed output (prompts, timing, raw responses)
+  --dry-run        Show what would happen without calling Claude`)
 }

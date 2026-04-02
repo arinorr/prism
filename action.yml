@@ -1,0 +1,101 @@
+name: "Shinobi PR Review"
+description: "Multi-agent PR review powered by Claude — 7 specialized reviewers analyze your code"
+author: "arinorr"
+
+branding:
+  icon: "eye"
+  color: "purple"
+
+inputs:
+  anthropic_api_key:
+    description: "Anthropic API key for Claude"
+    required: true
+  roles:
+    description: "Comma-separated list of reviewer roles (default: all)"
+    required: false
+    default: ""
+  format:
+    description: "Output format: md, html, json (default: md)"
+    required: false
+    default: "md"
+  comment:
+    description: "Post inline suggestions as PR comments (true/false)"
+    required: false
+    default: "false"
+
+outputs:
+  report:
+    description: "Path to the generated report file"
+    value: ${{ steps.review.outputs.report }}
+  findings_count:
+    description: "Total number of findings"
+    value: ${{ steps.review.outputs.findings_count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.24"
+
+    - name: Build shinobi
+      shell: bash
+      run: go build -o "$GITHUB_WORKSPACE/shinobi" .
+
+    - name: Install Claude Code
+      shell: bash
+      run: npm install -g @anthropic-ai/claude-code
+
+    - name: Run review
+      id: review
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        INPUT_PR_NUMBER: ${{ github.event.pull_request.number }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_ROLES: ${{ inputs.roles }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+      run: |
+        set -euo pipefail
+
+        ARGS=(review "${INPUT_PR_NUMBER}" --format "${INPUT_FORMAT}")
+
+        if [ -n "${INPUT_ROLES}" ]; then
+          ARGS+=(--roles "${INPUT_ROLES}")
+        fi
+
+        if [ "${INPUT_COMMENT}" = "true" ]; then
+          ARGS+=(--comment)
+        fi
+
+        "$GITHUB_WORKSPACE/shinobi" "${ARGS[@]}"
+
+        # The CLI writes to results/shinobi-pr-{N}.{ext} by default.
+        REPORT_FILE="results/shinobi-pr-${INPUT_PR_NUMBER}.${INPUT_FORMAT}"
+        echo "report=${REPORT_FILE}" >> "$GITHUB_OUTPUT"
+
+        # Extract findings count from JSON if available.
+        if [ "${INPUT_FORMAT}" = "json" ]; then
+          COUNT=$(jq '.findings | length' "${REPORT_FILE}" 2>/dev/null || echo "0")
+        else
+          COUNT="n/a"
+        fi
+        echo "findings_count=${COUNT}" >> "$GITHUB_OUTPUT"
+
+    - name: Upload report artifact
+      if: always() && steps.review.outputs.report != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: shinobi-review
+        path: ${{ steps.review.outputs.report }}
+
+    - name: Post summary to PR
+      if: inputs.format == 'md' && steps.review.outputs.report != ''
+      shell: bash
+      env:
+        REPORT_PATH: ${{ steps.review.outputs.report }}
+      run: |
+        if [ -f "${REPORT_PATH}" ]; then
+          cat "${REPORT_PATH}" >> "$GITHUB_STEP_SUMMARY"
+        fi
