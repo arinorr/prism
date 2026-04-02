@@ -1,6 +1,10 @@
 package agents
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -227,5 +231,372 @@ func TestBuildSynthesisPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "editor") {
 		t.Error("synthesis prompt should contain all agents' feedback")
+	}
+}
+
+func TestNewOrchestrator_LoadsSkills(t *testing.T) {
+	dir := t.TempDir()
+	skillPath := filepath.Join(dir, "test-skill.md")
+	if err := os.WriteFile(skillPath, []byte("You are a test reviewer."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: skillPath}}
+	orch, err := NewOrchestrator(roles, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if orch.skill(roles[0]) != "You are a test reviewer." {
+		t.Errorf("skill content mismatch: %q", orch.skill(roles[0]))
+	}
+}
+
+func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
+	roles := []Role{{Name: "Bad", Slug: "bad", SkillFile: "/nonexistent/path.md"}}
+	_, err := NewOrchestrator(roles, Options{})
+	if err == nil {
+		t.Fatal("expected error for missing skill file")
+	}
+	if !strings.Contains(err.Error(), "failed to load skill") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestNewOrchestrator_EmptyRoles(t *testing.T) {
+	orch, err := NewOrchestrator([]Role{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(orch.roles) != 0 {
+		t.Errorf("expected 0 roles, got %d", len(orch.roles))
+	}
+}
+
+func TestReadSkillFile_DirectPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "skill.md")
+	if err := os.WriteFile(path, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := readSkillFile(path, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != "content" {
+		t.Errorf("expected 'content', got %q", string(data))
+	}
+}
+
+func TestReadSkillFile_FallbackToExeDir(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "skills")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "test.md"), []byte("fallback"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Direct path won't work, but exeDir fallback should.
+	data, err := readSkillFile("skills/test.md", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != "fallback" {
+		t.Errorf("expected 'fallback', got %q", string(data))
+	}
+}
+
+func TestReadSkillFile_NotFound(t *testing.T) {
+	_, err := readSkillFile("/nonexistent.md", "/also/nonexistent")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestDryRun_EmptyRoles(t *testing.T) {
+	orch := &Orchestrator{roles: []Role{}, opts: Options{DryRun: true}, skills: map[string]string{}}
+	pr := &gh.PR{Number: "1", Title: "Test"}
+	_, err := orch.Review(pr)
+	if err == nil {
+		t.Fatal("expected error for empty roles in dry run")
+	}
+	if !strings.Contains(err.Error(), "no roles selected") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestDryRun_ProducesResult(t *testing.T) {
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Test", Slug: "test", Description: "A test role"}},
+		opts:   Options{DryRun: true},
+		skills: map[string]string{"test": "skill content"},
+	}
+	pr := &gh.PR{Number: "42", Title: "Test PR", Diff: "some diff", Files: []gh.FileChange{{Path: "a.go"}}}
+	result, err := orch.Review(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Summary, "dry run") {
+		t.Errorf("dry run summary should mention dry run: %q", result.Summary)
+	}
+}
+
+func TestDryRun_Verbose(t *testing.T) {
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Test", Slug: "test", Description: "A test role", SkillFile: "test.md"}},
+		opts:   Options{DryRun: true, Verbose: true},
+		skills: map[string]string{"test": "skill content here"},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Diff: "diff"}
+	result, err := orch.Review(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestSkill_ReturnsContent(t *testing.T) {
+	orch := &Orchestrator{
+		skills: map[string]string{"sentinel": "security reviewer"},
+	}
+	role := Role{Slug: "sentinel"}
+	if got := orch.skill(role); got != "security reviewer" {
+		t.Errorf("expected 'security reviewer', got %q", got)
+	}
+}
+
+func TestSkill_MissingReturnsEmpty(t *testing.T) {
+	orch := &Orchestrator{skills: map[string]string{}}
+	role := Role{Slug: "nonexistent"}
+	if got := orch.skill(role); got != "" {
+		t.Errorf("expected empty string for missing skill, got %q", got)
+	}
+}
+
+func mockRunner(response string) claudeRunner {
+	return func(args ...string) ([]byte, error) {
+		return []byte(response), nil
+	}
+}
+
+func mockRunnerJSON(findingsJSON string) claudeRunner {
+	// The claude --output-format json wraps the response in {"result": "..."}
+	// where the inner value is the raw text the model produced.
+	inner := `{"findings":[` + findingsJSON + `]}`
+	// Build the outer JSON properly.
+	outerBytes, err := json.Marshal(struct {
+		Result string `json:"result"`
+	}{Result: inner})
+	if err != nil {
+		panic(err)
+	}
+	return func(args ...string) ([]byte, error) {
+		return outerBytes, nil
+	}
+}
+
+func TestRunAgent_Success(t *testing.T) {
+	finding := `{"file":"a.go","line":1,"severity":"info","summary":"test","detail":"d"}`
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{},
+		run:    mockRunnerJSON(finding),
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "body", Diff: "diff"}
+	fb, err := orch.runAgent(role, pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fb.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(fb.Findings))
+	}
+	if fb.Findings[0].File != "a.go" {
+		t.Errorf("expected file 'a.go', got %q", fb.Findings[0].File)
+	}
+}
+
+func TestRunAgent_Verbose(t *testing.T) {
+	finding := `{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}`
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{Verbose: true},
+		run:    mockRunnerJSON(finding),
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgent(role, pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunAgent_CommandFailure(t *testing.T) {
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{},
+		run: func(args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("command failed")
+		},
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgent(role, pr)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "claude command failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunAgent_InvalidJSON(t *testing.T) {
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{},
+		run:    mockRunner("not json at all"),
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgent(role, pr)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestDispatchAgents_AllSucceed(t *testing.T) {
+	finding := `{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}`
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "A", Slug: "a"}, {Name: "B", Slug: "b"}},
+		skills: map[string]string{"a": "skill a", "b": "skill b"},
+		opts:   Options{},
+		run:    mockRunnerJSON(finding),
+	}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	feedbacks, err := orch.dispatchAgents(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(feedbacks) != 2 {
+		t.Errorf("expected 2 feedbacks, got %d", len(feedbacks))
+	}
+}
+
+func TestDispatchAgents_AllFail(t *testing.T) {
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "A", Slug: "a"}},
+		skills: map[string]string{"a": "skill"},
+		opts:   Options{},
+		run: func(args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("fail")
+		},
+	}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.dispatchAgents(pr)
+	if err == nil {
+		t.Fatal("expected error when all agents fail")
+	}
+	if !strings.Contains(err.Error(), "all agents failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestSynthesize_Success(t *testing.T) {
+	orch := &Orchestrator{
+		opts: Options{},
+		run:  mockRunner("Overall the code looks good."),
+	}
+	pr := &gh.PR{Title: "Test"}
+	feedbacks := []Feedback{
+		{Role: "test", Findings: []Finding{
+			{File: "a.go", Line: 10, Severity: "warning", Summary: "issue", Detail: "detail"},
+		}},
+	}
+	result, err := orch.synthesize(pr, feedbacks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Summary, "looks good") {
+		t.Errorf("unexpected summary: %q", result.Summary)
+	}
+	if len(result.Findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(result.Findings))
+	}
+	if len(result.Suggestions) != 1 {
+		t.Errorf("expected 1 suggestion (warning with file+line), got %d", len(result.Suggestions))
+	}
+}
+
+func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
+	orch := &Orchestrator{
+		opts: Options{},
+		run:  mockRunner("summary"),
+	}
+	pr := &gh.PR{Title: "Test"}
+	feedbacks := []Feedback{
+		{Role: "test", Findings: []Finding{
+			{File: "a.go", Line: 5, Severity: "info", Summary: "note", Detail: "d"},
+		}},
+	}
+	result, err := orch.synthesize(pr, feedbacks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Suggestions) != 0 {
+		t.Errorf("info findings should not become suggestions, got %d", len(result.Suggestions))
+	}
+}
+
+func TestSynthesize_CommandFailure(t *testing.T) {
+	orch := &Orchestrator{
+		opts: Options{},
+		run: func(args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("synthesis error")
+		},
+	}
+	pr := &gh.PR{Title: "Test"}
+	_, err := orch.synthesize(pr, []Feedback{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "synthesis failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestReview_FullPipeline(t *testing.T) {
+	innerFindings := `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`
+	agentResponse, marshalErr := json.Marshal(struct {
+		Result string `json:"result"`
+	}{Result: innerFindings})
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+
+	callCount := 0
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Test", Slug: "test"}},
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{},
+		run: func(args ...string) ([]byte, error) {
+			callCount++
+			if callCount <= 1 {
+				return agentResponse, nil
+			}
+			return []byte("Review complete."), nil
+		},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Body: "b", Diff: "d"}
+	result, err := orch.Review(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Summary, "Review complete") {
+		t.Errorf("unexpected summary: %q", result.Summary)
+	}
+	if len(result.Findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(result.Findings))
 	}
 }

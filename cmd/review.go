@@ -14,59 +14,72 @@ import (
 
 const defaultResultsDir = "results"
 
-func runReview(args []string) error {
+// reviewOptions holds parsed CLI flags for the review command.
+type reviewOptions struct {
+	prRef      string
+	comment    bool
+	verbose    bool
+	dryRun     bool
+	toStdout   bool
+	rolesFlag  string
+	formatFlag string
+}
+
+// parseReviewArgs parses the CLI arguments for the review command.
+func parseReviewArgs(args []string) (*reviewOptions, error) {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: prism review <pr-number|pr-url>")
+		return nil, fmt.Errorf("usage: prism review <pr-number|pr-url>")
 	}
 
-	var (
-		prRef      = ""
-		comment    = false
-		verbose    = false
-		dryRun     = false
-		toStdout   = false
-		rolesFlag  = ""
-		formatFlag = ""
-	)
+	opts := &reviewOptions{}
 
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--comment":
-			comment = true
+			opts.comment = true
 		case args[i] == "--verbose" || args[i] == "-v":
-			verbose = true
+			opts.verbose = true
 		case args[i] == "--dry-run":
-			dryRun = true
+			opts.dryRun = true
 		case args[i] == "--stdout":
-			toStdout = true
+			opts.toStdout = true
 		case args[i] == "--roles" && i+1 < len(args):
 			i++
-			rolesFlag = args[i]
+			opts.rolesFlag = args[i]
 		case strings.HasPrefix(args[i], "--roles="):
-			rolesFlag = strings.TrimPrefix(args[i], "--roles=")
+			opts.rolesFlag = strings.TrimPrefix(args[i], "--roles=")
 		case args[i] == "--format" && i+1 < len(args):
 			i++
-			formatFlag = args[i]
+			opts.formatFlag = args[i]
 		case strings.HasPrefix(args[i], "--format="):
-			formatFlag = strings.TrimPrefix(args[i], "--format=")
+			opts.formatFlag = strings.TrimPrefix(args[i], "--format=")
 		case !strings.HasPrefix(args[i], "-"):
-			prRef = args[i]
+			opts.prRef = args[i]
 		default:
-			return fmt.Errorf("unknown flag: %s", args[i])
+			return nil, fmt.Errorf("unknown flag: %s", args[i])
 		}
 	}
 
-	if prRef == "" {
-		return fmt.Errorf("usage: prism review <pr-number|pr-url>")
+	if opts.prRef == "" {
+		return nil, fmt.Errorf("usage: prism review <pr-number|pr-url>")
+	}
+
+	return opts, nil
+}
+
+func runReview(args []string) error {
+	opts, err := parseReviewArgs(args)
+	if err != nil {
+		return err
 	}
 
 	// Determine which roles to use.
 	roles := agents.AllRoles
-	if rolesFlag != "" {
-		var err error
-		roles, err = agents.ParseRoles(rolesFlag)
-		if err != nil {
-			return err
+	if opts.rolesFlag != "" {
+		var parseErr error
+		roles, parseErr = agents.ParseRoles(opts.rolesFlag)
+		if parseErr != nil {
+			return parseErr
 		}
 	}
 
@@ -76,21 +89,21 @@ func runReview(args []string) error {
 		return fmt.Errorf("failed to initialize GitHub client: %w", err)
 	}
 
-	pr, err := client.GetPRDiff(prRef)
+	pr, err := client.GetPRDiff(opts.prRef)
 	if err != nil {
 		return fmt.Errorf("failed to get PR diff: %w", err)
 	}
 
-	fmt.Printf("🥷 Reviewing PR #%s: %s\n", pr.Number, pr.Title)
+	fmt.Printf("🔍 Reviewing PR #%s: %s\n", pr.Number, pr.Title)
 	fmt.Printf("   %d files changed\n\n", len(pr.Files))
 
 	// Dispatch agents.
-	orchestrator, err := agents.NewOrchestrator(roles, agents.Options{
-		Verbose: verbose,
-		DryRun:  dryRun,
+	orchestrator, orchErr := agents.NewOrchestrator(roles, agents.Options{
+		Verbose: opts.verbose,
+		DryRun:  opts.dryRun,
 	})
-	if err != nil {
-		return fmt.Errorf("failed to initialize orchestrator: %w", err)
+	if orchErr != nil {
+		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
 	}
 
 	start := time.Now()
@@ -100,70 +113,60 @@ func runReview(args []string) error {
 	}
 	elapsed := time.Since(start)
 
-	// If no format specified, print summary to terminal and we're done.
-	if formatFlag == "" {
+	// Output the results.
+	return outputResults(opts, pr, result, roles, elapsed)
+}
+
+// outputResults handles format selection, report generation, and file output.
+func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, roles []agents.Role, elapsed time.Duration) error {
+	if opts.formatFlag == "" {
 		fmt.Println(result.Summary)
-	} else {
-		// Build report data only when a format is requested.
-		roleNames := make([]string, len(roles))
-		for i, r := range roles {
-			roleNames[i] = r.Name
-		}
-		data := &report.Data{
-			PR:       pr,
-			Result:   result,
-			Roles:    roleNames,
-			Duration: elapsed.Round(time.Second).String(),
-		}
-
-		var output string
-		ext := formatFlag
-		if ext == "markdown" {
-			ext = "md"
-		}
-
-		switch formatFlag {
-		case "md", "markdown":
-			output = report.Markdown(data)
-		case "html":
-			var htmlErr error
-			output, htmlErr = report.HTML(data)
-			if htmlErr != nil {
-				return fmt.Errorf("failed to generate HTML report: %w", htmlErr)
-			}
-		case "json":
-			var jsonErr error
-			output, jsonErr = report.JSON(data)
-			if jsonErr != nil {
-				return fmt.Errorf("failed to generate JSON report: %w", jsonErr)
-			}
-		default:
-			return fmt.Errorf("unknown format: %s (available: md, html, json)", formatFlag)
-		}
-
-		if toStdout {
-			fmt.Print(output)
-		} else {
-			outPath := filepath.Join(defaultResultsDir, fmt.Sprintf("prism-pr-%s.%s", sanitizeFilename(pr.Number), ext))
-			if err := writeToFile(output, outPath); err != nil {
-				return err
-			}
-		}
+		return nil
 	}
 
-	// Optionally post comments.
-	if comment {
-		if len(result.Suggestions) == 0 {
-			fmt.Println("\nNo inline suggestions to post.")
-		} else {
-			if err := client.PostComments(pr, result.Suggestions); err != nil {
-				return fmt.Errorf("failed to post comments: %w", err)
-			}
-			fmt.Printf("\n✅ Posted %d inline comments to PR #%s\n", len(result.Suggestions), pr.Number)
-		}
+	roleNames := make([]string, len(roles))
+	for i, r := range roles {
+		roleNames[i] = r.Name
+	}
+	data := &report.Data{
+		PR:       pr,
+		Result:   result,
+		Roles:    roleNames,
+		Duration: elapsed.Round(time.Second).String(),
 	}
 
-	return nil
+	var output string
+	ext := opts.formatFlag
+	if ext == "markdown" {
+		ext = "md"
+	}
+
+	switch opts.formatFlag {
+	case "md", "markdown":
+		output = report.Markdown(data)
+	case "html":
+		var htmlErr error
+		output, htmlErr = report.HTML(data)
+		if htmlErr != nil {
+			return fmt.Errorf("failed to generate HTML report: %w", htmlErr)
+		}
+	case "json":
+		var jsonErr error
+		output, jsonErr = report.JSON(data)
+		if jsonErr != nil {
+			return fmt.Errorf("failed to generate JSON report: %w", jsonErr)
+		}
+	default:
+		return fmt.Errorf("unknown format: %s (available: md, html, json)", opts.formatFlag)
+	}
+
+	if opts.toStdout {
+		fmt.Print(output)
+		return nil
+	}
+
+	outPath := filepath.Join(defaultResultsDir, fmt.Sprintf("prism-pr-%s.%s", sanitizeFilename(pr.Number), ext))
+	return writeToFile(output, outPath)
 }
 
 // sanitizeFilename strips characters that could cause path traversal or invalid filenames.

@@ -69,15 +69,15 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "**Total coverage: ${TOTAL}**" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check coverage threshold
-        continue-on-error: true
+      - name: Enforce 90% coverage threshold
         env:
           TOTAL: ${{ steps.coverage.outputs.total_num }}
         run: |
           THRESHOLD=90
           echo "Coverage: ${TOTAL}% (threshold: ${THRESHOLD}%)"
           if (( $(echo "$TOTAL < $THRESHOLD" | bc -l) )); then
-            echo "::warning::Coverage ${TOTAL}% is below the ${THRESHOLD}% threshold"
+            echo "::error::Coverage ${TOTAL}% is below the ${THRESHOLD}% threshold"
+            exit 1
           fi
 
       - name: Comment on PR

@@ -32,15 +32,29 @@ type Suggestion struct {
 	Role string // which agent produced this
 }
 
+// commandRunner executes a command and returns its output.
+// Defaults to exec.Command(...).Output() but can be replaced in tests.
+type commandRunner func(name string, args ...string) ([]byte, error)
+
+func defaultRunner(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).Output()
+}
+
+func defaultRunnerNoOutput(name string, args ...string) error {
+	return exec.Command(name, args...).Run()
+}
+
 // Client wraps GitHub CLI interactions.
 type Client struct {
 	useGH bool
+	run   commandRunner
+	exec  func(name string, args ...string) error
 }
 
 // NewClient creates a new GitHub client, preferring gh if available.
 func NewClient() (*Client, error) {
 	_, err := exec.LookPath("gh")
-	return &Client{useGH: err == nil}, nil
+	return &Client{useGH: err == nil, run: defaultRunner, exec: defaultRunnerNoOutput}, nil
 }
 
 // GetPRDiff fetches the PR diff and metadata.
@@ -53,7 +67,7 @@ func (c *Client) GetPRDiff(prRef string) (*PR, error) {
 
 func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 	// Get PR metadata.
-	out, err := exec.Command("gh", "pr", "view", prRef, "--json", "number,title,body,headRefOid").Output()
+	out, err := c.run("gh", "pr", "view", prRef, "--json", "number,title,body,headRefOid")
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view failed: %w", err)
 	}
@@ -69,13 +83,13 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 	}
 
 	// Get the diff.
-	diff, err := exec.Command("gh", "pr", "diff", prRef).Output()
+	diff, err := c.run("gh", "pr", "diff", prRef)
 	if err != nil {
 		return nil, fmt.Errorf("gh pr diff failed: %w", err)
 	}
 
 	// Get changed files.
-	filesOut, err := exec.Command("gh", "pr", "view", prRef, "--json", "files").Output()
+	filesOut, err := c.run("gh", "pr", "view", prRef, "--json", "files")
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view files failed: %w", err)
 	}
@@ -116,13 +130,13 @@ func (c *Client) getPRDiffGit(prRef string) (*PR, error) {
 	// This is a simplified fallback — assumes the PR branch is checked out.
 	base := detectBaseBranch()
 
-	diff, err := exec.Command("git", "diff", base+"...HEAD").Output()
+	diff, err := c.run("git", "diff", base+"...HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("git diff failed: %w", err)
 	}
 
 	// Get changed file list.
-	filesOut, err := exec.Command("git", "diff", "--name-status", base+"...HEAD").Output()
+	filesOut, err := c.run("git", "diff", "--name-status", base+"...HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-status failed: %w", err)
 	}
@@ -143,7 +157,7 @@ func (c *Client) getPRDiffGit(prRef string) (*PR, error) {
 
 	// Get HEAD commit SHA.
 	headSHA := ""
-	if shaOut, shaErr := exec.Command("git", "rev-parse", "HEAD").Output(); shaErr == nil {
+	if shaOut, shaErr := c.run("git", "rev-parse", "HEAD"); shaErr == nil {
 		headSHA = strings.TrimSpace(string(shaOut))
 	}
 
@@ -169,13 +183,13 @@ func (c *Client) PostComments(pr *PR, suggestions []Suggestion) error {
 	var errs []error
 	for _, s := range suggestions {
 		body := fmt.Sprintf("**[%s]** %s", s.Role, s.Body)
-		err := exec.Command("gh", "api",
+		err := c.exec("gh", "api",
 			fmt.Sprintf("repos/{owner}/{repo}/pulls/%s/comments", pr.Number),
 			"-f", fmt.Sprintf("body=%s", body),
 			"-f", fmt.Sprintf("path=%s", s.File),
 			"-F", fmt.Sprintf("line=%d", s.Line),
 			"-f", fmt.Sprintf("commit_id=%s", pr.HeadSHA),
-		).Run()
+		)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed to post comment on %s:%d: %w", s.File, s.Line, err))
 		}
