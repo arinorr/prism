@@ -28,11 +28,13 @@ type Finding struct {
 	Severity string `json:"severity"` // info, warning, critical
 	Summary  string `json:"summary"`
 	Detail   string `json:"detail"`
+	Role     string `json:"role,omitempty"`
 }
 
 // ReviewResult is the synthesized output from all agents.
 type ReviewResult struct {
 	Summary     string
+	Findings    []Finding
 	Suggestions []gh.Suggestion
 }
 
@@ -255,15 +257,33 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 	var response struct {
 		Result string `json:"result"`
 	}
-	if err := json.Unmarshal(out, &response); err != nil {
-		// If not JSON, use raw output.
-		return &ReviewResult{
-			Summary: string(out),
-		}, nil
+	summary := string(out)
+	if err := json.Unmarshal(out, &response); err == nil {
+		summary = response.Result
+	}
+
+	// Collect all findings and derive inline suggestions from them.
+	var allFindings []Finding
+	var suggestions []gh.Suggestion
+	for _, fb := range feedbacks {
+		for _, f := range fb.Findings {
+			f.Role = fb.Role
+			allFindings = append(allFindings, f)
+			if f.File != "" && f.Line > 0 {
+				suggestions = append(suggestions, gh.Suggestion{
+					File: f.File,
+					Line: f.Line,
+					Body: fmt.Sprintf("**[%s]** %s\n\n%s", f.Severity, f.Summary, f.Detail),
+					Role: fb.Role,
+				})
+			}
+		}
 	}
 
 	return &ReviewResult{
-		Summary: response.Result,
+		Summary:     summary,
+		Findings:    allFindings,
+		Suggestions: suggestions,
 	}, nil
 }
 

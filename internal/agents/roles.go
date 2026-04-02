@@ -50,6 +50,12 @@ var (
 		Description: "Security vulnerabilities, dangerous code, and attack vectors",
 		SkillFile:   "skills/sentinel.md",
 	}
+	RoleTestEngineer = Role{
+		Name:        "Test Engineer",
+		Slug:        "test-engineer",
+		Description: "Test coverage, edge cases, and testing improvements",
+		SkillFile:   "skills/test-engineer.md",
+	}
 
 	AllRoles = []Role{
 		RoleKnowItAll,
@@ -58,15 +64,17 @@ var (
 		RoleEditor,
 		RoleOptimizer,
 		RoleSentinel,
+		RoleTestEngineer,
 	}
 
 	roleMap = map[string]Role{
-		"know-it-all": RoleKnowItAll,
-		"architect":   RoleArchitect,
-		"solver":      RoleSolver,
-		"editor":      RoleEditor,
-		"optimizer":   RoleOptimizer,
-		"sentinel":    RoleSentinel,
+		"know-it-all":   RoleKnowItAll,
+		"architect":     RoleArchitect,
+		"solver":        RoleSolver,
+		"editor":        RoleEditor,
+		"optimizer":     RoleOptimizer,
+		"sentinel":      RoleSentinel,
+		"test-engineer": RoleTestEngineer,
 	}
 )
 

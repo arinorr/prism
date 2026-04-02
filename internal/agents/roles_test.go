@@ -70,8 +70,8 @@ func TestParseRoles_AllRoles(t *testing.T) {
 }
 
 func TestAllRoles_Count(t *testing.T) {
-	if len(AllRoles) != 6 {
-		t.Errorf("expected 6 roles in AllRoles, got %d", len(AllRoles))
+	if len(AllRoles) != 7 {
+		t.Errorf("expected 7 roles in AllRoles, got %d", len(AllRoles))
 	}
 }
 
