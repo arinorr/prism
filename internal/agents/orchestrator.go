@@ -17,7 +17,7 @@ const previewMaxBytes = 500
 
 // Feedback is the structured output from a single agent review.
 type Feedback struct {
-	Role     string   `json:"role"`
+	Role     string    `json:"role"`
 	Findings []Finding `json:"findings"`
 }
 
@@ -74,7 +74,7 @@ func NewOrchestrator(roles []Role, opts Options) (*Orchestrator, error) {
 }
 
 // readSkillFile tries to read a skill file, falling back to exe-relative path.
-func readSkillFile(path string, exeDir string) ([]byte, error) {
+func readSkillFile(path, exeDir string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil && exeDir != "" {
 		data, err = os.ReadFile(filepath.Join(exeDir, path))
@@ -267,7 +267,7 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 	}, nil
 }
 
-func buildAgentPrompt(role Role, pr *gh.PR) string {
+func buildAgentPrompt(_ Role, pr *gh.PR) string {
 	return fmt.Sprintf(`Review the following pull request changes through your specialized lens.
 
 PR Title: %s
@@ -290,7 +290,10 @@ Output ONLY valid JSON in this format:
 func buildSynthesisPrompt(pr *gh.PR, feedbacks []Feedback) string {
 	var parts []string
 	for _, fb := range feedbacks {
-		data, _ := json.Marshal(fb)
+		data, err := json.Marshal(fb)
+		if err != nil {
+			continue
+		}
 		parts = append(parts, string(data))
 	}
 
@@ -322,7 +325,7 @@ func (o *Orchestrator) skill(role Role) string {
 	return o.skills[role.Slug]
 }
 
-func parseFeedback(role string, response string) (*Feedback, error) {
+func parseFeedback(role, response string) (*Feedback, error) {
 	response = strings.TrimSpace(response)
 
 	// Try direct parse first.
