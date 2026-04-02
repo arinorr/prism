@@ -50,24 +50,51 @@ jobs:
           go-version: "1.25"
 
       - name: Generate coverage
-        run: go test -coverprofile=coverage.out ./...
+        run: go test -coverprofile=coverage.out ./... 2>&1 | tee coverage-run.txt
 
       - name: Coverage report
         id: coverage
         run: |
-          REPORT=$(go tool cover -func=coverage.out)
-          TOTAL=$(echo "$REPORT" | grep total | awk '{print $3}')
+          FUNC_REPORT=$(go tool cover -func=coverage.out)
+          TOTAL=$(echo "$FUNC_REPORT" | grep total | awk '{print $3}')
           TOTAL_NUM=$(echo "$TOTAL" | tr -d '%')
 
           echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
           echo "total_num=$TOTAL_NUM" >> "$GITHUB_OUTPUT"
 
+          # Extract per-package coverage from test output.
+          PKG_COVERAGE=$(grep "coverage:" coverage-run.txt | sed 's/ok  	//' | sed 's/\t/ /g' || true)
+
+          # Build per-package table for outputs.
+          PKG_TABLE=""
+          while IFS= read -r line; do
+            pkg=$(echo "$line" | awk '{print $1}')
+            cov=$(echo "$line" | grep -o '[0-9.]*% of statements' | head -1)
+            if [ -n "$pkg" ] && [ -n "$cov" ]; then
+              short_pkg=$(echo "$pkg" | sed 's|github.com/arinorr/prism/||' | sed 's|github.com/arinorr/prism|prism (root)|')
+              PKG_TABLE="${PKG_TABLE}| \`${short_pkg}\` | ${cov} |\n"
+            fi
+          done <<< "$PKG_COVERAGE"
+          echo "pkg_table<<DELIM" >> "$GITHUB_OUTPUT"
+          echo -e "$PKG_TABLE" >> "$GITHUB_OUTPUT"
+          echo "DELIM" >> "$GITHUB_OUTPUT"
+
           # Step summary
           echo "## Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package | Statement Coverage |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|-------------------|" >> "$GITHUB_STEP_SUMMARY"
+          echo -e "$PKG_TABLE" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Total** | **${TOTAL}** |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "<details><summary>Per-function breakdown</summary>" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          echo "$FUNC_REPORT" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "**Total coverage: ${TOTAL}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "</details>" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "> Go only supports statement coverage. Branch/condition coverage is not available in the Go toolchain." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce 90% coverage threshold
         env:
@@ -86,8 +113,25 @@ jobs:
         with:
           script: |
             const total = '${{ steps.coverage.outputs.total }}';
+            const pkgTable = `${{ steps.coverage.outputs.pkg_table }}`;
             const marker = '<!-- prism-coverage -->';
-            const body = `${marker}\n## Coverage Report\n\n| Metric | Value |\n|--------|-------|\n| **Total coverage** | ${total} |\n| **Threshold** | 90% |\n| **Status** | ${parseFloat(total) >= 90 ? '✅ Pass' : '❌ Fail'} |\n\n*Updated by CI*`;
+            const status = parseFloat(total) >= 90 ? '✅ Pass' : '❌ Fail';
+            const body = [
+              marker,
+              '## Coverage Report',
+              '',
+              '| Package | Statement Coverage |',
+              '|---------|-------------------|',
+              pkgTable.trim(),
+              `| **Total** | **${total}** |`,
+              '',
+              `| Threshold | 90% |`,
+              `| Status | ${status} |`,
+              '',
+              '> Go only supports statement coverage. Branch/condition coverage is not available in the Go toolchain.',
+              '',
+              '*Updated by CI*',
+            ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
