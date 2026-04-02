@@ -42,7 +42,9 @@ linters:
         path: _test\.go
 
 output:
-  max-issues-per-linter: 50
-  max-same-issues: 5
   sort-order:
     - file
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 5
