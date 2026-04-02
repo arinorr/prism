@@ -42,13 +42,19 @@ type Options struct {
 
 // Orchestrator manages the multi-agent review process.
 type Orchestrator struct {
-	roles []Role
-	opts  Options
+	roles   []Role
+	opts    Options
+	exeDir  string
+	skills  map[string]string
 }
 
 // NewOrchestrator creates a new orchestrator with the given roles.
 func NewOrchestrator(roles []Role, opts Options) *Orchestrator {
-	return &Orchestrator{roles: roles, opts: opts}
+	exeDir := ""
+	if exePath, err := os.Executable(); err == nil {
+		exeDir = filepath.Dir(exePath)
+	}
+	return &Orchestrator{roles: roles, opts: opts, exeDir: exeDir, skills: make(map[string]string)}
 }
 
 // Review runs all agents in parallel and synthesizes their feedback.
@@ -68,25 +74,34 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 }
 
 func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
-	fmt.Println("🏜️  DRY RUN — no agents will be called\n")
-	fmt.Printf("PR: #%s %s\n", pr.Number, pr.Title)
+	if len(o.roles) == 0 {
+		return nil, fmt.Errorf("no roles selected")
+	}
+
+	fmt.Println("🏜️  DRY RUN — no agents will be called")
+	fmt.Printf("\nPR: #%s %s\n", pr.Number, pr.Title)
 	fmt.Printf("Files changed: %d\n", len(pr.Files))
 	fmt.Printf("Diff size: %d bytes\n\n", len(pr.Diff))
 
 	fmt.Printf("Agents that would run (%d):\n", len(o.roles))
 	for _, r := range o.roles {
-		skill := loadSkill(r)
 		fmt.Printf("   • %s — %s\n", r.Name, r.Description)
 		if o.opts.Verbose {
-			fmt.Printf("     Skill file: %s (%d bytes)\n", r.SkillFile, len(skill))
+			skill, err := o.loadSkill(r)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "     ⚠️  %v\n", err)
+			} else {
+				fmt.Printf("     Skill file: %s (%d bytes)\n", r.SkillFile, len(skill))
+			}
 		}
 	}
 
 	fmt.Println("\nPrompt that would be sent to each agent:")
 	fmt.Println("───────────────────────────────────────")
 	prompt := buildAgentPrompt(o.roles[0], pr)
-	if len(prompt) > 500 {
-		fmt.Printf("%s\n... (%d bytes total)\n", prompt[:500], len(prompt))
+	const previewMaxBytes = 500
+	if len(prompt) > previewMaxBytes {
+		fmt.Printf("%s\n... (%d bytes total)\n", prompt[:previewMaxBytes], len(prompt))
 	} else {
 		fmt.Println(prompt)
 	}
@@ -142,7 +157,10 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 
 func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	prompt := buildAgentPrompt(role, pr)
-	skill := loadSkill(role)
+	skill, err := o.loadSkill(role)
+	if err != nil {
+		return nil, err
+	}
 
 	if o.opts.Verbose {
 		fmt.Printf("   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
@@ -174,7 +192,8 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	}
 	if err := json.Unmarshal(out, &response); err != nil {
 		if o.opts.Verbose {
-			fmt.Fprintf(os.Stderr, "   🔬 [%s] raw response: %s\n", role.Name, string(out[:min(len(out), 500)]))
+			preview := truncateUTF8(string(out), 500)
+			fmt.Fprintf(os.Stderr, "   🔬 [%s] raw response: %s\n", role.Name, preview)
 		}
 		return nil, fmt.Errorf("failed to parse claude response: %w", err)
 	}
@@ -268,38 +287,53 @@ Produce a well-formatted markdown summary with:
 		pr.Title, strings.Join(parts, "\n\n---\n\n"))
 }
 
-func loadSkill(role Role) string {
+func (o *Orchestrator) loadSkill(role Role) (string, error) {
+	// Return cached skill if available.
+	if s, ok := o.skills[role.Slug]; ok {
+		return s, nil
+	}
+
 	// Try the path as-is first (works when run from repo root).
 	data, err := os.ReadFile(role.SkillFile)
-	if err == nil {
-		return string(data)
+	if err != nil && o.exeDir != "" {
+		// Fall back to resolving relative to the executable's directory.
+		data, err = os.ReadFile(filepath.Join(o.exeDir, role.SkillFile))
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to load skill %s: %w", role.SkillFile, err)
 	}
 
-	// Fall back to resolving relative to the executable's directory.
-	exePath, exeErr := os.Executable()
-	if exeErr == nil {
-		exeDir := filepath.Dir(exePath)
-		data, err = os.ReadFile(filepath.Join(exeDir, role.SkillFile))
-		if err == nil {
-			return string(data)
-		}
-	}
-
-	fmt.Fprintf(os.Stderr, "   ⚠️  failed to load skill %s: %v\n", role.SkillFile, err)
-	return ""
+	s := string(data)
+	o.skills[role.Slug] = s
+	return s, nil
 }
 
 func parseFeedback(role string, response string) (*Feedback, error) {
-	// Try to extract JSON from the response.
 	response = strings.TrimSpace(response)
 
-	// Handle cases where the response is wrapped in markdown code blocks.
-	if strings.HasPrefix(response, "```") {
+	// Try direct parse first.
+	var result struct {
+		Findings []Finding `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(response), &result); err == nil {
+		return &Feedback{Role: role, Findings: result.Findings}, nil
+	}
+
+	// Extract JSON from markdown code blocks.
+	if idx := strings.Index(response, "```"); idx != -1 {
 		lines := strings.Split(response, "\n")
 		var jsonLines []string
 		inBlock := false
 		for _, line := range lines {
 			if strings.HasPrefix(line, "```") {
+				if inBlock {
+					// End of block — try to parse what we collected.
+					candidate := strings.Join(jsonLines, "\n")
+					if err := json.Unmarshal([]byte(candidate), &result); err == nil {
+						return &Feedback{Role: role, Findings: result.Findings}, nil
+					}
+					jsonLines = nil
+				}
 				inBlock = !inBlock
 				continue
 			}
@@ -307,18 +341,29 @@ func parseFeedback(role string, response string) (*Feedback, error) {
 				jsonLines = append(jsonLines, line)
 			}
 		}
-		response = strings.Join(jsonLines, "\n")
 	}
 
-	var result struct {
-		Findings []Finding `json:"findings"`
-	}
-	if err := json.Unmarshal([]byte(response), &result); err != nil {
-		return nil, fmt.Errorf("invalid JSON response: %w\nRaw: %s", err, response[:min(len(response), 200)])
+	// Last resort: find the first { and last } and try to parse that.
+	if start := strings.Index(response, "{"); start != -1 {
+		if end := strings.LastIndex(response, "}"); end > start {
+			candidate := response[start : end+1]
+			if err := json.Unmarshal([]byte(candidate), &result); err == nil {
+				return &Feedback{Role: role, Findings: result.Findings}, nil
+			}
+		}
 	}
 
-	return &Feedback{
-		Role:     role,
-		Findings: result.Findings,
-	}, nil
+	return nil, fmt.Errorf("could not extract JSON from response\nRaw: %s", truncateUTF8(response, 200))
+}
+
+// truncateUTF8 truncates s to at most maxBytes without splitting a UTF-8 character.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Walk back from maxBytes to avoid splitting a multi-byte rune.
+	for maxBytes > 0 && maxBytes < len(s) && s[maxBytes]&0xC0 == 0x80 {
+		maxBytes--
+	}
+	return s[:maxBytes]
 }
