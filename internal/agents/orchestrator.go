@@ -5,15 +5,19 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/arinorr/shinobi/internal/gh"
 )
 
+const previewMaxBytes = 500
+
 // Feedback is the structured output from a single agent review.
 type Feedback struct {
-	Role     string   `json:"role"`
+	Role     string    `json:"role"`
 	Findings []Finding `json:"findings"`
 }
 
@@ -32,18 +36,58 @@ type ReviewResult struct {
 	Suggestions []gh.Suggestion
 }
 
+// Options controls orchestrator behavior.
+type Options struct {
+	Verbose bool
+	DryRun  bool
+}
+
 // Orchestrator manages the multi-agent review process.
 type Orchestrator struct {
-	roles []Role
+	roles  []Role
+	opts   Options
+	skills map[string]string // immutable after construction
 }
 
 // NewOrchestrator creates a new orchestrator with the given roles.
-func NewOrchestrator(roles []Role) *Orchestrator {
-	return &Orchestrator{roles: roles}
+// All skill files are loaded eagerly so the map is immutable during review.
+func NewOrchestrator(roles []Role, opts Options) (*Orchestrator, error) {
+	exeDir := ""
+	if exePath, err := os.Executable(); err == nil {
+		exeDir = filepath.Dir(exePath)
+	}
+
+	skills := make(map[string]string, len(roles))
+	for _, r := range roles {
+		data, err := readSkillFile(r.SkillFile, exeDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load skill for %s: %w", r.Name, err)
+		}
+		skills[r.Slug] = string(data)
+	}
+
+	return &Orchestrator{
+		roles:  roles,
+		opts:   opts,
+		skills: skills,
+	}, nil
+}
+
+// readSkillFile tries to read a skill file, falling back to exe-relative path.
+func readSkillFile(path, exeDir string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil && exeDir != "" {
+		data, err = os.ReadFile(filepath.Join(exeDir, path))
+	}
+	return data, err
 }
 
 // Review runs all agents in parallel and synthesizes their feedback.
 func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
+	if o.opts.DryRun {
+		return o.dryRun(pr)
+	}
+
 	// Phase 1: Dispatch all agents in parallel.
 	feedbacks, err := o.dispatchAgents(pr)
 	if err != nil {
@@ -54,6 +98,38 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 	return o.synthesize(pr, feedbacks)
 }
 
+func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
+	if len(o.roles) == 0 {
+		return nil, fmt.Errorf("no roles selected")
+	}
+
+	fmt.Println("🏜️  DRY RUN — no agents will be called")
+	fmt.Printf("Diff size: %d bytes\n\n", len(pr.Diff))
+
+	fmt.Printf("Agents that would run (%d):\n", len(o.roles))
+	for _, r := range o.roles {
+		fmt.Printf("   • %s — %s\n", r.Name, r.Description)
+		if o.opts.Verbose {
+			fmt.Printf("     Skill file: %s (%d bytes)\n", r.SkillFile, len(o.skill(r)))
+		}
+	}
+
+	fmt.Printf("\nSample prompt (for %s):\n", o.roles[0].Name)
+	fmt.Println("───────────────────────────────────────")
+	prompt := buildAgentPrompt(o.roles[0], pr)
+	const previewMaxBytes = 500
+	if len(prompt) > previewMaxBytes {
+		fmt.Printf("%s\n... (%d bytes total)\n", truncateUTF8(prompt, previewMaxBytes), len(prompt))
+	} else {
+		fmt.Println(prompt)
+	}
+	fmt.Println("───────────────────────────────────────")
+
+	return &ReviewResult{
+		Summary: "[dry run — no review performed]",
+	}, nil
+}
+
 func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 	var (
 		mu        sync.Mutex
@@ -62,32 +138,40 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 		errs      []error
 	)
 
+	// agentLog collects output per-agent to avoid interleaved printing.
+	type agentLog struct {
+		role   string
+		output string
+	}
+	var logs []agentLog
+
 	for _, role := range o.roles {
 		wg.Add(1)
 		go func(r Role) {
 			defer wg.Done()
 
-			fmt.Printf("   🔍 [%s] reviewing...\n", r.Name)
-			fb, err := o.runAgent(r, pr)
+			var buf strings.Builder
+			fmt.Fprintf(&buf, "   🔍 [%s] reviewing...\n", r.Name)
+			fb, err := o.runAgent(r, pr, &buf)
 
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				errs = append(errs, fmt.Errorf("[%s] %w", r.Name, err))
-				return
+				fmt.Fprintf(&buf, "   ⚠️  [%s] %v\n", r.Name, err)
+			} else {
+				feedbacks = append(feedbacks, *fb)
+				fmt.Fprintf(&buf, "   ✅ [%s] found %d findings\n", r.Name, len(fb.Findings))
 			}
-			feedbacks = append(feedbacks, *fb)
-			fmt.Printf("   ✅ [%s] found %d findings\n", r.Name, len(fb.Findings))
+			logs = append(logs, agentLog{role: r.Name, output: buf.String()})
 		}(role)
 	}
 
 	wg.Wait()
 
-	if len(errs) > 0 {
-		// Report errors but continue with whatever feedback we got.
-		for _, e := range errs {
-			fmt.Fprintf(os.Stderr, "   ⚠️  %v\n", e)
-		}
+	// Print all agent output atomically, one agent at a time.
+	for _, l := range logs {
+		fmt.Print(l.output)
 	}
 
 	if len(feedbacks) == 0 {
@@ -97,20 +181,41 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 	return feedbacks, nil
 }
 
-func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
+func (o *Orchestrator) runAgent(role Role, pr *gh.PR, log *strings.Builder) (*Feedback, error) {
 	prompt := buildAgentPrompt(role, pr)
+	skill := o.skill(role)
+
+	if o.opts.Verbose {
+		fmt.Fprintf(log, "   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
+	}
 
 	// Run claude with the role's skill and structured output.
+	start := time.Now()
 	cmd := exec.Command("claude",
 		"--print",
 		"--output-format", "json",
-		"--append-system-prompt", loadSkill(role),
+		"--append-system-prompt", skill,
 		"-p", prompt,
 	)
 
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
 	out, err := cmd.Output()
+	elapsed := time.Since(start)
+
 	if err != nil {
+		if o.opts.Verbose {
+			fmt.Fprintf(log, "   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
+			if s := stderr.String(); s != "" {
+				fmt.Fprintf(log, "   📋 [%s] stderr: %s\n", role.Name, truncateUTF8(s, 300))
+			}
+		}
 		return nil, fmt.Errorf("claude command failed: %w", err)
+	}
+
+	if o.opts.Verbose {
+		fmt.Fprintf(log, "   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(out))
 	}
 
 	// Parse the agent's JSON response.
@@ -118,6 +223,9 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 		Result string `json:"result"`
 	}
 	if err := json.Unmarshal(out, &response); err != nil {
+		if o.opts.Verbose {
+			fmt.Fprintf(log, "   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(string(out), previewMaxBytes))
+		}
 		return nil, fmt.Errorf("failed to parse claude response: %w", err)
 	}
 
@@ -159,7 +267,7 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 	}, nil
 }
 
-func buildAgentPrompt(role Role, pr *gh.PR) string {
+func buildAgentPrompt(_ Role, pr *gh.PR) string {
 	return fmt.Sprintf(`Review the following pull request changes through your specialized lens.
 
 PR Title: %s
@@ -182,7 +290,10 @@ Output ONLY valid JSON in this format:
 func buildSynthesisPrompt(pr *gh.PR, feedbacks []Feedback) string {
 	var parts []string
 	for _, fb := range feedbacks {
-		data, _ := json.MarshalIndent(fb, "", "  ")
+		data, err := json.Marshal(fb)
+		if err != nil {
+			continue
+		}
 		parts = append(parts, string(data))
 	}
 
@@ -210,26 +321,36 @@ Produce a well-formatted markdown summary with:
 		pr.Title, strings.Join(parts, "\n\n---\n\n"))
 }
 
-func loadSkill(role Role) string {
-	data, err := os.ReadFile(role.SkillFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "   ⚠️  failed to load skill %s: %v\n", role.SkillFile, err)
-		return ""
-	}
-	return string(data)
+func (o *Orchestrator) skill(role Role) string {
+	return o.skills[role.Slug]
 }
 
-func parseFeedback(role string, response string) (*Feedback, error) {
-	// Try to extract JSON from the response.
+func parseFeedback(role, response string) (*Feedback, error) {
 	response = strings.TrimSpace(response)
 
-	// Handle cases where the response is wrapped in markdown code blocks.
-	if strings.HasPrefix(response, "```") {
+	// Try direct parse first.
+	var result struct {
+		Findings []Finding `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(response), &result); err == nil {
+		return &Feedback{Role: role, Findings: result.Findings}, nil
+	}
+
+	// Extract JSON from markdown code blocks.
+	if idx := strings.Index(response, "```"); idx != -1 {
 		lines := strings.Split(response, "\n")
 		var jsonLines []string
 		inBlock := false
 		for _, line := range lines {
 			if strings.HasPrefix(line, "```") {
+				if inBlock {
+					// End of block — try to parse what we collected.
+					candidate := strings.Join(jsonLines, "\n")
+					if err := json.Unmarshal([]byte(candidate), &result); err == nil {
+						return &Feedback{Role: role, Findings: result.Findings}, nil
+					}
+					jsonLines = nil
+				}
 				inBlock = !inBlock
 				continue
 			}
@@ -237,18 +358,29 @@ func parseFeedback(role string, response string) (*Feedback, error) {
 				jsonLines = append(jsonLines, line)
 			}
 		}
-		response = strings.Join(jsonLines, "\n")
 	}
 
-	var result struct {
-		Findings []Finding `json:"findings"`
-	}
-	if err := json.Unmarshal([]byte(response), &result); err != nil {
-		return nil, fmt.Errorf("invalid JSON response: %w\nRaw: %s", err, response[:min(len(response), 200)])
+	// Last resort: find {"findings" marker and extract from there to the last }.
+	if start := strings.Index(response, `{"findings"`); start != -1 {
+		if end := strings.LastIndex(response, "}"); end > start {
+			candidate := response[start : end+1]
+			if err := json.Unmarshal([]byte(candidate), &result); err == nil {
+				return &Feedback{Role: role, Findings: result.Findings}, nil
+			}
+		}
 	}
 
-	return &Feedback{
-		Role:     role,
-		Findings: result.Findings,
-	}, nil
+	return nil, fmt.Errorf("could not extract JSON from response\nRaw: %s", truncateUTF8(response, 200))
+}
+
+// truncateUTF8 truncates s to at most maxBytes without splitting a UTF-8 character.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Walk back from maxBytes to avoid splitting a multi-byte rune.
+	for maxBytes > 0 && maxBytes < len(s) && s[maxBytes]&0xC0 == 0x80 {
+		maxBytes--
+	}
+	return s[:maxBytes]
 }

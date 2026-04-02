@@ -14,15 +14,21 @@ func runReview(args []string) error {
 	}
 
 	var (
-		prRef      = ""
-		comment    = false
-		rolesFlag  = ""
+		prRef     = ""
+		comment   = false
+		verbose   = false
+		dryRun    = false
+		rolesFlag = ""
 	)
 
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--comment":
 			comment = true
+		case args[i] == "--verbose" || args[i] == "-v":
+			verbose = true
+		case args[i] == "--dry-run":
+			dryRun = true
 		case args[i] == "--roles" && i+1 < len(args):
 			i++
 			rolesFlag = args[i]
@@ -64,7 +70,13 @@ func runReview(args []string) error {
 	fmt.Printf("   %d files changed\n\n", len(pr.Files))
 
 	// Dispatch agents.
-	orchestrator := agents.NewOrchestrator(roles)
+	orchestrator, err := agents.NewOrchestrator(roles, agents.Options{
+		Verbose: verbose,
+		DryRun:  dryRun,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to initialize orchestrator: %w", err)
+	}
 	result, err := orchestrator.Review(pr)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)

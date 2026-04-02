@@ -18,17 +18,17 @@ type PR struct {
 
 // FileChange represents a single file's changes in the PR.
 type FileChange struct {
-	Path    string
-	Patch   string
-	Status  string // added, modified, removed, renamed
+	Path   string
+	Patch  string
+	Status string // added, modified, removed, renamed
 }
 
 // Suggestion is a review comment tied to a specific file and line.
 type Suggestion struct {
-	File    string
-	Line    int
-	Body    string
-	Role    string // which agent produced this
+	File string
+	Line int
+	Body string
+	Role string // which agent produced this
 }
 
 // Client wraps GitHub CLI interactions.
