@@ -144,6 +144,50 @@ func TestSeverityBadge(t *testing.T) {
 	}
 }
 
+func TestHTML_SanitizesSummaryXSS(t *testing.T) {
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "Good PR.\n\n<script>alert('xss')</script>\n\n[click](javascript:alert(1))",
+		},
+		Roles: []string{"Test"},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(out, "<script>") {
+		t.Error("HTML summary should not contain <script> tags")
+	}
+	if strings.Contains(out, "javascript:") {
+		t.Error("HTML summary should not contain javascript: URLs")
+	}
+	// Benign markdown should still render.
+	if !strings.Contains(out, "Good PR.") {
+		t.Error("HTML summary should still contain safe text")
+	}
+}
+
+func TestHTML_SummaryPreservesSafeMarkdown(t *testing.T) {
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "**Bold text** and `code` and [link](https://example.com)",
+		},
+		Roles: []string{"Test"},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "<strong>Bold text</strong>") {
+		t.Error("HTML summary should preserve bold markdown")
+	}
+	if !strings.Contains(out, "<code>code</code>") {
+		t.Error("HTML summary should preserve code markdown")
+	}
+}
+
 func TestMarkdown_NoLine0InDetails(t *testing.T) {
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},

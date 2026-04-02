@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -57,8 +58,28 @@ func NewClient() (*Client, error) {
 	return &Client{useGH: err == nil, run: defaultRunner, exec: defaultRunnerNoOutput}, nil
 }
 
+// prRefPattern matches valid PR references: numbers, GitHub URLs, or branch-like names.
+var prRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./:@-]*$`)
+
+// ValidatePRRef checks that a PR reference is safe to pass to external commands.
+func ValidatePRRef(prRef string) error {
+	if prRef == "" {
+		return fmt.Errorf("PR reference cannot be empty")
+	}
+	if strings.HasPrefix(prRef, "-") {
+		return fmt.Errorf("invalid PR reference %q: cannot start with a dash", prRef)
+	}
+	if !prRefPattern.MatchString(prRef) {
+		return fmt.Errorf("invalid PR reference %q: contains disallowed characters", prRef)
+	}
+	return nil
+}
+
 // GetPRDiff fetches the PR diff and metadata.
 func (c *Client) GetPRDiff(prRef string) (*PR, error) {
+	if err := ValidatePRRef(prRef); err != nil {
+		return nil, err
+	}
 	if !c.useGH {
 		return c.getPRDiffGit(prRef)
 	}

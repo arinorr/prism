@@ -80,6 +80,67 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
+func TestValidatePRRef_ValidNumeric(t *testing.T) {
+	if err := ValidatePRRef("42"); err != nil {
+		t.Errorf("expected valid, got: %v", err)
+	}
+}
+
+func TestValidatePRRef_ValidURL(t *testing.T) {
+	if err := ValidatePRRef("https://github.com/org/repo/pull/42"); err != nil {
+		t.Errorf("expected valid, got: %v", err)
+	}
+}
+
+func TestValidatePRRef_ValidBranch(t *testing.T) {
+	if err := ValidatePRRef("feature/my-branch"); err != nil {
+		t.Errorf("expected valid, got: %v", err)
+	}
+}
+
+func TestValidatePRRef_FlagInjection(t *testing.T) {
+	if err := ValidatePRRef("--exec=evil"); err == nil {
+		t.Error("expected error for flag injection")
+	}
+}
+
+func TestValidatePRRef_DoubleDash(t *testing.T) {
+	if err := ValidatePRRef("--json"); err == nil {
+		t.Error("expected error for double-dash flag")
+	}
+}
+
+func TestValidatePRRef_SingleDash(t *testing.T) {
+	if err := ValidatePRRef("-v"); err == nil {
+		t.Error("expected error for single-dash flag")
+	}
+}
+
+func TestValidatePRRef_Empty(t *testing.T) {
+	if err := ValidatePRRef(""); err == nil {
+		t.Error("expected error for empty string")
+	}
+}
+
+func TestValidatePRRef_ShellMetachars(t *testing.T) {
+	for _, input := range []string{"42; rm -rf /", "$(whoami)", "42 && echo bad", "42`id`"} {
+		if err := ValidatePRRef(input); err == nil {
+			t.Errorf("expected error for %q", input)
+		}
+	}
+}
+
+func TestGetPRDiff_RejectsInvalidRef(t *testing.T) {
+	client := &Client{useGH: true, run: defaultRunner}
+	_, err := client.GetPRDiff("--exec=evil")
+	if err == nil {
+		t.Fatal("expected error for flag injection")
+	}
+	if !strings.Contains(err.Error(), "cannot start with a dash") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestGetPRDiff_RoutesToGH(t *testing.T) {
 	callCount := 0
 	client := &Client{
