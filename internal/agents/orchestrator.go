@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/arinorr/shinobi/internal/gh"
 )
@@ -32,18 +34,29 @@ type ReviewResult struct {
 	Suggestions []gh.Suggestion
 }
 
+// Options controls orchestrator behavior.
+type Options struct {
+	Verbose bool
+	DryRun  bool
+}
+
 // Orchestrator manages the multi-agent review process.
 type Orchestrator struct {
 	roles []Role
+	opts  Options
 }
 
 // NewOrchestrator creates a new orchestrator with the given roles.
-func NewOrchestrator(roles []Role) *Orchestrator {
-	return &Orchestrator{roles: roles}
+func NewOrchestrator(roles []Role, opts Options) *Orchestrator {
+	return &Orchestrator{roles: roles, opts: opts}
 }
 
 // Review runs all agents in parallel and synthesizes their feedback.
 func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
+	if o.opts.DryRun {
+		return o.dryRun(pr)
+	}
+
 	// Phase 1: Dispatch all agents in parallel.
 	feedbacks, err := o.dispatchAgents(pr)
 	if err != nil {
@@ -52,6 +65,36 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 
 	// Phase 2: Synthesize feedback.
 	return o.synthesize(pr, feedbacks)
+}
+
+func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
+	fmt.Println("🏜️  DRY RUN — no agents will be called\n")
+	fmt.Printf("PR: #%s %s\n", pr.Number, pr.Title)
+	fmt.Printf("Files changed: %d\n", len(pr.Files))
+	fmt.Printf("Diff size: %d bytes\n\n", len(pr.Diff))
+
+	fmt.Printf("Agents that would run (%d):\n", len(o.roles))
+	for _, r := range o.roles {
+		skill := loadSkill(r)
+		fmt.Printf("   • %s — %s\n", r.Name, r.Description)
+		if o.opts.Verbose {
+			fmt.Printf("     Skill file: %s (%d bytes)\n", r.SkillFile, len(skill))
+		}
+	}
+
+	fmt.Println("\nPrompt that would be sent to each agent:")
+	fmt.Println("───────────────────────────────────────")
+	prompt := buildAgentPrompt(o.roles[0], pr)
+	if len(prompt) > 500 {
+		fmt.Printf("%s\n... (%d bytes total)\n", prompt[:500], len(prompt))
+	} else {
+		fmt.Println(prompt)
+	}
+	fmt.Println("───────────────────────────────────────")
+
+	return &ReviewResult{
+		Summary: "[dry run — no review performed]",
+	}, nil
 }
 
 func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
@@ -99,16 +142,28 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 
 func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	prompt := buildAgentPrompt(role, pr)
+	skill := loadSkill(role)
+
+	if o.opts.Verbose {
+		fmt.Printf("   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
+	}
 
 	// Run claude with the role's skill and structured output.
+	start := time.Now()
 	cmd := exec.Command("claude",
 		"--print",
 		"--output-format", "json",
-		"--append-system-prompt", loadSkill(role),
+		"--append-system-prompt", skill,
 		"-p", prompt,
 	)
 
 	out, err := cmd.Output()
+	elapsed := time.Since(start)
+
+	if o.opts.Verbose {
+		fmt.Printf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(out))
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("claude command failed: %w", err)
 	}
@@ -118,6 +173,9 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 		Result string `json:"result"`
 	}
 	if err := json.Unmarshal(out, &response); err != nil {
+		if o.opts.Verbose {
+			fmt.Fprintf(os.Stderr, "   🔬 [%s] raw response: %s\n", role.Name, string(out[:min(len(out), 500)]))
+		}
 		return nil, fmt.Errorf("failed to parse claude response: %w", err)
 	}
 
@@ -211,12 +269,24 @@ Produce a well-formatted markdown summary with:
 }
 
 func loadSkill(role Role) string {
+	// Try the path as-is first (works when run from repo root).
 	data, err := os.ReadFile(role.SkillFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "   ⚠️  failed to load skill %s: %v\n", role.SkillFile, err)
-		return ""
+	if err == nil {
+		return string(data)
 	}
-	return string(data)
+
+	// Fall back to resolving relative to the executable's directory.
+	exePath, exeErr := os.Executable()
+	if exeErr == nil {
+		exeDir := filepath.Dir(exePath)
+		data, err = os.ReadFile(filepath.Join(exeDir, role.SkillFile))
+		if err == nil {
+			return string(data)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "   ⚠️  failed to load skill %s: %v\n", role.SkillFile, err)
+	return ""
 }
 
 func parseFeedback(role string, response string) (*Feedback, error) {
