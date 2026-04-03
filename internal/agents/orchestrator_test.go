@@ -1,7 +1,7 @@
 package agents
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm"
 )
 
 func TestParseFeedback_DirectJSON(t *testing.T) {
@@ -287,7 +288,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: skillPath}}
-	orch, err := NewOrchestrator(roles, Options{})
+	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -298,7 +299,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 
 func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 	roles := []Role{{Name: "Bad", Slug: "bad", SkillFile: "/nonexistent/path.md"}}
-	_, err := NewOrchestrator(roles, Options{})
+	_, err := NewOrchestrator(roles, Options{}, &llm.Mock{})
 	if err == nil {
 		t.Fatal("expected error for missing skill file")
 	}
@@ -308,7 +309,7 @@ func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 }
 
 func TestNewOrchestrator_EmptyRoles(t *testing.T) {
-	orch, err := NewOrchestrator([]Role{}, Options{})
+	orch, err := NewOrchestrator([]Role{}, Options{}, &llm.Mock{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -420,26 +421,12 @@ func TestSkill_MissingReturnsEmpty(t *testing.T) {
 	}
 }
 
-func mockRunner(response string) claudeRunner {
-	return func(args ...string) ([]byte, error) {
-		return []byte(response), nil
-	}
+func mockLLM(response string) *llm.Mock {
+	return &llm.Mock{Response: response}
 }
 
-func mockRunnerJSON(findingsJSON string) claudeRunner {
-	// The claude --output-format json wraps the response in {"result": "..."}
-	// where the inner value is the raw text the model produced.
-	inner := `{"findings":[` + findingsJSON + `]}`
-	// Build the outer JSON properly.
-	outerBytes, err := json.Marshal(struct {
-		Result string `json:"result"`
-	}{Result: inner})
-	if err != nil {
-		panic(err)
-	}
-	return func(args ...string) ([]byte, error) {
-		return outerBytes, nil
-	}
+func mockLLMFindings(findingsJSON string) *llm.Mock {
+	return &llm.Mock{Response: `{"findings":[` + findingsJSON + `]}`}
 }
 
 func TestRunAgent_Success(t *testing.T) {
@@ -447,7 +434,7 @@ func TestRunAgent_Success(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run:    mockRunnerJSON(finding),
+		llm:    mockLLMFindings(finding),
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "body", Diff: "diff"}
@@ -463,12 +450,37 @@ func TestRunAgent_Success(t *testing.T) {
 	}
 }
 
+func TestRunAgent_VerifiesRequest(t *testing.T) {
+	mock := &llm.Mock{Response: `{"findings":[]}`}
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "my skill content"},
+		opts:   Options{},
+		llm:    mock,
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "body", Diff: "diff"}
+	_, err := orch.runAgent(role, pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+	}
+	req := mock.Calls[0]
+	if req.SystemPrompt != "my skill content" {
+		t.Errorf("expected system prompt 'my skill content', got %q", req.SystemPrompt)
+	}
+	if !req.JSONOutput {
+		t.Error("expected JSONOutput=true for agent calls")
+	}
+}
+
 func TestRunAgent_Verbose(t *testing.T) {
 	finding := `{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}`
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{Verbose: true},
-		run:    mockRunnerJSON(finding),
+		llm:    mockLLMFindings(finding),
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -482,9 +494,7 @@ func TestRunAgent_CommandFailure(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run: func(args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("command failed")
-		},
+		llm:    &llm.Mock{Err: fmt.Errorf("command failed")},
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -492,7 +502,7 @@ func TestRunAgent_CommandFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "claude command failed") {
+	if !strings.Contains(err.Error(), "command failed") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -501,7 +511,7 @@ func TestRunAgent_InvalidJSON(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run:    mockRunner("not json at all"),
+		llm:    mockLLM("not json at all"),
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -517,7 +527,7 @@ func TestDispatchAgents_AllSucceed(t *testing.T) {
 		roles:  []Role{{Name: "A", Slug: "a"}, {Name: "B", Slug: "b"}},
 		skills: map[string]string{"a": "skill a", "b": "skill b"},
 		opts:   Options{},
-		run:    mockRunnerJSON(finding),
+		llm:    mockLLMFindings(finding),
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
 	feedbacks, err := orch.dispatchAgents(pr)
@@ -534,9 +544,7 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 		roles:  []Role{{Name: "A", Slug: "a"}},
 		skills: map[string]string{"a": "skill"},
 		opts:   Options{},
-		run: func(args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("fail")
-		},
+		llm:    &llm.Mock{Err: fmt.Errorf("fail")},
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
 	_, err := orch.dispatchAgents(pr)
@@ -551,7 +559,7 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 func TestSynthesize_Success(t *testing.T) {
 	orch := &Orchestrator{
 		opts: Options{},
-		run:  mockRunner("Overall the code looks good."),
+		llm:  mockLLM("Overall the code looks good."),
 	}
 	pr := &gh.PR{Title: "Test"}
 	feedbacks := []Feedback{
@@ -574,10 +582,30 @@ func TestSynthesize_Success(t *testing.T) {
 	}
 }
 
+func TestSynthesize_VerifiesRequest(t *testing.T) {
+	mock := &llm.Mock{Response: "summary"}
+	orch := &Orchestrator{opts: Options{}, llm: mock}
+	pr := &gh.PR{Title: "Test"}
+	_, err := orch.synthesize(pr, []Feedback{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+	}
+	req := mock.Calls[0]
+	if req.SystemPrompt != "" {
+		t.Errorf("synthesis should not have a system prompt, got %q", req.SystemPrompt)
+	}
+	if req.JSONOutput {
+		t.Error("synthesis should not request JSON output")
+	}
+}
+
 func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
 	orch := &Orchestrator{
 		opts: Options{},
-		run:  mockRunner("summary"),
+		llm:  mockLLM("summary"),
 	}
 	pr := &gh.PR{Title: "Test"}
 	feedbacks := []Feedback{
@@ -597,9 +625,7 @@ func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
 func TestSynthesize_CommandFailure(t *testing.T) {
 	orch := &Orchestrator{
 		opts: Options{},
-		run: func(args ...string) ([]byte, error) {
-			return nil, fmt.Errorf("synthesis error")
-		},
+		llm:  &llm.Mock{Err: fmt.Errorf("synthesis error")},
 	}
 	pr := &gh.PR{Title: "Test"}
 	_, err := orch.synthesize(pr, []Feedback{})
@@ -612,26 +638,23 @@ func TestSynthesize_CommandFailure(t *testing.T) {
 }
 
 func TestReview_FullPipeline(t *testing.T) {
-	innerFindings := `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`
-	agentResponse, marshalErr := json.Marshal(struct {
-		Result string `json:"result"`
-	}{Result: innerFindings})
-	if marshalErr != nil {
-		t.Fatal(marshalErr)
-	}
-
 	callCount := 0
+	mock := &llm.Mock{
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
+			callCount++
+			if req.JSONOutput {
+				// Agent call — return findings.
+				return `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`, nil
+			}
+			// Synthesis call.
+			return "Review complete.", nil
+		},
+	}
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Test", Slug: "test"}},
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run: func(args ...string) ([]byte, error) {
-			callCount++
-			if callCount <= 1 {
-				return agentResponse, nil
-			}
-			return []byte("Review complete."), nil
-		},
+		llm:    mock,
 	}
 	pr := &gh.PR{Number: "1", Title: "Test", Body: "b", Diff: "d"}
 	result, err := orch.Review(pr)
@@ -643,5 +666,8 @@ func TestReview_FullPipeline(t *testing.T) {
 	}
 	if len(result.Findings) != 1 {
 		t.Errorf("expected 1 finding, got %d", len(result.Findings))
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 LLM calls (1 agent + 1 synthesis), got %d", callCount)
 	}
 }

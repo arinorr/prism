@@ -31,7 +31,14 @@ This specialization means each agent produces more targeted, actionable findings
          │ + skill  │  │ + skill   │  │ + skill │
          └────┬────┘  └─────┬─────┘  └────┬────┘
               │              │              │
-              └──────────────┼──────────────┘
+              └──────┬───────┼──────────────┘
+                     │       │
+              ┌──────▼───────▼───────┐
+              │   LLM Adapter        │
+              │   (Claude CLI, etc.) │
+              └──────────┬───────────┘
+                         │
+              └──────────┼──────────────┘
                              │
                     ┌────────▼────────┐
                     │   Synthesizer    │
@@ -45,12 +52,24 @@ This specialization means each agent produces more targeted, actionable findings
                     └─────────────────┘
 ```
 
+### LLM adapter (ports and adapters)
+
+Prism uses the ports-and-adapters pattern for LLM communication. The orchestrator depends on an `llm.LLM` interface (the port), and concrete implementations (adapters) handle provider-specific details:
+
+- **`llm.LLM`** — the interface with a single `Complete(ctx, Request)` method
+- **`claude.Adapter`** — the default adapter, wraps `claude --print` CLI calls
+- Future adapters could support OpenAI, Anthropic API, or local models
+
+This separation means the orchestrator never knows which LLM provider it's talking to. Swapping providers requires only changing which adapter is constructed in `cmd/review.go`.
+
 ### Agent dispatch
 
-Each agent runs as a separate `claude --print` invocation with:
-- The PR diff as the main prompt
-- A skill file (markdown persona) appended as a system prompt
-- Instructions to output structured JSON findings
+Each agent runs in parallel with:
+- The PR diff as the user prompt
+- A skill file (markdown persona) as the system prompt
+- A request for structured JSON output
+
+The LLM adapter handles provider-specific details like CLI flags, API auth, and response envelope formats. The orchestrator receives clean text responses.
 
 All agents run in parallel. As each completes, Prism reports progress.
 
@@ -68,9 +87,9 @@ Each agent's behavior is defined by a markdown skill file in `skills/`. These ca
 
 ## Requirements
 
-- **Go 1.24+** — to build Prism
+- **Go 1.25+** — to build Prism
 - **gh CLI** — to fetch PR metadata and diffs (with git fallback)
-- **Claude Code** — the Claude CLI, which Prism invokes for each agent
+- **Claude Code** — the Claude CLI, used by the default LLM adapter (alternative adapters may use different backends)
 
 ## Token usage
 

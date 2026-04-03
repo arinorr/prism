@@ -10,6 +10,7 @@ import (
 
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm/claude"
 	"github.com/arinorr/prism/internal/report"
 )
 
@@ -99,10 +100,11 @@ func runReview(args []string) error {
 	fmt.Printf("   %d files changed\n\n", len(pr.Files))
 
 	// Dispatch agents.
+	llmBackend := claude.New()
 	orchestrator, orchErr := agents.NewOrchestrator(roles, agents.Options{
 		Verbose: opts.verbose,
 		DryRun:  opts.dryRun,
-	})
+	}, llmBackend)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
 	}

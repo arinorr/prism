@@ -1,16 +1,17 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm"
 )
 
 const previewMaxBytes = 500
@@ -44,24 +45,17 @@ type Options struct {
 	DryRun  bool
 }
 
-// claudeRunner executes a claude command and returns its output.
-type claudeRunner func(args ...string) ([]byte, error)
-
-func defaultClaudeRunner(args ...string) ([]byte, error) {
-	return exec.Command("claude", args...).Output() // #nosec G204 -- binary is hardcoded "claude", args are internally constructed prompts
-}
-
 // Orchestrator manages the multi-agent review process.
 type Orchestrator struct {
 	roles  []Role
 	opts   Options
 	skills map[string]string // immutable after construction
-	run    claudeRunner
+	llm    llm.LLM
 }
 
-// NewOrchestrator creates a new orchestrator with the given roles.
+// NewOrchestrator creates a new orchestrator with the given roles and LLM backend.
 // All skill files are loaded eagerly so the map is immutable during review.
-func NewOrchestrator(roles []Role, opts Options) (*Orchestrator, error) {
+func NewOrchestrator(roles []Role, opts Options, backend llm.LLM) (*Orchestrator, error) {
 	exeDir := ""
 	if exePath, err := os.Executable(); err == nil {
 		exeDir = filepath.Dir(exePath)
@@ -80,7 +74,7 @@ func NewOrchestrator(roles []Role, opts Options) (*Orchestrator, error) {
 		roles:  roles,
 		opts:   opts,
 		skills: skills,
-		run:    defaultClaudeRunner,
+		llm:    backend,
 	}, nil
 }
 
@@ -194,41 +188,31 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 		fmt.Printf("   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
 	}
 
-	// Run claude with the role's skill and structured output.
 	start := time.Now()
-	out, err := o.run(
-		"--print",
-		"--output-format", "json",
-		"--append-system-prompt", skill,
-		"-p", prompt,
-	)
+	response, err := o.llm.Complete(context.Background(), llm.Request{
+		SystemPrompt: skill,
+		UserPrompt:   prompt,
+		JSONOutput:   true,
+	})
 	elapsed := time.Since(start)
 
 	if err != nil {
 		if o.opts.Verbose {
 			fmt.Fprintf(os.Stderr, "   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
 		}
-		return nil, fmt.Errorf("claude command failed: %w", err)
+		return nil, err
 	}
 
 	if o.opts.Verbose {
-		fmt.Printf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(out))
+		fmt.Printf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(response))
 	}
 
-	// Parse the agent's JSON response.
-	var response struct {
-		Result string `json:"result"`
-	}
-	if err := json.Unmarshal(out, &response); err != nil {
-		if o.opts.Verbose {
-			fmt.Fprintf(os.Stderr, "   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(string(out), previewMaxBytes))
-		}
-		return nil, fmt.Errorf("failed to parse claude response: %w", err)
-	}
-
-	// Extract the structured feedback from the response.
-	fb, err := parseFeedback(role.Slug, response.Result)
+	// Extract the structured feedback from the response text.
+	fb, err := parseFeedback(role.Slug, response)
 	if err != nil {
+		if o.opts.Verbose {
+			fmt.Fprintf(os.Stderr, "   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(response, previewMaxBytes))
+		}
 		return nil, fmt.Errorf("failed to parse feedback: %w", err)
 	}
 
@@ -239,18 +223,11 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 	fmt.Println("   🧠 Synthesizing feedback from all agents...")
 	synthesisPrompt := buildSynthesisPrompt(pr, feedbacks)
 
-	out, err := o.run("--print", "-p", synthesisPrompt)
+	summary, err := o.llm.Complete(context.Background(), llm.Request{
+		UserPrompt: synthesisPrompt,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("synthesis failed: %w", err)
-	}
-
-	// Parse synthesis response.
-	var response struct {
-		Result string `json:"result"`
-	}
-	summary := string(out)
-	if err := json.Unmarshal(out, &response); err == nil {
-		summary = response.Result
 	}
 
 	// Collect all findings and derive inline suggestions from warning+ findings.
