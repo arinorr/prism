@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ type reviewOptions struct {
 	verbose     bool
 	dryRun      bool
 	toStdout    bool
+	yes         bool
 	rolesFlag   string
 	formatFlag  string
 	modelFlag   string
@@ -48,6 +50,8 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.verbose = true
 		case args[i] == "--dry-run":
 			opts.dryRun = true
+		case args[i] == "--yes" || args[i] == "-y":
+			opts.yes = true
 		case args[i] == "--stdout":
 			opts.toStdout = true
 		case args[i] == "--roles" && i+1 < len(args):
@@ -147,10 +151,19 @@ func runReview(args []string) error {
 		return fmt.Errorf("failed to get PR diff: %w", err)
 	}
 
-	// Check diff size and warn if large.
+	// Check diff size and prompt for confirmation if large.
 	sizeResult := sizecheck.Check(len(pr.Diff), merged.DiffWarnBytes, merged.DiffChunkBytes)
 	if sizeResult.Warn {
 		fmt.Fprintf(os.Stderr, "⚠️  %s\n", sizeResult.Message)
+		if !opts.yes && isInteractive() {
+			fmt.Fprint(os.Stderr, "Continue anyway? [y/N] ")
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Scan()
+			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+			if answer != "y" && answer != "yes" {
+				return fmt.Errorf("review canceled — diff too large")
+			}
+		}
 	}
 
 	// Detect languages for skill module loading.
@@ -273,6 +286,15 @@ func sanitizeFilename(s string) string {
 		return "unknown"
 	}
 	return s
+}
+
+// isInteractive returns true if stdin is a terminal (not piped or in CI).
+func isInteractive() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 func writeToFile(content, path string) error {
