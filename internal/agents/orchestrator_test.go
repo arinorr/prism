@@ -11,6 +11,7 @@ import (
 
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/llm"
+	"github.com/arinorr/prism/internal/llm/llmtest"
 )
 
 func TestParseFeedback_DirectJSON(t *testing.T) {
@@ -289,7 +290,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: skillPath}}
-	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, nil)
+	orch, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -300,7 +301,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 
 func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 	roles := []Role{{Name: "Bad", Slug: "bad", SkillFile: "/nonexistent/path.md"}}
-	_, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, nil)
+	_, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing skill file")
 	}
@@ -310,7 +311,7 @@ func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 }
 
 func TestNewOrchestrator_EmptyRoles(t *testing.T) {
-	orch, err := NewOrchestrator([]Role{}, Options{}, &llm.Mock{}, nil)
+	orch, err := NewOrchestrator([]Role{}, Options{}, &llmtest.Mock{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -339,7 +340,7 @@ func TestNewOrchestrator_WithLanguageModule(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, []string{"typescript"})
+	orch, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, []string{"typescript"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -357,7 +358,7 @@ func TestNewOrchestrator_LanguageModuleMissing(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, []string{"rust"})
+	orch, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, []string{"rust"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -390,7 +391,7 @@ func TestNewOrchestrator_MultipleLanguages(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, []string{"go", "typescript"})
+	orch, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, []string{"go", "typescript"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -520,12 +521,12 @@ func TestSkill_MissingReturnsEmpty(t *testing.T) {
 	}
 }
 
-func mockLLM(response string) *llm.Mock {
-	return &llm.Mock{Response: response}
+func mockLLM(response string) *llmtest.Mock {
+	return &llmtest.Mock{Response: response}
 }
 
-func mockLLMFindings(findingsJSON string) *llm.Mock {
-	return &llm.Mock{Response: `{"findings":[` + findingsJSON + `]}`}
+func mockLLMFindings(findingsJSON string) *llmtest.Mock {
+	return &llmtest.Mock{Response: `{"findings":[` + findingsJSON + `]}`}
 }
 
 func TestRunAgent_Success(t *testing.T) {
@@ -550,7 +551,7 @@ func TestRunAgent_Success(t *testing.T) {
 }
 
 func TestRunAgent_VerifiesRequest(t *testing.T) {
-	mock := &llm.Mock{Response: `{"findings":[]}`}
+	mock := &llmtest.Mock{Response: `{"findings":[]}`}
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "my skill content"},
 		opts:   Options{},
@@ -593,7 +594,7 @@ func TestRunAgent_CommandFailure(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		llm:    &llm.Mock{Err: fmt.Errorf("command failed")},
+		llm:    &llmtest.Mock{Err: fmt.Errorf("command failed")},
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -621,7 +622,7 @@ func TestRunAgent_InvalidJSON(t *testing.T) {
 }
 
 func TestRunAgent_WithModel(t *testing.T) {
-	mock := &llm.Mock{Response: `{"findings":[]}`}
+	mock := &llmtest.Mock{Response: `{"findings":[]}`}
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{Model: "sonnet"},
@@ -667,7 +668,7 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 		roles:  []Role{{Name: "A", Slug: "a"}},
 		skills: map[string]string{"a": "skill"},
 		opts:   Options{},
-		llm:    &llm.Mock{Err: fmt.Errorf("fail")},
+		llm:    &llmtest.Mock{Err: fmt.Errorf("fail")},
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
 	_, failedAgents, err := orch.dispatchAgents(pr)
@@ -685,7 +686,7 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 func TestDispatchAgents_PartialFailure(t *testing.T) {
 	// Both agents get JSONOutput=true calls, so both succeed here.
 	// The important thing is that dispatchAgents tolerates partial failure.
-	mock := &llm.Mock{
+	mock := &llmtest.Mock{
 		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
 			if req.JSONOutput {
 				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}]}`, nil
@@ -711,7 +712,7 @@ func TestDispatchAgents_PartialFailure(t *testing.T) {
 
 func TestRunAgentWithRetry_SucceedsOnSecondAttempt(t *testing.T) {
 	attempt := 0
-	mock := &llm.Mock{
+	mock := &llmtest.Mock{
 		CompleteFunc: func(_ context.Context, _ llm.Request) (string, error) {
 			attempt++
 			if attempt == 1 {
@@ -743,7 +744,7 @@ func TestRunAgentWithRetry_ExhaustedRetries(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{MaxRetries: 1},
-		llm:    &llm.Mock{Err: fmt.Errorf("persistent failure")},
+		llm:    &llmtest.Mock{Err: fmt.Errorf("persistent failure")},
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -755,7 +756,7 @@ func TestRunAgentWithRetry_ExhaustedRetries(t *testing.T) {
 
 func TestRunAgentWithRetry_NoRetries(t *testing.T) {
 	attempt := 0
-	mock := &llm.Mock{
+	mock := &llmtest.Mock{
 		CompleteFunc: func(_ context.Context, _ llm.Request) (string, error) {
 			attempt++
 			return "", fmt.Errorf("fail")
@@ -778,7 +779,7 @@ func TestRunAgentWithRetry_NoRetries(t *testing.T) {
 }
 
 func TestRunAgent_Timeout(t *testing.T) {
-	mock := &llm.Mock{
+	mock := &llmtest.Mock{
 		CompleteFunc: func(ctx context.Context, _ llm.Request) (string, error) {
 			select {
 			case <-ctx.Done():
@@ -831,7 +832,7 @@ func TestSynthesize_Success(t *testing.T) {
 }
 
 func TestSynthesize_VerifiesRequest(t *testing.T) {
-	mock := &llm.Mock{Response: "summary"}
+	mock := &llmtest.Mock{Response: "summary"}
 	orch := &Orchestrator{opts: Options{}, llm: mock}
 	pr := &gh.PR{Title: "Test"}
 	_, err := orch.synthesize(pr, []Feedback{})
@@ -873,7 +874,7 @@ func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
 func TestSynthesize_CommandFailure(t *testing.T) {
 	orch := &Orchestrator{
 		opts: Options{},
-		llm:  &llm.Mock{Err: fmt.Errorf("synthesis error")},
+		llm:  &llmtest.Mock{Err: fmt.Errorf("synthesis error")},
 	}
 	pr := &gh.PR{Title: "Test"}
 	_, err := orch.synthesize(pr, []Feedback{})
@@ -887,7 +888,7 @@ func TestSynthesize_CommandFailure(t *testing.T) {
 
 func TestReview_FullPipeline(t *testing.T) {
 	callCount := 0
-	mock := &llm.Mock{
+	mock := &llmtest.Mock{
 		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
 			callCount++
 			if req.JSONOutput {
@@ -924,7 +925,7 @@ func TestReview_FullPipeline(t *testing.T) {
 }
 
 func TestReview_FailedAgentsTracked(t *testing.T) {
-	mock := &llm.Mock{
+	mock := &llmtest.Mock{
 		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
 			if req.JSONOutput {
 				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"ok","detail":"d"}]}`, nil

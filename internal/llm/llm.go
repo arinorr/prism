@@ -6,10 +6,7 @@
 // providers without changing business logic.
 package llm
 
-import (
-	"context"
-	"sync"
-)
+import "context"
 
 // LLM is the port that the orchestrator uses to communicate with a
 // language model. Implementations handle provider-specific details
@@ -38,34 +35,4 @@ type Request struct {
 	// Model overrides the default model for this request. Empty means
 	// use the provider's default.
 	Model string
-}
-
-// Mock is a test double for the LLM interface. It is safe for
-// concurrent use (agents call Complete from goroutines).
-type Mock struct {
-	// Response is returned by Complete. Set this before calling.
-	Response string
-
-	// Err is returned by Complete if non-nil.
-	Err error
-
-	// Calls records each request passed to Complete.
-	Calls []Request
-
-	// CompleteFunc, if set, is called instead of returning Response/Err.
-	// This allows per-call behavior in tests.
-	CompleteFunc func(ctx context.Context, req Request) (string, error)
-
-	mu sync.Mutex
-}
-
-// Complete satisfies the LLM interface.
-func (m *Mock) Complete(ctx context.Context, req Request) (string, error) {
-	m.mu.Lock()
-	m.Calls = append(m.Calls, req)
-	m.mu.Unlock()
-	if m.CompleteFunc != nil {
-		return m.CompleteFunc(ctx, req)
-	}
-	return m.Response, m.Err
 }
