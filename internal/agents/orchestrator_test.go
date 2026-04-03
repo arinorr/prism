@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -692,14 +693,11 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 }
 
 func TestDispatchAgents_PartialFailure(t *testing.T) {
-	callCount := 0
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Good", Slug: "good"}, {Name: "Bad", Slug: "bad"}},
 		skills: map[string]string{"good": "skill", "bad": "skill"},
 		opts:   Options{},
 		run: func(_ context.Context, args ...string) ([]byte, error) {
-			callCount++
-			// Find the prompt to determine which agent this is.
 			for _, arg := range args {
 				if strings.Contains(arg, "Review the following") {
 					inner := `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}]}`
@@ -904,14 +902,14 @@ func TestReview_FullPipeline(t *testing.T) {
 		t.Fatal(marshalErr)
 	}
 
-	callCount := 0
+	var callCount atomic.Int32
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Test", Slug: "test"}},
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
 		run: func(_ context.Context, _ ...string) ([]byte, error) {
-			callCount++
-			if callCount <= 1 {
+			n := callCount.Add(1)
+			if n <= 1 {
 				return agentResponse, nil
 			}
 			return []byte("Review complete."), nil
@@ -934,14 +932,11 @@ func TestReview_FullPipeline(t *testing.T) {
 }
 
 func TestReview_FailedAgentsTracked(t *testing.T) {
-	callCount := 0
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Good", Slug: "good"}, {Name: "Bad", Slug: "bad"}},
 		skills: map[string]string{"good": "skill", "bad": "skill"},
 		opts:   Options{},
 		run: func(_ context.Context, args ...string) ([]byte, error) {
-			callCount++
-			// First 2 calls are the agents (parallel), last is synthesis.
 			// Always return valid response so at least one agent succeeds.
 			for _, a := range args {
 				if strings.Contains(a, "Review the following") {
