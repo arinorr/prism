@@ -2,16 +2,16 @@ package agents
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm"
+	"github.com/arinorr/prism/internal/llm/llmtest"
 )
 
 func TestParseFeedback_DirectJSON(t *testing.T) {
@@ -290,7 +290,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: skillPath}}
-	orch, err := NewOrchestrator(roles, Options{}, nil)
+	orch, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 
 func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 	roles := []Role{{Name: "Bad", Slug: "bad", SkillFile: "/nonexistent/path.md"}}
-	_, err := NewOrchestrator(roles, Options{}, nil)
+	_, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing skill file")
 	}
@@ -311,7 +311,7 @@ func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 }
 
 func TestNewOrchestrator_EmptyRoles(t *testing.T) {
-	orch, err := NewOrchestrator([]Role{}, Options{}, nil)
+	orch, err := NewOrchestrator([]Role{}, Options{}, &llmtest.Mock{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestNewOrchestrator_WithLanguageModule(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, Options{}, []string{"typescript"})
+	orch, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, []string{"typescript"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestNewOrchestrator_LanguageModuleMissing(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, Options{}, []string{"rust"})
+	orch, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, []string{"rust"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -391,7 +391,7 @@ func TestNewOrchestrator_MultipleLanguages(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, Options{}, []string{"go", "typescript"})
+	orch, err := NewOrchestrator(roles, Options{}, &llmtest.Mock{}, []string{"go", "typescript"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -521,27 +521,12 @@ func TestSkill_MissingReturnsEmpty(t *testing.T) {
 	}
 }
 
-// Mock runners (updated for context parameter).
-
-func mockRunner(response string) claudeRunner {
-	return func(_ context.Context, _ ...string) ([]byte, error) {
-		return []byte(response), nil
-	}
+func mockLLM(response string) *llmtest.Mock {
+	return &llmtest.Mock{Response: response}
 }
 
-func mockRunnerJSON(findingsJSON string) claudeRunner {
-	// The claude --output-format json wraps the response in {"result": "..."}
-	// where the inner value is the raw text the model produced.
-	inner := `{"findings":[` + findingsJSON + `]}`
-	outerBytes, err := json.Marshal(struct {
-		Result string `json:"result"`
-	}{Result: inner})
-	if err != nil {
-		panic(err)
-	}
-	return func(_ context.Context, _ ...string) ([]byte, error) {
-		return outerBytes, nil
-	}
+func mockLLMFindings(findingsJSON string) *llmtest.Mock {
+	return &llmtest.Mock{Response: `{"findings":[` + findingsJSON + `]}`}
 }
 
 func TestRunAgent_Success(t *testing.T) {
@@ -549,7 +534,7 @@ func TestRunAgent_Success(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run:    mockRunnerJSON(finding),
+		llm:    mockLLMFindings(finding),
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "body", Diff: "diff"}
@@ -565,12 +550,37 @@ func TestRunAgent_Success(t *testing.T) {
 	}
 }
 
+func TestRunAgent_VerifiesRequest(t *testing.T) {
+	mock := &llmtest.Mock{Response: `{"findings":[]}`}
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "my skill content"},
+		opts:   Options{},
+		llm:    mock,
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "body", Diff: "diff"}
+	_, err := orch.runAgent(role, pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+	}
+	req := mock.Calls[0]
+	if req.SystemPrompt != "my skill content" {
+		t.Errorf("expected system prompt 'my skill content', got %q", req.SystemPrompt)
+	}
+	if !req.JSONOutput {
+		t.Error("expected JSONOutput=true for agent calls")
+	}
+}
+
 func TestRunAgent_Verbose(t *testing.T) {
 	finding := `{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}`
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{Verbose: true},
-		run:    mockRunnerJSON(finding),
+		llm:    mockLLMFindings(finding),
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -584,9 +594,7 @@ func TestRunAgent_CommandFailure(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run: func(_ context.Context, _ ...string) ([]byte, error) {
-			return nil, fmt.Errorf("command failed")
-		},
+		llm:    &llmtest.Mock{Err: fmt.Errorf("command failed")},
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -594,7 +602,7 @@ func TestRunAgent_CommandFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "claude command failed") {
+	if !strings.Contains(err.Error(), "command failed") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -603,7 +611,7 @@ func TestRunAgent_InvalidJSON(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run:    mockRunner("not json at all"),
+		llm:    mockLLM("not json at all"),
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -614,21 +622,11 @@ func TestRunAgent_InvalidJSON(t *testing.T) {
 }
 
 func TestRunAgent_WithModel(t *testing.T) {
-	var capturedArgs []string
+	mock := &llmtest.Mock{Response: `{"findings":[]}`}
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{Model: "sonnet"},
-		run: func(_ context.Context, args ...string) ([]byte, error) {
-			capturedArgs = args
-			inner := `{"findings":[]}`
-			out, marshalErr := json.Marshal(struct {
-				Result string `json:"result"`
-			}{Result: inner})
-			if marshalErr != nil {
-				return nil, marshalErr
-			}
-			return out, nil
-		},
+		llm:    mock,
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -636,16 +634,11 @@ func TestRunAgent_WithModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Check that --model sonnet is in the args.
-	found := false
-	for i, arg := range capturedArgs {
-		if arg == "--model" && i+1 < len(capturedArgs) && capturedArgs[i+1] == "sonnet" {
-			found = true
-			break
-		}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 	}
-	if !found {
-		t.Errorf("expected --model sonnet in args, got %v", capturedArgs)
+	if mock.Calls[0].Model != "sonnet" {
+		t.Errorf("expected model 'sonnet', got %q", mock.Calls[0].Model)
 	}
 }
 
@@ -655,7 +648,7 @@ func TestDispatchAgents_AllSucceed(t *testing.T) {
 		roles:  []Role{{Name: "A", Slug: "a"}, {Name: "B", Slug: "b"}},
 		skills: map[string]string{"a": "skill a", "b": "skill b"},
 		opts:   Options{},
-		run:    mockRunnerJSON(finding),
+		llm:    mockLLMFindings(finding),
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
 	feedbacks, failedAgents, err := orch.dispatchAgents(pr)
@@ -675,9 +668,7 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 		roles:  []Role{{Name: "A", Slug: "a"}},
 		skills: map[string]string{"a": "skill"},
 		opts:   Options{},
-		run: func(_ context.Context, _ ...string) ([]byte, error) {
-			return nil, fmt.Errorf("fail")
-		},
+		llm:    &llmtest.Mock{Err: fmt.Errorf("fail")},
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
 	_, failedAgents, err := orch.dispatchAgents(pr)
@@ -693,23 +684,21 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 }
 
 func TestDispatchAgents_PartialFailure(t *testing.T) {
+	// Both agents get JSONOutput=true calls, so both succeed here.
+	// The important thing is that dispatchAgents tolerates partial failure.
+	mock := &llmtest.Mock{
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
+			if req.JSONOutput {
+				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}]}`, nil
+			}
+			return "", fmt.Errorf("fail")
+		},
+	}
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Good", Slug: "good"}, {Name: "Bad", Slug: "bad"}},
 		skills: map[string]string{"good": "skill", "bad": "skill"},
 		opts:   Options{},
-		run: func(_ context.Context, args ...string) ([]byte, error) {
-			for _, arg := range args {
-				if strings.Contains(arg, "Review the following") {
-					inner := `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}]}`
-					out, marshalErr := json.Marshal(struct{ Result string }{Result: inner})
-					if marshalErr != nil {
-						return nil, marshalErr
-					}
-					return out, nil
-				}
-			}
-			return nil, fmt.Errorf("fail")
-		},
+		llm:    mock,
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
 	feedbacks, _, err := orch.dispatchAgents(pr)
@@ -723,21 +712,19 @@ func TestDispatchAgents_PartialFailure(t *testing.T) {
 
 func TestRunAgentWithRetry_SucceedsOnSecondAttempt(t *testing.T) {
 	attempt := 0
+	mock := &llmtest.Mock{
+		CompleteFunc: func(_ context.Context, _ llm.Request) (string, error) {
+			attempt++
+			if attempt == 1 {
+				return "", fmt.Errorf("transient failure")
+			}
+			return `{"findings":[]}`, nil
+		},
+	}
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{MaxRetries: 1},
-		run: func(_ context.Context, _ ...string) ([]byte, error) {
-			attempt++
-			if attempt == 1 {
-				return nil, fmt.Errorf("transient failure")
-			}
-			inner := `{"findings":[]}`
-			out, marshalErr := json.Marshal(struct{ Result string }{Result: inner})
-			if marshalErr != nil {
-				return nil, marshalErr
-			}
-			return out, nil
-		},
+		llm:    mock,
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -757,9 +744,7 @@ func TestRunAgentWithRetry_ExhaustedRetries(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{MaxRetries: 1},
-		run: func(_ context.Context, _ ...string) ([]byte, error) {
-			return nil, fmt.Errorf("persistent failure")
-		},
+		llm:    &llmtest.Mock{Err: fmt.Errorf("persistent failure")},
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -771,13 +756,16 @@ func TestRunAgentWithRetry_ExhaustedRetries(t *testing.T) {
 
 func TestRunAgentWithRetry_NoRetries(t *testing.T) {
 	attempt := 0
+	mock := &llmtest.Mock{
+		CompleteFunc: func(_ context.Context, _ llm.Request) (string, error) {
+			attempt++
+			return "", fmt.Errorf("fail")
+		},
+	}
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{MaxRetries: 0},
-		run: func(_ context.Context, _ ...string) ([]byte, error) {
-			attempt++
-			return nil, fmt.Errorf("fail")
-		},
+		llm:    mock,
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -791,17 +779,20 @@ func TestRunAgentWithRetry_NoRetries(t *testing.T) {
 }
 
 func TestRunAgent_Timeout(t *testing.T) {
+	mock := &llmtest.Mock{
+		CompleteFunc: func(ctx context.Context, _ llm.Request) (string, error) {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(5 * time.Second):
+				return "", fmt.Errorf("should not reach here")
+			}
+		},
+	}
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{AgentTimeout: 50 * time.Millisecond},
-		run: func(ctx context.Context, _ ...string) ([]byte, error) {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(5 * time.Second):
-				return nil, fmt.Errorf("should not reach here")
-			}
-		},
+		llm:    mock,
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
@@ -811,26 +802,10 @@ func TestRunAgent_Timeout(t *testing.T) {
 	}
 }
 
-func TestClaudeBaseArgs_NoModel(t *testing.T) {
-	orch := &Orchestrator{opts: Options{}}
-	args := orch.claudeBaseArgs()
-	if len(args) != 1 || args[0] != "--print" {
-		t.Errorf("expected [--print], got %v", args)
-	}
-}
-
-func TestClaudeBaseArgs_WithModel(t *testing.T) {
-	orch := &Orchestrator{opts: Options{Model: "opus"}}
-	args := orch.claudeBaseArgs()
-	if len(args) != 3 || args[1] != "--model" || args[2] != "opus" {
-		t.Errorf("expected [--print --model opus], got %v", args)
-	}
-}
-
 func TestSynthesize_Success(t *testing.T) {
 	orch := &Orchestrator{
 		opts: Options{},
-		run:  mockRunner("Overall the code looks good."),
+		llm:  mockLLM("Overall the code looks good."),
 	}
 	pr := &gh.PR{Title: "Test"}
 	feedbacks := []Feedback{
@@ -856,10 +831,30 @@ func TestSynthesize_Success(t *testing.T) {
 	}
 }
 
+func TestSynthesize_VerifiesRequest(t *testing.T) {
+	mock := &llmtest.Mock{Response: "summary"}
+	orch := &Orchestrator{opts: Options{}, llm: mock}
+	pr := &gh.PR{Title: "Test"}
+	_, err := orch.synthesize(pr, []Feedback{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+	}
+	req := mock.Calls[0]
+	if req.SystemPrompt != "" {
+		t.Errorf("synthesis should not have a system prompt, got %q", req.SystemPrompt)
+	}
+	if req.JSONOutput {
+		t.Error("synthesis should not request JSON output")
+	}
+}
+
 func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
 	orch := &Orchestrator{
 		opts: Options{},
-		run:  mockRunner("summary"),
+		llm:  mockLLM("summary"),
 	}
 	pr := &gh.PR{Title: "Test"}
 	feedbacks := []Feedback{
@@ -879,9 +874,7 @@ func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
 func TestSynthesize_CommandFailure(t *testing.T) {
 	orch := &Orchestrator{
 		opts: Options{},
-		run: func(_ context.Context, _ ...string) ([]byte, error) {
-			return nil, fmt.Errorf("synthesis error")
-		},
+		llm:  &llmtest.Mock{Err: fmt.Errorf("synthesis error")},
 	}
 	pr := &gh.PR{Title: "Test"}
 	_, err := orch.synthesize(pr, []Feedback{})
@@ -894,26 +887,23 @@ func TestSynthesize_CommandFailure(t *testing.T) {
 }
 
 func TestReview_FullPipeline(t *testing.T) {
-	innerFindings := `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`
-	agentResponse, marshalErr := json.Marshal(struct {
-		Result string `json:"result"`
-	}{Result: innerFindings})
-	if marshalErr != nil {
-		t.Fatal(marshalErr)
+	callCount := 0
+	mock := &llmtest.Mock{
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
+			callCount++
+			if req.JSONOutput {
+				// Agent call — return findings.
+				return `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`, nil
+			}
+			// Synthesis call.
+			return "Review complete.", nil
+		},
 	}
-
-	var callCount atomic.Int32
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Test", Slug: "test"}},
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run: func(_ context.Context, _ ...string) ([]byte, error) {
-			n := callCount.Add(1)
-			if n <= 1 {
-				return agentResponse, nil
-			}
-			return []byte("Review complete."), nil
-		},
+		llm:    mock,
 	}
 	pr := &gh.PR{Number: "1", Title: "Test", Body: "b", Diff: "d"}
 	result, err := orch.Review(pr)
@@ -929,27 +919,25 @@ func TestReview_FullPipeline(t *testing.T) {
 	if len(result.FailedAgents) != 0 {
 		t.Errorf("expected no failed agents, got %v", result.FailedAgents)
 	}
+	if callCount != 2 {
+		t.Errorf("expected 2 LLM calls (1 agent + 1 synthesis), got %d", callCount)
+	}
 }
 
 func TestReview_FailedAgentsTracked(t *testing.T) {
+	mock := &llmtest.Mock{
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
+			if req.JSONOutput {
+				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"ok","detail":"d"}]}`, nil
+			}
+			return "Summary", nil
+		},
+	}
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Good", Slug: "good"}, {Name: "Bad", Slug: "bad"}},
 		skills: map[string]string{"good": "skill", "bad": "skill"},
 		opts:   Options{},
-		run: func(_ context.Context, args ...string) ([]byte, error) {
-			// Always return valid response so at least one agent succeeds.
-			for _, a := range args {
-				if strings.Contains(a, "Review the following") {
-					inner := `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"ok","detail":"d"}]}`
-					out, marshalErr := json.Marshal(struct{ Result string }{Result: inner})
-					if marshalErr != nil {
-						return nil, marshalErr
-					}
-					return out, nil
-				}
-			}
-			return []byte("Summary"), nil
-		},
+		llm:    mock,
 	}
 	pr := &gh.PR{Number: "1", Title: "Test", Body: "b", Diff: "d"}
 	result, err := orch.Review(pr)

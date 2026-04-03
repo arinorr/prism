@@ -446,6 +446,59 @@ func TestHTML_FailedAgents(t *testing.T) {
 	}
 }
 
+func TestHTML_DedupedFindings(t *testing.T) {
+	d := dedupedTestData()
+	output, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "vote-count") {
+		t.Error("HTML should contain vote-count class for deduped findings")
+	}
+	if !strings.Contains(output, "5/7") {
+		t.Error("HTML should contain vote count '5/7' for deduped findings")
+	}
+	// Deduped findings should NOT render agent-badge spans in findings (CSS definition is fine).
+	if strings.Contains(output, `<span class="agent-badge`) {
+		t.Error("HTML with deduped findings should use vote-count instead of agent-badge spans")
+	}
+}
+
+func TestHTML_DedupedFindingsPreferredOverRaw(t *testing.T) {
+	// When both Findings and DedupedFindings are present, deduped should win.
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "Test.",
+			Findings: []agents.Finding{
+				{File: "a.go", Line: 10, Severity: "warning", Summary: "raw finding", Role: "solver"},
+			},
+			DedupedFindings: []agents.DedupedFinding{
+				{
+					Finding:     agents.Finding{File: "a.go", Line: 10, Severity: "warning", Summary: "deduped finding"},
+					VoteCount:   3,
+					TotalAgents: 5,
+					Voters:      []string{"solver", "architect", "sentinel"},
+				},
+			},
+		},
+		Roles: []string{"Test"},
+	}
+	output, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "deduped finding") {
+		t.Error("HTML should show deduped finding when both are present")
+	}
+	if strings.Contains(output, "raw finding") {
+		t.Error("HTML should not show raw finding when deduped findings are present")
+	}
+	if !strings.Contains(output, "3/5") {
+		t.Error("HTML should show vote count 3/5")
+	}
+}
+
 func TestJSON_DedupedFindings(t *testing.T) {
 	d := dedupedTestData()
 	output, err := JSON(d)

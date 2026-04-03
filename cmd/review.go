@@ -12,6 +12,7 @@ import (
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/config"
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm/claude"
 	"github.com/arinorr/prism/internal/report"
 	"github.com/arinorr/prism/internal/sizecheck"
 )
@@ -45,66 +46,62 @@ type reviewOptions struct {
 	configPath  string
 }
 
+// parseStringFlag checks whether args[*i] matches --flag or --flag=value.
+// For --flag value it advances *i and returns (value, true).
+// For --flag=value it returns (value, true) without advancing.
+// Otherwise it returns ("", false).
+func parseStringFlag(args []string, i *int, flag string) (string, bool) {
+	if args[*i] == flag && *i+1 < len(args) {
+		*i++
+		return args[*i], true
+	}
+	if strings.HasPrefix(args[*i], flag+"=") {
+		return strings.TrimPrefix(args[*i], flag+"="), true
+	}
+	return "", false
+}
+
 // parseReviewArgs parses the CLI arguments for the review command.
 func parseReviewArgs(args []string) (*reviewOptions, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("usage: prism review <pr-number|pr-url>")
 	}
 
-	opts := &reviewOptions{configPath: ".prism.yml"}
+	opts := &reviewOptions{configPath: ".prism.yml", retriesFlag: -1}
 
 	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--comment":
+		switch args[i] {
+		case "--comment":
 			opts.comment = true
-		case args[i] == "--verbose" || args[i] == "-v":
+		case "--verbose", "-v":
 			opts.verbose = true
-		case args[i] == "--dry-run":
+		case "--dry-run":
 			opts.dryRun = true
-		case args[i] == "--yes" || args[i] == "-y":
+		case "--yes", "-y":
 			opts.yes = true
-		case args[i] == "--stdout":
+		case "--stdout":
 			opts.toStdout = true
-		case args[i] == "--roles" && i+1 < len(args):
-			i++
-			opts.rolesFlag = args[i]
-		case strings.HasPrefix(args[i], "--roles="):
-			opts.rolesFlag = strings.TrimPrefix(args[i], "--roles=")
-		case args[i] == "--format" && i+1 < len(args):
-			i++
-			opts.formatFlag = args[i]
-		case strings.HasPrefix(args[i], "--format="):
-			opts.formatFlag = strings.TrimPrefix(args[i], "--format=")
-		case args[i] == "--model" && i+1 < len(args):
-			i++
-			opts.modelFlag = args[i]
-		case strings.HasPrefix(args[i], "--model="):
-			opts.modelFlag = strings.TrimPrefix(args[i], "--model=")
-		case args[i] == "--timeout" && i+1 < len(args):
-			i++
-			opts.timeoutFlag = args[i]
-		case strings.HasPrefix(args[i], "--timeout="):
-			opts.timeoutFlag = strings.TrimPrefix(args[i], "--timeout=")
-		case args[i] == "--max-retries" && i+1 < len(args):
-			i++
-			var n int
-			if _, scanErr := fmt.Sscanf(args[i], "%d", &n); scanErr == nil {
-				opts.retriesFlag = n
-			}
-		case strings.HasPrefix(args[i], "--max-retries="):
-			var n int
-			if _, scanErr := fmt.Sscanf(strings.TrimPrefix(args[i], "--max-retries="), "%d", &n); scanErr == nil {
-				opts.retriesFlag = n
-			}
-		case args[i] == "--config" && i+1 < len(args):
-			i++
-			opts.configPath = args[i]
-		case strings.HasPrefix(args[i], "--config="):
-			opts.configPath = strings.TrimPrefix(args[i], "--config=")
-		case !strings.HasPrefix(args[i], "-"):
-			opts.prRef = args[i]
 		default:
-			return nil, fmt.Errorf("unknown flag: %s", args[i])
+			if v, ok := parseStringFlag(args, &i, "--roles"); ok {
+				opts.rolesFlag = v
+			} else if v, ok := parseStringFlag(args, &i, "--format"); ok {
+				opts.formatFlag = v
+			} else if v, ok := parseStringFlag(args, &i, "--model"); ok {
+				opts.modelFlag = v
+			} else if v, ok := parseStringFlag(args, &i, "--timeout"); ok {
+				opts.timeoutFlag = v
+			} else if v, ok := parseStringFlag(args, &i, "--max-retries"); ok {
+				var n int
+				if _, scanErr := fmt.Sscanf(v, "%d", &n); scanErr == nil {
+					opts.retriesFlag = n
+				}
+			} else if v, ok := parseStringFlag(args, &i, "--config"); ok {
+				opts.configPath = v
+			} else if !strings.HasPrefix(args[i], "-") {
+				opts.prRef = args[i]
+			} else {
+				return nil, fmt.Errorf("unknown flag: %s", args[i])
+			}
 		}
 	}
 
@@ -115,22 +112,19 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 	return opts, nil
 }
 
-func runReview(args []string) error {
-	opts, err := parseReviewArgs(args)
-	if err != nil {
-		return err
-	}
-
-	// Load and merge config: defaults < .prism.yml < CLI flags.
+// loadAndMergeConfig loads configuration from file and merges with CLI flags.
+func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 	fileCfg, cfgErr := config.Load(opts.configPath)
 	if cfgErr != nil {
-		return fmt.Errorf("failed to load config: %w", cfgErr)
+		return config.Config{}, fmt.Errorf("failed to load config: %w", cfgErr)
 	}
 	cliCfg := config.Config{
 		Model:        opts.modelFlag,
 		Format:       opts.formatFlag,
 		AgentTimeout: opts.timeoutFlag,
-		MaxRetries:   opts.retriesFlag,
+	}
+	if opts.retriesFlag >= 0 {
+		cliCfg.MaxRetries = config.IntPtr(opts.retriesFlag)
 	}
 	if opts.rolesFlag != "" {
 		cliCfg.Roles = strings.Split(opts.rolesFlag, ",")
@@ -139,27 +133,27 @@ func runReview(args []string) error {
 		}
 	}
 	def := config.Default()
-	merged := config.Merge(&def, &fileCfg, &cliCfg)
+	return config.Merge(&def, &fileCfg, &cliCfg), nil
+}
 
-	// Determine which roles to use.
-	roles := agents.AllRoles
+// resolveRoles determines which agent roles to use from the merged config.
+func resolveRoles(merged *config.Config) ([]agents.Role, error) {
 	if len(merged.Roles) > 0 {
-		var parseErr error
-		roles, parseErr = agents.ParseRoles(strings.Join(merged.Roles, ","))
-		if parseErr != nil {
-			return parseErr
-		}
+		return agents.ParseRoles(strings.Join(merged.Roles, ","))
 	}
+	return agents.AllRoles, nil
+}
 
-	// Fetch PR diff.
+// fetchAndCheckPR fetches the PR diff and checks its size, prompting for confirmation if large.
+func fetchAndCheckPR(opts *reviewOptions, merged *config.Config) (*gh.PR, prClient, error) {
 	client, err := newGHClient()
 	if err != nil {
-		return fmt.Errorf("failed to initialize GitHub client: %w", err)
+		return nil, nil, fmt.Errorf("failed to initialize GitHub client: %w", err)
 	}
 
 	pr, err := client.GetPRDiff(opts.prRef)
 	if err != nil {
-		return fmt.Errorf("failed to get PR diff: %w", err)
+		return nil, nil, fmt.Errorf("failed to get PR diff: %w", err)
 	}
 
 	// Check diff size and prompt for confirmation if large.
@@ -172,9 +166,33 @@ func runReview(args []string) error {
 			scanner.Scan()
 			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
 			if answer != "y" && answer != "yes" {
-				return fmt.Errorf("review canceled — diff too large")
+				return nil, nil, fmt.Errorf("review canceled — diff too large")
 			}
 		}
+	}
+
+	return pr, client, nil
+}
+
+func runReview(args []string) error {
+	opts, err := parseReviewArgs(args)
+	if err != nil {
+		return err
+	}
+
+	merged, err := loadAndMergeConfig(opts)
+	if err != nil {
+		return err
+	}
+
+	roles, err := resolveRoles(&merged)
+	if err != nil {
+		return err
+	}
+
+	pr, client, err := fetchAndCheckPR(opts, &merged)
+	if err != nil {
+		return err
 	}
 
 	// Detect languages for skill module loading.
@@ -188,13 +206,14 @@ func runReview(args []string) error {
 	fmt.Println()
 
 	// Dispatch agents.
+	llmBackend := claude.New()
 	orchestrator, orchErr := agents.NewOrchestrator(roles, agents.Options{
 		Verbose:      opts.verbose,
 		DryRun:       opts.dryRun,
 		Model:        merged.Model,
 		AgentTimeout: merged.TimeoutDuration(),
-		MaxRetries:   merged.MaxRetries,
-	}, languages)
+		MaxRetries:   merged.MaxRetriesVal(),
+	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
 	}
