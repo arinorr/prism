@@ -287,7 +287,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: skillPath}}
-	orch, err := NewOrchestrator(roles, Options{})
+	orch, err := NewOrchestrator(roles, Options{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 
 func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 	roles := []Role{{Name: "Bad", Slug: "bad", SkillFile: "/nonexistent/path.md"}}
-	_, err := NewOrchestrator(roles, Options{})
+	_, err := NewOrchestrator(roles, Options{}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing skill file")
 	}
@@ -308,7 +308,7 @@ func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 }
 
 func TestNewOrchestrator_EmptyRoles(t *testing.T) {
-	orch, err := NewOrchestrator([]Role{}, Options{})
+	orch, err := NewOrchestrator([]Role{}, Options{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -608,6 +608,88 @@ func TestSynthesize_CommandFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "synthesis failed") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestNewOrchestrator_WithLanguageModule(t *testing.T) {
+	dir := t.TempDir()
+	// Create base skill.
+	basePath := filepath.Join(dir, "skills", "test.md")
+	if err := os.MkdirAll(filepath.Dir(basePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(basePath, []byte("base skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create language module.
+	langDir := filepath.Join(dir, "skills", "test")
+	if err := os.MkdirAll(langDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "typescript.md"), []byte("typescript module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
+	orch, err := NewOrchestrator(roles, Options{}, []string{"typescript"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := orch.skill(roles[0])
+	if got != "base skill\n\ntypescript module" {
+		t.Errorf("expected concatenated skill, got %q", got)
+	}
+}
+
+func TestNewOrchestrator_LanguageModuleMissing(t *testing.T) {
+	dir := t.TempDir()
+	basePath := filepath.Join(dir, "test.md")
+	if err := os.WriteFile(basePath, []byte("base skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
+	orch, err := NewOrchestrator(roles, Options{}, []string{"rust"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should gracefully skip missing module and return only the base.
+	if got := orch.skill(roles[0]); got != "base skill" {
+		t.Errorf("expected base skill only, got %q", got)
+	}
+}
+
+func TestNewOrchestrator_MultipleLanguages(t *testing.T) {
+	dir := t.TempDir()
+	// Create base skill.
+	basePath := filepath.Join(dir, "skills", "review.md")
+	if err := os.MkdirAll(filepath.Dir(basePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(basePath, []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create two language modules.
+	langDir := filepath.Join(dir, "skills", "review")
+	if err := os.MkdirAll(langDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "go.md"), []byte("go module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "typescript.md"), []byte("ts module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
+	orch, err := NewOrchestrator(roles, Options{}, []string{"go", "typescript"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := orch.skill(roles[0])
+	want := "base\n\ngo module\n\nts module"
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
 	}
 }
 

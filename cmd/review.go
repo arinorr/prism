@@ -95,14 +95,21 @@ func runReview(args []string) error {
 		return fmt.Errorf("failed to get PR diff: %w", err)
 	}
 
+	// Detect languages for skill module loading.
+	languages := agents.DetectLanguages(pr.Files)
+
 	fmt.Printf("🔍 Reviewing PR #%s: %s\n", pr.Number, pr.Title)
-	fmt.Printf("   %d files changed\n\n", len(pr.Files))
+	fmt.Printf("   %d files changed\n", len(pr.Files))
+	if len(languages) > 0 {
+		fmt.Printf("   Languages: %s\n", strings.Join(languages, ", "))
+	}
+	fmt.Println()
 
 	// Dispatch agents.
 	orchestrator, orchErr := agents.NewOrchestrator(roles, agents.Options{
 		Verbose: opts.verbose,
 		DryRun:  opts.dryRun,
-	})
+	}, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
 	}

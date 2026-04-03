@@ -62,7 +62,9 @@ type Orchestrator struct {
 
 // NewOrchestrator creates a new orchestrator with the given roles.
 // All skill files are loaded eagerly so the map is immutable during review.
-func NewOrchestrator(roles []Role, opts Options) (*Orchestrator, error) {
+// Language-specific modules (e.g. skills/know-it-all/typescript.md) are
+// appended to the base skill when the corresponding language is detected.
+func NewOrchestrator(roles []Role, opts Options, languages []string) (*Orchestrator, error) {
 	exeDir := ""
 	if exePath, err := os.Executable(); err == nil {
 		exeDir = filepath.Dir(exePath)
@@ -74,7 +76,19 @@ func NewOrchestrator(roles []Role, opts Options) (*Orchestrator, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to load skill for %s: %w", r.Name, err)
 		}
-		skills[r.Slug] = string(data)
+		combined := string(data)
+
+		// Append language-specific modules if they exist.
+		for _, lang := range languages {
+			langPath := languageSkillPath(r.SkillFile, lang)
+			langData, langErr := readSkillFile(langPath, exeDir) // #nosec G304 -- paths derived from compile-time constants in roles.go + detected language strings
+			if langErr != nil {
+				continue // Module doesn't exist for this role+language — that's fine.
+			}
+			combined += "\n\n" + string(langData)
+		}
+
+		skills[r.Slug] = combined
 	}
 
 	return &Orchestrator{
