@@ -2,6 +2,7 @@ package agents
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -128,7 +129,6 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 	fmt.Printf("\nSample prompt (for %s):\n", o.roles[0].Name)
 	fmt.Println("───────────────────────────────────────")
 	prompt := buildAgentPrompt(o.roles[0], pr)
-	const previewMaxBytes = 500
 	if len(prompt) > previewMaxBytes {
 		fmt.Printf("%s\n... (%d bytes total)\n", truncateUTF8(prompt, previewMaxBytes), len(prompt))
 	} else {
@@ -180,7 +180,7 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 	fmt.Println()
 
 	if len(feedbacks) == 0 {
-		return nil, fmt.Errorf("all agents failed")
+		return nil, fmt.Errorf("all agents failed: %w", errors.Join(errs...))
 	}
 
 	return feedbacks, nil
