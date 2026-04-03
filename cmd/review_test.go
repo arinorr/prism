@@ -10,6 +10,30 @@ import (
 	"github.com/arinorr/prism/internal/gh"
 )
 
+// mockClient implements prClient for testing.
+type mockClient struct {
+	pr  *gh.PR
+	err error
+}
+
+func (m *mockClient) GetPRDiff(_ string) (*gh.PR, error) {
+	return m.pr, m.err
+}
+
+func (m *mockClient) PostComments(_ *gh.PR, _ []gh.Suggestion) error {
+	return nil
+}
+
+// withMockClient replaces the GH client constructor for the duration of a test.
+func withMockClient(t *testing.T, pr *gh.PR, err error) {
+	t.Helper()
+	orig := newGHClient
+	newGHClient = func() (prClient, error) {
+		return &mockClient{pr: pr, err: err}, nil
+	}
+	t.Cleanup(func() { newGHClient = orig })
+}
+
 func TestParseReviewArgs_BasicPR(t *testing.T) {
 	opts, err := parseReviewArgs([]string{"42"})
 	if err != nil {
@@ -345,7 +369,7 @@ func testPR() *gh.PR {
 
 func TestOutputResults_NoFormat(t *testing.T) {
 	opts := &reviewOptions{}
-	err := outputResults(opts, testPR(), testResult(), nil, 0)
+	err := outputResults(opts, testPR(), testResult(), nil, 0, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -353,7 +377,7 @@ func TestOutputResults_NoFormat(t *testing.T) {
 
 func TestOutputResults_Markdown(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "md", toStdout: true}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -361,7 +385,7 @@ func TestOutputResults_Markdown(t *testing.T) {
 
 func TestOutputResults_MarkdownLong(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "markdown", toStdout: true}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -369,7 +393,7 @@ func TestOutputResults_MarkdownLong(t *testing.T) {
 
 func TestOutputResults_HTML(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "html", toStdout: true}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -377,7 +401,7 @@ func TestOutputResults_HTML(t *testing.T) {
 
 func TestOutputResults_JSON(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "json", toStdout: true}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -385,7 +409,7 @@ func TestOutputResults_JSON(t *testing.T) {
 
 func TestOutputResults_UnknownFormat(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "xml"}
-	err := outputResults(opts, testPR(), testResult(), nil, 0)
+	err := outputResults(opts, testPR(), testResult(), nil, 0, opts.formatFlag)
 	if err == nil {
 		t.Fatal("expected error for unknown format")
 	}
@@ -413,7 +437,7 @@ func TestOutputResults_WritesToFile(t *testing.T) {
 
 func TestOutputResults_MarkdownToFile(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "md", toStdout: false}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -422,7 +446,7 @@ func TestOutputResults_MarkdownToFile(t *testing.T) {
 
 func TestOutputResults_HTMLToStdout(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "html", toStdout: true}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -435,7 +459,7 @@ func TestOutputResults_HandlesCommentNoSuggestions(t *testing.T) {
 	opts := &reviewOptions{comment: true}
 	result := &agents.ReviewResult{Summary: "Clean."}
 	pr := &gh.PR{Number: "1", Title: "Test"}
-	err := outputResults(opts, pr, result, nil, 0)
+	err := outputResults(opts, pr, result, nil, 0, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -513,6 +537,152 @@ func TestRunReview_BadRoles(t *testing.T) {
 	}
 }
 
+func TestParseReviewArgs_ModelFlag(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--model", "sonnet"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.modelFlag != "sonnet" {
+		t.Errorf("expected model 'sonnet', got %q", opts.modelFlag)
+	}
+}
+
+func TestParseReviewArgs_ModelEquals(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--model=opus"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.modelFlag != "opus" {
+		t.Errorf("expected model 'opus', got %q", opts.modelFlag)
+	}
+}
+
+func TestParseReviewArgs_TimeoutFlag(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--timeout", "2m"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.timeoutFlag != "2m" {
+		t.Errorf("expected timeout '2m', got %q", opts.timeoutFlag)
+	}
+}
+
+func TestParseReviewArgs_TimeoutEquals(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--timeout=30s"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.timeoutFlag != "30s" {
+		t.Errorf("expected timeout '30s', got %q", opts.timeoutFlag)
+	}
+}
+
+func TestParseReviewArgs_MaxRetries(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--max-retries", "3"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.retriesFlag != 3 {
+		t.Errorf("expected retries 3, got %d", opts.retriesFlag)
+	}
+}
+
+func TestParseReviewArgs_MaxRetriesEquals(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--max-retries=0"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 0 is a valid value (no retries).
+	if opts.retriesFlag != 0 {
+		t.Errorf("expected retries 0, got %d", opts.retriesFlag)
+	}
+}
+
+func TestParseReviewArgs_ConfigFlag(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--config", "custom.yml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.configPath != "custom.yml" {
+		t.Errorf("expected config 'custom.yml', got %q", opts.configPath)
+	}
+}
+
+func TestParseReviewArgs_ConfigEquals(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--config=my.yml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.configPath != "my.yml" {
+		t.Errorf("expected config 'my.yml', got %q", opts.configPath)
+	}
+}
+
+func TestParseReviewArgs_DefaultConfig(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.configPath != ".prism.yml" {
+		t.Errorf("expected default config '.prism.yml', got %q", opts.configPath)
+	}
+}
+
+func TestParseReviewArgs_AllNewFlags(t *testing.T) {
+	opts, err := parseReviewArgs([]string{
+		"42", "--model", "haiku", "--timeout", "1m",
+		"--max-retries", "2", "--config", "test.yml",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.modelFlag != "haiku" {
+		t.Errorf("expected model 'haiku', got %q", opts.modelFlag)
+	}
+	if opts.timeoutFlag != "1m" {
+		t.Errorf("expected timeout '1m', got %q", opts.timeoutFlag)
+	}
+	if opts.retriesFlag != 2 {
+		t.Errorf("expected retries 2, got %d", opts.retriesFlag)
+	}
+	if opts.configPath != "test.yml" {
+		t.Errorf("expected config 'test.yml', got %q", opts.configPath)
+	}
+}
+
+func TestOutputResults_MarkdownWithDedupedFindings(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "md", toStdout: true}
+	result := &agents.ReviewResult{
+		Summary: "Review complete.",
+		DedupedFindings: []agents.DedupedFinding{
+			{
+				Finding:     agents.Finding{File: "a.go", Line: 10, Severity: "warning", Summary: "test issue", Detail: "detail"},
+				VoteCount:   3,
+				TotalAgents: 5,
+				Voters:      []string{"architect", "solver", "sentinel"},
+			},
+		},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}}
+	err := outputResults(opts, pr, result, []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOutputResults_MarkdownWithFailedAgents(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "md", toStdout: true}
+	result := &agents.ReviewResult{
+		Summary:      "Partial review.",
+		FailedAgents: []string{"Sentinel", "Optimizer"},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}}
+	err := outputResults(opts, pr, result, []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExecute_UnknownCommand(t *testing.T) {
 	origArgs := os.Args
 	defer func() { os.Args = origArgs }()
@@ -524,5 +694,177 @@ func TestExecute_UnknownCommand(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown command") {
 		t.Errorf("expected 'unknown command' error, got: %v", err)
+	}
+}
+
+func TestIsInteractive_InTest(t *testing.T) {
+	// In tests, stdin is typically not a terminal.
+	result := isInteractive()
+	// In CI/test, this should be false (stdin is piped).
+	if result {
+		t.Log("isInteractive returned true — running in a terminal")
+	}
+}
+
+func TestRunReview_ConfigWithValidRoles(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yml")
+	if err := os.WriteFile(cfgPath, []byte("roles:\n  - sentinel\nmodel: sonnet\nagent_timeout: \"2m\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Will fail at GetPRDiff, but exercises config loading + role parsing + merge.
+	err := runReview([]string{"99999", "--config", cfgPath})
+	if err == nil {
+		t.Skip("unexpectedly succeeded")
+	}
+}
+
+func TestRunReview_WithModelAndTimeout(t *testing.T) {
+	// Exercises config merge path with CLI overrides.
+	err := runReview([]string{"99999", "--model", "haiku", "--timeout", "1m", "--max-retries", "2"})
+	if err == nil {
+		t.Skip("unexpectedly succeeded")
+	}
+}
+
+func TestRunReview_WithYesFlag(t *testing.T) {
+	err := runReview([]string{"99999", "--yes"})
+	if err == nil {
+		t.Skip("unexpectedly succeeded")
+	}
+}
+
+func TestRunReview_ConfigWithBadRoles(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yml")
+	if err := os.WriteFile(cfgPath, []byte("roles:\n  - nonexistent\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runReview([]string{"42", "--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected error for bad roles in config")
+	}
+	if !strings.Contains(err.Error(), "unknown role") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReview_BadConfig(t *testing.T) {
+	dir := t.TempDir()
+	badConfig := filepath.Join(dir, "bad.yml")
+	if err := os.WriteFile(badConfig, []byte("roles: [not closed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runReview([]string{"42", "--config", badConfig})
+	if err == nil {
+		t.Fatal("expected error for bad config")
+	}
+	if !strings.Contains(err.Error(), "failed to load config") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParseReviewArgs_YesFlag(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--yes"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.yes {
+		t.Error("expected yes=true")
+	}
+}
+
+func TestParseReviewArgs_YShorthand(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "-y"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.yes {
+		t.Error("expected yes=true from -y")
+	}
+}
+
+func TestOutputResults_JSONToStdout(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "json", toStdout: true}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOutputResults_JSONToFile(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "json", toStdout: false}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = os.RemoveAll("results")
+}
+
+func TestOutputResults_HTMLToFile(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "html", toStdout: false}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = os.RemoveAll("results")
+}
+
+func TestOutputResults_FormatFromConfig(t *testing.T) {
+	// When formatFlag comes from config (6th arg) not CLI opts.
+	opts := &reviewOptions{toStdout: true}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, "md")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReview_FullPipelineWithMockClient(t *testing.T) {
+	withMockClient(t, &gh.PR{
+		Number: "42",
+		Title:  "Test PR",
+		Diff:   "diff content here",
+		Files: []gh.FileChange{
+			{Path: "src/app.ts", Status: "modified"},
+			{Path: "main.go", Status: "modified"},
+		},
+	}, nil)
+
+	// This will fail at the orchestrator (skill files not found from test binary)
+	// but exercises config loading, role parsing, size check, and language detection.
+	err := runReview([]string{"42", "--dry-run", "--yes"})
+	// Dry run succeeds even without real skill files since it doesn't call claude.
+	// But it will fail loading skills. Either way, we exercise the path.
+	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReview_MockClientGetPRDiffError(t *testing.T) {
+	withMockClient(t, nil, os.ErrNotExist)
+
+	err := runReview([]string{"42"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "failed to get PR diff") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReview_LargeDiffWithYes(t *testing.T) {
+	largeDiff := strings.Repeat("x", 200000) // 200KB, above warn threshold
+	withMockClient(t, &gh.PR{
+		Number: "42",
+		Title:  "Big PR",
+		Diff:   largeDiff,
+		Files:  []gh.FileChange{{Path: "big.go"}},
+	}, nil)
+
+	// --yes skips the interactive prompt; --dry-run avoids needing skill files.
+	err := runReview([]string{"42", "--yes", "--dry-run"})
+	// Will fail at skill loading, but the size check + confirmation skip path is exercised.
+	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

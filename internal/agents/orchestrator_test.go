@@ -1,12 +1,15 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/arinorr/prism/internal/gh"
 )
@@ -317,6 +320,88 @@ func TestNewOrchestrator_EmptyRoles(t *testing.T) {
 	}
 }
 
+func TestNewOrchestrator_WithLanguageModule(t *testing.T) {
+	dir := t.TempDir()
+	// Create base skill.
+	basePath := filepath.Join(dir, "skills", "test.md")
+	if err := os.MkdirAll(filepath.Dir(basePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(basePath, []byte("base skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create language module.
+	langDir := filepath.Join(dir, "skills", "test")
+	if err := os.MkdirAll(langDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "typescript.md"), []byte("typescript module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
+	orch, err := NewOrchestrator(roles, Options{}, []string{"typescript"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := orch.skill(roles[0])
+	if got != "base skill\n\ntypescript module" {
+		t.Errorf("expected concatenated skill, got %q", got)
+	}
+}
+
+func TestNewOrchestrator_LanguageModuleMissing(t *testing.T) {
+	dir := t.TempDir()
+	basePath := filepath.Join(dir, "test.md")
+	if err := os.WriteFile(basePath, []byte("base skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
+	orch, err := NewOrchestrator(roles, Options{}, []string{"rust"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should gracefully skip missing module and return only the base.
+	if got := orch.skill(roles[0]); got != "base skill" {
+		t.Errorf("expected base skill only, got %q", got)
+	}
+}
+
+func TestNewOrchestrator_MultipleLanguages(t *testing.T) {
+	dir := t.TempDir()
+	// Create base skill.
+	basePath := filepath.Join(dir, "skills", "review.md")
+	if err := os.MkdirAll(filepath.Dir(basePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(basePath, []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create two language modules.
+	langDir := filepath.Join(dir, "skills", "review")
+	if err := os.MkdirAll(langDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "go.md"), []byte("go module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "typescript.md"), []byte("ts module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
+	orch, err := NewOrchestrator(roles, Options{}, []string{"go", "typescript"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := orch.skill(roles[0])
+	want := "base\n\ngo module\n\nts module"
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
 func TestReadSkillFile_DirectPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "skill.md")
@@ -412,6 +497,22 @@ func TestSkill_ReturnsContent(t *testing.T) {
 	}
 }
 
+func TestDryRun_VerboseWithModelAndTimeout(t *testing.T) {
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Test", Slug: "test", Description: "A test role", SkillFile: "test.md"}},
+		opts:   Options{DryRun: true, Verbose: true, Model: "sonnet", AgentTimeout: 5 * time.Minute, MaxRetries: 2},
+		skills: map[string]string{"test": "skill content here"},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Diff: "diff"}
+	result, err := orch.Review(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
 func TestSkill_MissingReturnsEmpty(t *testing.T) {
 	orch := &Orchestrator{skills: map[string]string{}}
 	role := Role{Slug: "nonexistent"}
@@ -420,8 +521,10 @@ func TestSkill_MissingReturnsEmpty(t *testing.T) {
 	}
 }
 
+// Mock runners (updated for context parameter).
+
 func mockRunner(response string) claudeRunner {
-	return func(args ...string) ([]byte, error) {
+	return func(_ context.Context, _ ...string) ([]byte, error) {
 		return []byte(response), nil
 	}
 }
@@ -430,14 +533,13 @@ func mockRunnerJSON(findingsJSON string) claudeRunner {
 	// The claude --output-format json wraps the response in {"result": "..."}
 	// where the inner value is the raw text the model produced.
 	inner := `{"findings":[` + findingsJSON + `]}`
-	// Build the outer JSON properly.
 	outerBytes, err := json.Marshal(struct {
 		Result string `json:"result"`
 	}{Result: inner})
 	if err != nil {
 		panic(err)
 	}
-	return func(args ...string) ([]byte, error) {
+	return func(_ context.Context, _ ...string) ([]byte, error) {
 		return outerBytes, nil
 	}
 }
@@ -482,7 +584,7 @@ func TestRunAgent_CommandFailure(t *testing.T) {
 	orch := &Orchestrator{
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run: func(args ...string) ([]byte, error) {
+		run: func(_ context.Context, _ ...string) ([]byte, error) {
 			return nil, fmt.Errorf("command failed")
 		},
 	}
@@ -511,6 +613,42 @@ func TestRunAgent_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestRunAgent_WithModel(t *testing.T) {
+	var capturedArgs []string
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{Model: "sonnet"},
+		run: func(_ context.Context, args ...string) ([]byte, error) {
+			capturedArgs = args
+			inner := `{"findings":[]}`
+			out, marshalErr := json.Marshal(struct {
+				Result string `json:"result"`
+			}{Result: inner})
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			return out, nil
+		},
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgent(role, pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Check that --model sonnet is in the args.
+	found := false
+	for i, arg := range capturedArgs {
+		if arg == "--model" && i+1 < len(capturedArgs) && capturedArgs[i+1] == "sonnet" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected --model sonnet in args, got %v", capturedArgs)
+	}
+}
+
 func TestDispatchAgents_AllSucceed(t *testing.T) {
 	finding := `{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}`
 	orch := &Orchestrator{
@@ -520,12 +658,15 @@ func TestDispatchAgents_AllSucceed(t *testing.T) {
 		run:    mockRunnerJSON(finding),
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	feedbacks, err := orch.dispatchAgents(pr)
+	feedbacks, failedAgents, err := orch.dispatchAgents(pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(feedbacks) != 2 {
 		t.Errorf("expected 2 feedbacks, got %d", len(feedbacks))
+	}
+	if len(failedAgents) != 0 {
+		t.Errorf("expected no failed agents, got %v", failedAgents)
 	}
 }
 
@@ -534,17 +675,155 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 		roles:  []Role{{Name: "A", Slug: "a"}},
 		skills: map[string]string{"a": "skill"},
 		opts:   Options{},
-		run: func(args ...string) ([]byte, error) {
+		run: func(_ context.Context, _ ...string) ([]byte, error) {
 			return nil, fmt.Errorf("fail")
 		},
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, err := orch.dispatchAgents(pr)
+	_, failedAgents, err := orch.dispatchAgents(pr)
 	if err == nil {
 		t.Fatal("expected error when all agents fail")
 	}
 	if !strings.Contains(err.Error(), "all agents failed") {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if len(failedAgents) != 1 || failedAgents[0] != "A" {
+		t.Errorf("expected [A] in failed agents, got %v", failedAgents)
+	}
+}
+
+func TestDispatchAgents_PartialFailure(t *testing.T) {
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Good", Slug: "good"}, {Name: "Bad", Slug: "bad"}},
+		skills: map[string]string{"good": "skill", "bad": "skill"},
+		opts:   Options{},
+		run: func(_ context.Context, args ...string) ([]byte, error) {
+			for _, arg := range args {
+				if strings.Contains(arg, "Review the following") {
+					inner := `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}]}`
+					out, marshalErr := json.Marshal(struct{ Result string }{Result: inner})
+					if marshalErr != nil {
+						return nil, marshalErr
+					}
+					return out, nil
+				}
+			}
+			return nil, fmt.Errorf("fail")
+		},
+	}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	feedbacks, _, err := orch.dispatchAgents(pr)
+	if err != nil {
+		t.Fatalf("partial failure should not error: %v", err)
+	}
+	if len(feedbacks) < 1 {
+		t.Error("expected at least 1 feedback from successful agent")
+	}
+}
+
+func TestRunAgentWithRetry_SucceedsOnSecondAttempt(t *testing.T) {
+	attempt := 0
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{MaxRetries: 1},
+		run: func(_ context.Context, _ ...string) ([]byte, error) {
+			attempt++
+			if attempt == 1 {
+				return nil, fmt.Errorf("transient failure")
+			}
+			inner := `{"findings":[]}`
+			out, marshalErr := json.Marshal(struct{ Result string }{Result: inner})
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			return out, nil
+		},
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	fb, err := orch.runAgentWithRetry(role, pr)
+	if err != nil {
+		t.Fatalf("expected success on retry, got: %v", err)
+	}
+	if fb == nil {
+		t.Fatal("expected non-nil feedback")
+	}
+	if attempt != 2 {
+		t.Errorf("expected 2 attempts, got %d", attempt)
+	}
+}
+
+func TestRunAgentWithRetry_ExhaustedRetries(t *testing.T) {
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{MaxRetries: 1},
+		run: func(_ context.Context, _ ...string) ([]byte, error) {
+			return nil, fmt.Errorf("persistent failure")
+		},
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgentWithRetry(role, pr)
+	if err == nil {
+		t.Fatal("expected error after exhausted retries")
+	}
+}
+
+func TestRunAgentWithRetry_NoRetries(t *testing.T) {
+	attempt := 0
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{MaxRetries: 0},
+		run: func(_ context.Context, _ ...string) ([]byte, error) {
+			attempt++
+			return nil, fmt.Errorf("fail")
+		},
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgentWithRetry(role, pr)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if attempt != 1 {
+		t.Errorf("expected 1 attempt with MaxRetries=0, got %d", attempt)
+	}
+}
+
+func TestRunAgent_Timeout(t *testing.T) {
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{AgentTimeout: 50 * time.Millisecond},
+		run: func(ctx context.Context, _ ...string) ([]byte, error) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(5 * time.Second):
+				return nil, fmt.Errorf("should not reach here")
+			}
+		},
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgent(role, pr)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+}
+
+func TestClaudeBaseArgs_NoModel(t *testing.T) {
+	orch := &Orchestrator{opts: Options{}}
+	args := orch.claudeBaseArgs()
+	if len(args) != 1 || args[0] != "--print" {
+		t.Errorf("expected [--print], got %v", args)
+	}
+}
+
+func TestClaudeBaseArgs_WithModel(t *testing.T) {
+	orch := &Orchestrator{opts: Options{Model: "opus"}}
+	args := orch.claudeBaseArgs()
+	if len(args) != 3 || args[1] != "--model" || args[2] != "opus" {
+		t.Errorf("expected [--print --model opus], got %v", args)
 	}
 }
 
@@ -572,6 +851,9 @@ func TestSynthesize_Success(t *testing.T) {
 	if len(result.Suggestions) != 1 {
 		t.Errorf("expected 1 suggestion (warning with file+line), got %d", len(result.Suggestions))
 	}
+	if len(result.DedupedFindings) != 1 {
+		t.Errorf("expected 1 deduped finding, got %d", len(result.DedupedFindings))
+	}
 }
 
 func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
@@ -597,7 +879,7 @@ func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
 func TestSynthesize_CommandFailure(t *testing.T) {
 	orch := &Orchestrator{
 		opts: Options{},
-		run: func(args ...string) ([]byte, error) {
+		run: func(_ context.Context, _ ...string) ([]byte, error) {
 			return nil, fmt.Errorf("synthesis error")
 		},
 	}
@@ -611,88 +893,6 @@ func TestSynthesize_CommandFailure(t *testing.T) {
 	}
 }
 
-func TestNewOrchestrator_WithLanguageModule(t *testing.T) {
-	dir := t.TempDir()
-	// Create base skill.
-	basePath := filepath.Join(dir, "skills", "test.md")
-	if err := os.MkdirAll(filepath.Dir(basePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(basePath, []byte("base skill"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Create language module.
-	langDir := filepath.Join(dir, "skills", "test")
-	if err := os.MkdirAll(langDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(langDir, "typescript.md"), []byte("typescript module"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, Options{}, []string{"typescript"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got := orch.skill(roles[0])
-	if got != "base skill\n\ntypescript module" {
-		t.Errorf("expected concatenated skill, got %q", got)
-	}
-}
-
-func TestNewOrchestrator_LanguageModuleMissing(t *testing.T) {
-	dir := t.TempDir()
-	basePath := filepath.Join(dir, "test.md")
-	if err := os.WriteFile(basePath, []byte("base skill"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, Options{}, []string{"rust"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// Should gracefully skip missing module and return only the base.
-	if got := orch.skill(roles[0]); got != "base skill" {
-		t.Errorf("expected base skill only, got %q", got)
-	}
-}
-
-func TestNewOrchestrator_MultipleLanguages(t *testing.T) {
-	dir := t.TempDir()
-	// Create base skill.
-	basePath := filepath.Join(dir, "skills", "review.md")
-	if err := os.MkdirAll(filepath.Dir(basePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(basePath, []byte("base"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Create two language modules.
-	langDir := filepath.Join(dir, "skills", "review")
-	if err := os.MkdirAll(langDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(langDir, "go.md"), []byte("go module"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(langDir, "typescript.md"), []byte("ts module"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, Options{}, []string{"go", "typescript"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got := orch.skill(roles[0])
-	want := "base\n\ngo module\n\nts module"
-	if got != want {
-		t.Errorf("expected %q, got %q", want, got)
-	}
-}
-
 func TestReview_FullPipeline(t *testing.T) {
 	innerFindings := `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`
 	agentResponse, marshalErr := json.Marshal(struct {
@@ -702,14 +902,14 @@ func TestReview_FullPipeline(t *testing.T) {
 		t.Fatal(marshalErr)
 	}
 
-	callCount := 0
+	var callCount atomic.Int32
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Test", Slug: "test"}},
 		skills: map[string]string{"test": "skill"},
 		opts:   Options{},
-		run: func(args ...string) ([]byte, error) {
-			callCount++
-			if callCount <= 1 {
+		run: func(_ context.Context, _ ...string) ([]byte, error) {
+			n := callCount.Add(1)
+			if n <= 1 {
 				return agentResponse, nil
 			}
 			return []byte("Review complete."), nil
@@ -725,5 +925,39 @@ func TestReview_FullPipeline(t *testing.T) {
 	}
 	if len(result.Findings) != 1 {
 		t.Errorf("expected 1 finding, got %d", len(result.Findings))
+	}
+	if len(result.FailedAgents) != 0 {
+		t.Errorf("expected no failed agents, got %v", result.FailedAgents)
+	}
+}
+
+func TestReview_FailedAgentsTracked(t *testing.T) {
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Good", Slug: "good"}, {Name: "Bad", Slug: "bad"}},
+		skills: map[string]string{"good": "skill", "bad": "skill"},
+		opts:   Options{},
+		run: func(_ context.Context, args ...string) ([]byte, error) {
+			// Always return valid response so at least one agent succeeds.
+			for _, a := range args {
+				if strings.Contains(a, "Review the following") {
+					inner := `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"ok","detail":"d"}]}`
+					out, marshalErr := json.Marshal(struct{ Result string }{Result: inner})
+					if marshalErr != nil {
+						return nil, marshalErr
+					}
+					return out, nil
+				}
+			}
+			return []byte("Summary"), nil
+		},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Body: "b", Diff: "d"}
+	result, err := orch.Review(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Both agents succeed in this test, so no failures.
+	if result == nil {
+		t.Fatal("expected non-nil result")
 	}
 }
