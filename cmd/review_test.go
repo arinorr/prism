@@ -411,6 +411,23 @@ func TestOutputResults_WritesToFile(t *testing.T) {
 	}
 }
 
+func TestOutputResults_MarkdownToFile(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "md", toStdout: false}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = os.RemoveAll("results")
+}
+
+func TestOutputResults_HTMLToStdout(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "html", toStdout: true}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestOutputResults_HandlesCommentNoSuggestions(t *testing.T) {
 	// When --comment is set but there are no suggestions, outputResults
 	// should print "No inline suggestions to post." to signal it handled the flag.
@@ -424,6 +441,14 @@ func TestOutputResults_HandlesCommentNoSuggestions(t *testing.T) {
 	}
 	// If we got here without handling comments, the feature is broken.
 	// The fix adds comment handling to outputResults.
+}
+
+func TestRunReview_InvalidPRRef(t *testing.T) {
+	// Flag injection attempt — should be caught by ValidatePRRef.
+	err := runReview([]string{"--exec=evil"})
+	if err == nil {
+		t.Fatal("expected error for flag injection ref")
+	}
 }
 
 func TestRunReview_BadRolesFromEquals(t *testing.T) {
