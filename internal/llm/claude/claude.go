@@ -11,10 +11,10 @@ import (
 )
 
 // commandRunner executes a command and returns its output.
-type commandRunner func(name string, args ...string) ([]byte, error)
+type commandRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
-func defaultRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output() // #nosec G204 -- binary is hardcoded "claude"
+func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output() // #nosec G204 -- binary is hardcoded "claude"
 }
 
 // Adapter implements llm.LLM using the Claude CLI (`claude --print`).
@@ -35,8 +35,12 @@ func newWithRunner(run commandRunner) *Adapter {
 // Complete sends a prompt to Claude via the CLI and returns the response text.
 // When req.JSONOutput is true, it passes --output-format json and unwraps the
 // {"result": "..."} envelope that Claude CLI produces.
-func (a *Adapter) Complete(_ context.Context, req llm.Request) (string, error) {
+func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, error) {
 	args := []string{"--print"}
+
+	if req.Model != "" {
+		args = append(args, "--model", req.Model)
+	}
 
 	if req.JSONOutput {
 		args = append(args, "--output-format", "json")
@@ -48,7 +52,7 @@ func (a *Adapter) Complete(_ context.Context, req llm.Request) (string, error) {
 
 	args = append(args, "-p", req.UserPrompt)
 
-	out, err := a.run("claude", args...)
+	out, err := a.run(ctx, "claude", args...)
 	if err != nil {
 		return "", fmt.Errorf("claude command failed: %w", err)
 	}

@@ -78,7 +78,7 @@ func ValidatePRRef(prRef string) error {
 // GetPRDiff fetches the PR diff and metadata.
 func (c *Client) GetPRDiff(prRef string) (*PR, error) {
 	if err := ValidatePRRef(prRef); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid PR reference: %w", err)
 	}
 	if !c.useGH {
 		return c.getPRDiffGit(prRef)

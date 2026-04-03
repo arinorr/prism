@@ -40,6 +40,13 @@
 - Agents could verify their own findings (e.g. "does this function exist?", "what does this API actually accept?")
 - Significant architectural change — the orchestrator would manage agent sessions instead of one-shot prompts
 
+### Language-specific agent skills — expand to more agents and languages
+- **Done (PR #9)**: Dynamic skill toolbox for Know-It-All and Sentinel with Go and TypeScript/JavaScript modules. Auto-detects language from file extensions and appends matching `skills/{agent}/{language}.md` modules.
+- Add modules for more agents: Test Engineer (pytest vs go test vs RTL conventions), Optimizer (language-specific perf patterns), Editor (language-specific readability idioms)
+- Add more languages: Python, Rust
+  - **Python**: bare `except:`, missing type hints, mutable default args, `__init__` complexity, Django/Flask security patterns
+  - **Rust**: ownership patterns, lifetime annotations, unsafe blocks, error handling with `?`
+
 ### Configurable model and settings
 - Let users pick which Claude model agents use
 - Set max token budget per agent

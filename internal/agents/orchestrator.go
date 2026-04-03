@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,15 +35,20 @@ type Finding struct {
 
 // ReviewResult is the synthesized output from all agents.
 type ReviewResult struct {
-	Summary     string
-	Findings    []Finding
-	Suggestions []gh.Suggestion
+	Summary         string
+	Findings        []Finding
+	DedupedFindings []DedupedFinding
+	Suggestions     []gh.Suggestion
+	FailedAgents    []string
 }
 
 // Options controls orchestrator behavior.
 type Options struct {
-	Verbose bool
-	DryRun  bool
+	Verbose      bool
+	DryRun       bool
+	Model        string
+	AgentTimeout time.Duration
+	MaxRetries   int
 }
 
 // Orchestrator manages the multi-agent review process.
@@ -53,9 +59,12 @@ type Orchestrator struct {
 	llm    llm.LLM
 }
 
-// NewOrchestrator creates a new orchestrator with the given roles and LLM backend.
+// NewOrchestrator creates a new orchestrator with the given roles, LLM backend,
+// and detected languages.
 // All skill files are loaded eagerly so the map is immutable during review.
-func NewOrchestrator(roles []Role, opts Options, backend llm.LLM) (*Orchestrator, error) {
+// Language-specific modules (e.g. skills/know-it-all/typescript.md) are
+// appended to the base skill when the corresponding language is detected.
+func NewOrchestrator(roles []Role, opts Options, backend llm.LLM, languages []string) (*Orchestrator, error) {
 	exeDir := ""
 	if exePath, err := os.Executable(); err == nil {
 		exeDir = filepath.Dir(exePath)
@@ -67,7 +76,19 @@ func NewOrchestrator(roles []Role, opts Options, backend llm.LLM) (*Orchestrator
 		if err != nil {
 			return nil, fmt.Errorf("failed to load skill for %s: %w", r.Name, err)
 		}
-		skills[r.Slug] = string(data)
+		combined := string(data)
+
+		// Append language-specific modules if they exist.
+		for _, lang := range languages {
+			langPath := languageSkillPath(r.SkillFile, lang)
+			langData, langErr := readSkillFile(langPath, exeDir) // #nosec G304 -- paths derived from compile-time constants in roles.go + detected language strings
+			if langErr != nil {
+				continue // Module doesn't exist for this role+language — that's fine.
+			}
+			combined += "\n\n" + string(langData)
+		}
+
+		skills[r.Slug] = combined
 	}
 
 	return &Orchestrator{
@@ -94,13 +115,19 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 	}
 
 	// Phase 1: Dispatch all agents in parallel.
-	feedbacks, err := o.dispatchAgents(pr)
+	feedbacks, failedAgents, err := o.dispatchAgents(pr)
 	if err != nil {
 		return nil, err
 	}
 
 	// Phase 2: Synthesize feedback.
-	return o.synthesize(pr, feedbacks)
+	result, err := o.synthesize(pr, feedbacks)
+	if err != nil {
+		return nil, err
+	}
+	result.FailedAgents = failedAgents
+
+	return result, nil
 }
 
 func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
@@ -119,10 +146,19 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 		}
 	}
 
+	if o.opts.Verbose {
+		if o.opts.Model != "" {
+			fmt.Printf("\nModel: %s\n", o.opts.Model)
+		}
+		if o.opts.AgentTimeout > 0 {
+			fmt.Printf("Agent timeout: %s\n", o.opts.AgentTimeout)
+		}
+		fmt.Printf("Max retries: %d\n", o.opts.MaxRetries)
+	}
+
 	fmt.Printf("\nSample prompt (for %s):\n", o.roles[0].Name)
 	fmt.Println("───────────────────────────────────────")
 	prompt := buildAgentPrompt(o.roles[0], pr)
-	const previewMaxBytes = 500
 	if len(prompt) > previewMaxBytes {
 		fmt.Printf("%s\n... (%d bytes total)\n", truncateUTF8(prompt, previewMaxBytes), len(prompt))
 	} else {
@@ -135,13 +171,14 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 	}, nil
 }
 
-func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
+func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, error) {
 	var (
-		mu        sync.Mutex
-		wg        sync.WaitGroup
-		feedbacks []Feedback
-		errs      []error
-		done      int
+		mu           sync.Mutex
+		wg           sync.WaitGroup
+		feedbacks    []Feedback
+		errs         []error
+		failedAgents []string
+		done         int
 	)
 
 	total := len(o.roles)
@@ -155,13 +192,14 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 			fmt.Printf("   🔍 [%s] reviewing...\n", r.Name)
 			mu.Unlock()
 
-			fb, err := o.runAgent(r, pr)
+			fb, err := o.runAgentWithRetry(r, pr)
 
 			mu.Lock()
 			defer mu.Unlock()
 			done++
 			if err != nil {
 				errs = append(errs, fmt.Errorf("[%s] %w", r.Name, err))
+				failedAgents = append(failedAgents, r.Name)
 				fmt.Printf("   ⚠️  [%s] failed (%d/%d done)\n", r.Name, done, total)
 			} else {
 				feedbacks = append(feedbacks, *fb)
@@ -173,11 +211,35 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 	wg.Wait()
 	fmt.Println()
 
-	if len(feedbacks) == 0 {
-		return nil, fmt.Errorf("all agents failed")
+	if len(failedAgents) > 0 && len(feedbacks) > 0 {
+		fmt.Printf("   ⚠️  %d agent(s) failed: %s\n\n", len(failedAgents), strings.Join(failedAgents, ", "))
 	}
 
-	return feedbacks, nil
+	if len(feedbacks) == 0 {
+		return nil, failedAgents, fmt.Errorf("all agents failed: %w", errors.Join(errs...))
+	}
+
+	return feedbacks, failedAgents, nil
+}
+
+func (o *Orchestrator) runAgentWithRetry(role Role, pr *gh.PR) (*Feedback, error) {
+	maxAttempts := o.opts.MaxRetries + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		fb, err := o.runAgent(role, pr)
+		if err == nil {
+			return fb, nil
+		}
+		lastErr = err
+		if attempt < maxAttempts {
+			fmt.Printf("   🔄 [%s] retry %d/%d...\n", role.Name, attempt, o.opts.MaxRetries)
+		}
+	}
+	return nil, lastErr
 }
 
 func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
@@ -188,11 +250,20 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 		fmt.Printf("   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
 	}
 
+	// Build context with optional timeout.
+	ctx := context.Background()
+	if o.opts.AgentTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.opts.AgentTimeout)
+		defer cancel()
+	}
+
 	start := time.Now()
-	response, err := o.llm.Complete(context.Background(), llm.Request{
+	response, err := o.llm.Complete(ctx, llm.Request{
 		SystemPrompt: skill,
 		UserPrompt:   prompt,
 		JSONOutput:   true,
+		Model:        o.opts.Model,
 	})
 	elapsed := time.Since(start)
 
@@ -219,12 +290,31 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	return fb, nil
 }
 
+// claudeBaseArgs returns the common args for all claude invocations.
+// Retained for compatibility with tests that verify model flag passing.
+func (o *Orchestrator) claudeBaseArgs() []string {
+	args := []string{"--print"}
+	if o.opts.Model != "" {
+		args = append(args, "--model", o.opts.Model)
+	}
+	return args
+}
+
 func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResult, error) {
 	fmt.Println("   🧠 Synthesizing feedback from all agents...")
 	synthesisPrompt := buildSynthesisPrompt(pr, feedbacks)
 
-	summary, err := o.llm.Complete(context.Background(), llm.Request{
+	// Build context with optional timeout.
+	ctx := context.Background()
+	if o.opts.AgentTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.opts.AgentTimeout)
+		defer cancel()
+	}
+
+	summary, err := o.llm.Complete(ctx, llm.Request{
 		UserPrompt: synthesisPrompt,
+		Model:      o.opts.Model,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("synthesis failed: %w", err)
@@ -249,10 +339,14 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 		}
 	}
 
+	// Deduplicate findings.
+	dedupedFindings := Deduplicate(allFindings, len(feedbacks))
+
 	return &ReviewResult{
-		Summary:     summary,
-		Findings:    allFindings,
-		Suggestions: suggestions,
+		Summary:         summary,
+		Findings:        allFindings,
+		DedupedFindings: dedupedFindings,
+		Suggestions:     suggestions,
 	}, nil
 }
 

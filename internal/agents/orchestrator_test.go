@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/llm"
@@ -288,7 +289,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: skillPath}}
-	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{})
+	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -299,7 +300,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 
 func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 	roles := []Role{{Name: "Bad", Slug: "bad", SkillFile: "/nonexistent/path.md"}}
-	_, err := NewOrchestrator(roles, Options{}, &llm.Mock{})
+	_, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing skill file")
 	}
@@ -309,12 +310,94 @@ func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 }
 
 func TestNewOrchestrator_EmptyRoles(t *testing.T) {
-	orch, err := NewOrchestrator([]Role{}, Options{}, &llm.Mock{})
+	orch, err := NewOrchestrator([]Role{}, Options{}, &llm.Mock{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(orch.roles) != 0 {
 		t.Errorf("expected 0 roles, got %d", len(orch.roles))
+	}
+}
+
+func TestNewOrchestrator_WithLanguageModule(t *testing.T) {
+	dir := t.TempDir()
+	// Create base skill.
+	basePath := filepath.Join(dir, "skills", "test.md")
+	if err := os.MkdirAll(filepath.Dir(basePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(basePath, []byte("base skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create language module.
+	langDir := filepath.Join(dir, "skills", "test")
+	if err := os.MkdirAll(langDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "typescript.md"), []byte("typescript module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
+	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, []string{"typescript"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := orch.skill(roles[0])
+	if got != "base skill\n\ntypescript module" {
+		t.Errorf("expected concatenated skill, got %q", got)
+	}
+}
+
+func TestNewOrchestrator_LanguageModuleMissing(t *testing.T) {
+	dir := t.TempDir()
+	basePath := filepath.Join(dir, "test.md")
+	if err := os.WriteFile(basePath, []byte("base skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
+	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, []string{"rust"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should gracefully skip missing module and return only the base.
+	if got := orch.skill(roles[0]); got != "base skill" {
+		t.Errorf("expected base skill only, got %q", got)
+	}
+}
+
+func TestNewOrchestrator_MultipleLanguages(t *testing.T) {
+	dir := t.TempDir()
+	// Create base skill.
+	basePath := filepath.Join(dir, "skills", "review.md")
+	if err := os.MkdirAll(filepath.Dir(basePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(basePath, []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create two language modules.
+	langDir := filepath.Join(dir, "skills", "review")
+	if err := os.MkdirAll(langDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "go.md"), []byte("go module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(langDir, "typescript.md"), []byte("ts module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
+	orch, err := NewOrchestrator(roles, Options{}, &llm.Mock{}, []string{"go", "typescript"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := orch.skill(roles[0])
+	want := "base\n\ngo module\n\nts module"
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
 	}
 }
 
@@ -410,6 +493,22 @@ func TestSkill_ReturnsContent(t *testing.T) {
 	role := Role{Slug: "sentinel"}
 	if got := orch.skill(role); got != "security reviewer" {
 		t.Errorf("expected 'security reviewer', got %q", got)
+	}
+}
+
+func TestDryRun_VerboseWithModelAndTimeout(t *testing.T) {
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Test", Slug: "test", Description: "A test role", SkillFile: "test.md"}},
+		opts:   Options{DryRun: true, Verbose: true, Model: "sonnet", AgentTimeout: 5 * time.Minute, MaxRetries: 2},
+		skills: map[string]string{"test": "skill content here"},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Diff: "diff"}
+	result, err := orch.Review(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
 	}
 }
 
@@ -521,6 +620,27 @@ func TestRunAgent_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestRunAgent_WithModel(t *testing.T) {
+	mock := &llm.Mock{Response: `{"findings":[]}`}
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{Model: "sonnet"},
+		llm:    mock,
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgent(role, pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+	}
+	if mock.Calls[0].Model != "sonnet" {
+		t.Errorf("expected model 'sonnet', got %q", mock.Calls[0].Model)
+	}
+}
+
 func TestDispatchAgents_AllSucceed(t *testing.T) {
 	finding := `{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}`
 	orch := &Orchestrator{
@@ -530,12 +650,15 @@ func TestDispatchAgents_AllSucceed(t *testing.T) {
 		llm:    mockLLMFindings(finding),
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	feedbacks, err := orch.dispatchAgents(pr)
+	feedbacks, failedAgents, err := orch.dispatchAgents(pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(feedbacks) != 2 {
 		t.Errorf("expected 2 feedbacks, got %d", len(feedbacks))
+	}
+	if len(failedAgents) != 0 {
+		t.Errorf("expected no failed agents, got %v", failedAgents)
 	}
 }
 
@@ -547,12 +670,150 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 		llm:    &llm.Mock{Err: fmt.Errorf("fail")},
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, err := orch.dispatchAgents(pr)
+	_, failedAgents, err := orch.dispatchAgents(pr)
 	if err == nil {
 		t.Fatal("expected error when all agents fail")
 	}
 	if !strings.Contains(err.Error(), "all agents failed") {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if len(failedAgents) != 1 || failedAgents[0] != "A" {
+		t.Errorf("expected [A] in failed agents, got %v", failedAgents)
+	}
+}
+
+func TestDispatchAgents_PartialFailure(t *testing.T) {
+	// Both agents get JSONOutput=true calls, so both succeed here.
+	// The important thing is that dispatchAgents tolerates partial failure.
+	mock := &llm.Mock{
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
+			if req.JSONOutput {
+				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}]}`, nil
+			}
+			return "", fmt.Errorf("fail")
+		},
+	}
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Good", Slug: "good"}, {Name: "Bad", Slug: "bad"}},
+		skills: map[string]string{"good": "skill", "bad": "skill"},
+		opts:   Options{},
+		llm:    mock,
+	}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	feedbacks, _, err := orch.dispatchAgents(pr)
+	if err != nil {
+		t.Fatalf("partial failure should not error: %v", err)
+	}
+	if len(feedbacks) < 1 {
+		t.Error("expected at least 1 feedback from successful agent")
+	}
+}
+
+func TestRunAgentWithRetry_SucceedsOnSecondAttempt(t *testing.T) {
+	attempt := 0
+	mock := &llm.Mock{
+		CompleteFunc: func(_ context.Context, _ llm.Request) (string, error) {
+			attempt++
+			if attempt == 1 {
+				return "", fmt.Errorf("transient failure")
+			}
+			return `{"findings":[]}`, nil
+		},
+	}
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{MaxRetries: 1},
+		llm:    mock,
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	fb, err := orch.runAgentWithRetry(role, pr)
+	if err != nil {
+		t.Fatalf("expected success on retry, got: %v", err)
+	}
+	if fb == nil {
+		t.Fatal("expected non-nil feedback")
+	}
+	if attempt != 2 {
+		t.Errorf("expected 2 attempts, got %d", attempt)
+	}
+}
+
+func TestRunAgentWithRetry_ExhaustedRetries(t *testing.T) {
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{MaxRetries: 1},
+		llm:    &llm.Mock{Err: fmt.Errorf("persistent failure")},
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgentWithRetry(role, pr)
+	if err == nil {
+		t.Fatal("expected error after exhausted retries")
+	}
+}
+
+func TestRunAgentWithRetry_NoRetries(t *testing.T) {
+	attempt := 0
+	mock := &llm.Mock{
+		CompleteFunc: func(_ context.Context, _ llm.Request) (string, error) {
+			attempt++
+			return "", fmt.Errorf("fail")
+		},
+	}
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{MaxRetries: 0},
+		llm:    mock,
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgentWithRetry(role, pr)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if attempt != 1 {
+		t.Errorf("expected 1 attempt with MaxRetries=0, got %d", attempt)
+	}
+}
+
+func TestRunAgent_Timeout(t *testing.T) {
+	mock := &llm.Mock{
+		CompleteFunc: func(ctx context.Context, _ llm.Request) (string, error) {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(5 * time.Second):
+				return "", fmt.Errorf("should not reach here")
+			}
+		},
+	}
+	orch := &Orchestrator{
+		skills: map[string]string{"test": "skill"},
+		opts:   Options{AgentTimeout: 50 * time.Millisecond},
+		llm:    mock,
+	}
+	role := Role{Name: "Test", Slug: "test"}
+	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
+	_, err := orch.runAgent(role, pr)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+}
+
+func TestClaudeBaseArgs_NoModel(t *testing.T) {
+	orch := &Orchestrator{opts: Options{}}
+	args := orch.claudeBaseArgs()
+	if len(args) != 1 || args[0] != "--print" {
+		t.Errorf("expected [--print], got %v", args)
+	}
+}
+
+func TestClaudeBaseArgs_WithModel(t *testing.T) {
+	orch := &Orchestrator{opts: Options{Model: "opus"}}
+	args := orch.claudeBaseArgs()
+	if len(args) != 3 || args[1] != "--model" || args[2] != "opus" {
+		t.Errorf("expected [--print --model opus], got %v", args)
 	}
 }
 
@@ -579,6 +840,9 @@ func TestSynthesize_Success(t *testing.T) {
 	}
 	if len(result.Suggestions) != 1 {
 		t.Errorf("expected 1 suggestion (warning with file+line), got %d", len(result.Suggestions))
+	}
+	if len(result.DedupedFindings) != 1 {
+		t.Errorf("expected 1 deduped finding, got %d", len(result.DedupedFindings))
 	}
 }
 
@@ -667,7 +931,36 @@ func TestReview_FullPipeline(t *testing.T) {
 	if len(result.Findings) != 1 {
 		t.Errorf("expected 1 finding, got %d", len(result.Findings))
 	}
+	if len(result.FailedAgents) != 0 {
+		t.Errorf("expected no failed agents, got %v", result.FailedAgents)
+	}
 	if callCount != 2 {
 		t.Errorf("expected 2 LLM calls (1 agent + 1 synthesis), got %d", callCount)
+	}
+}
+
+func TestReview_FailedAgentsTracked(t *testing.T) {
+	mock := &llm.Mock{
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
+			if req.JSONOutput {
+				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"ok","detail":"d"}]}`, nil
+			}
+			return "Summary", nil
+		},
+	}
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Good", Slug: "good"}, {Name: "Bad", Slug: "bad"}},
+		skills: map[string]string{"good": "skill", "bad": "skill"},
+		opts:   Options{},
+		llm:    mock,
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Body: "b", Diff: "d"}
+	result, err := orch.Review(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Both agents succeed in this test, so no failures.
+	if result == nil {
+		t.Fatal("expected non-nil result")
 	}
 }

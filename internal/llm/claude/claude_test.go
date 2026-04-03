@@ -21,7 +21,7 @@ func envelope(result string) []byte {
 }
 
 func TestComplete_JSONOutput(t *testing.T) {
-	adapter := newWithRunner(func(name string, args ...string) ([]byte, error) {
+	adapter := newWithRunner(func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name != "claude" {
 			t.Errorf("expected 'claude', got %q", name)
 		}
@@ -52,7 +52,7 @@ func TestComplete_JSONOutput(t *testing.T) {
 }
 
 func TestComplete_PlainOutput(t *testing.T) {
-	adapter := newWithRunner(func(name string, args ...string) ([]byte, error) {
+	adapter := newWithRunner(func(_ context.Context, name string, args ...string) ([]byte, error) {
 		// Verify --output-format json is NOT passed.
 		for _, a := range args {
 			if a == "--output-format" {
@@ -75,7 +75,7 @@ func TestComplete_PlainOutput(t *testing.T) {
 
 func TestComplete_PlainOutputWithEnvelope(t *testing.T) {
 	// When Claude wraps even non-JSON requests in an envelope.
-	adapter := newWithRunner(func(name string, args ...string) ([]byte, error) {
+	adapter := newWithRunner(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
 		return envelope("Summary text here."), nil
 	})
 
@@ -91,7 +91,7 @@ func TestComplete_PlainOutputWithEnvelope(t *testing.T) {
 }
 
 func TestComplete_SystemPromptPassedAsFlag(t *testing.T) {
-	adapter := newWithRunner(func(name string, args ...string) ([]byte, error) {
+	adapter := newWithRunner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		found := false
 		for i, a := range args {
 			if a == "--append-system-prompt" && i+1 < len(args) {
@@ -117,7 +117,7 @@ func TestComplete_SystemPromptPassedAsFlag(t *testing.T) {
 }
 
 func TestComplete_NoSystemPromptOmitsFlag(t *testing.T) {
-	adapter := newWithRunner(func(name string, args ...string) ([]byte, error) {
+	adapter := newWithRunner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		for _, a := range args {
 			if a == "--append-system-prompt" {
 				t.Error("should not pass --append-system-prompt when SystemPrompt is empty")
@@ -135,7 +135,7 @@ func TestComplete_NoSystemPromptOmitsFlag(t *testing.T) {
 }
 
 func TestComplete_CommandError(t *testing.T) {
-	adapter := newWithRunner(func(name string, args ...string) ([]byte, error) {
+	adapter := newWithRunner(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
 		return nil, fmt.Errorf("command not found")
 	})
 
@@ -149,7 +149,7 @@ func TestComplete_CommandError(t *testing.T) {
 }
 
 func TestComplete_InvalidEnvelope(t *testing.T) {
-	adapter := newWithRunner(func(name string, args ...string) ([]byte, error) {
+	adapter := newWithRunner(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
 		return []byte("not json"), nil
 	})
 
@@ -159,6 +159,47 @@ func TestComplete_InvalidEnvelope(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid envelope with JSONOutput=true")
+	}
+}
+
+func TestComplete_ModelPassedAsFlag(t *testing.T) {
+	adapter := newWithRunner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		found := false
+		for i, a := range args {
+			if a == "--model" && i+1 < len(args) && args[i+1] == "sonnet" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected --model sonnet in args, got %v", args)
+		}
+		return envelope("ok"), nil
+	})
+
+	_, err := adapter.Complete(context.Background(), llm.Request{
+		UserPrompt: "prompt",
+		Model:      "sonnet",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestComplete_NoModelOmitsFlag(t *testing.T) {
+	adapter := newWithRunner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		for _, a := range args {
+			if a == "--model" {
+				t.Error("should not pass --model when Model is empty")
+			}
+		}
+		return []byte("ok"), nil
+	})
+
+	_, err := adapter.Complete(context.Background(), llm.Request{
+		UserPrompt: "prompt",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

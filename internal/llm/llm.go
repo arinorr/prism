@@ -34,6 +34,10 @@ type Request struct {
 	// JSONOutput requests that the model output valid JSON. The adapter
 	// may use provider-specific mechanisms to enforce this.
 	JSONOutput bool
+
+	// Model overrides the default model for this request. Empty means
+	// use the provider's default.
+	Model string
 }
 
 // Mock is a test double for the LLM interface. It is safe for
