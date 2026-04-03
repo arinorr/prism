@@ -9,21 +9,27 @@ import (
 	"time"
 
 	"github.com/arinorr/prism/internal/agents"
+	"github.com/arinorr/prism/internal/config"
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/report"
+	"github.com/arinorr/prism/internal/sizecheck"
 )
 
 const defaultResultsDir = "results"
 
 // reviewOptions holds parsed CLI flags for the review command.
 type reviewOptions struct {
-	prRef      string
-	comment    bool
-	verbose    bool
-	dryRun     bool
-	toStdout   bool
-	rolesFlag  string
-	formatFlag string
+	prRef       string
+	comment     bool
+	verbose     bool
+	dryRun      bool
+	toStdout    bool
+	rolesFlag   string
+	formatFlag  string
+	modelFlag   string
+	timeoutFlag string
+	retriesFlag int
+	configPath  string
 }
 
 // parseReviewArgs parses the CLI arguments for the review command.
@@ -32,7 +38,7 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 		return nil, fmt.Errorf("usage: prism review <pr-number|pr-url>")
 	}
 
-	opts := &reviewOptions{}
+	opts := &reviewOptions{configPath: ".prism.yml"}
 
 	for i := 0; i < len(args); i++ {
 		switch {
@@ -54,6 +60,32 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.formatFlag = args[i]
 		case strings.HasPrefix(args[i], "--format="):
 			opts.formatFlag = strings.TrimPrefix(args[i], "--format=")
+		case args[i] == "--model" && i+1 < len(args):
+			i++
+			opts.modelFlag = args[i]
+		case strings.HasPrefix(args[i], "--model="):
+			opts.modelFlag = strings.TrimPrefix(args[i], "--model=")
+		case args[i] == "--timeout" && i+1 < len(args):
+			i++
+			opts.timeoutFlag = args[i]
+		case strings.HasPrefix(args[i], "--timeout="):
+			opts.timeoutFlag = strings.TrimPrefix(args[i], "--timeout=")
+		case args[i] == "--max-retries" && i+1 < len(args):
+			i++
+			var n int
+			if _, scanErr := fmt.Sscanf(args[i], "%d", &n); scanErr == nil {
+				opts.retriesFlag = n
+			}
+		case strings.HasPrefix(args[i], "--max-retries="):
+			var n int
+			if _, scanErr := fmt.Sscanf(strings.TrimPrefix(args[i], "--max-retries="), "%d", &n); scanErr == nil {
+				opts.retriesFlag = n
+			}
+		case args[i] == "--config" && i+1 < len(args):
+			i++
+			opts.configPath = args[i]
+		case strings.HasPrefix(args[i], "--config="):
+			opts.configPath = strings.TrimPrefix(args[i], "--config=")
 		case !strings.HasPrefix(args[i], "-"):
 			opts.prRef = args[i]
 		default:
@@ -74,11 +106,31 @@ func runReview(args []string) error {
 		return err
 	}
 
+	// Load and merge config: defaults < .prism.yml < CLI flags.
+	fileCfg, cfgErr := config.Load(opts.configPath)
+	if cfgErr != nil {
+		return fmt.Errorf("failed to load config: %w", cfgErr)
+	}
+	cliCfg := config.Config{
+		Model:        opts.modelFlag,
+		Format:       opts.formatFlag,
+		AgentTimeout: opts.timeoutFlag,
+		MaxRetries:   opts.retriesFlag,
+	}
+	if opts.rolesFlag != "" {
+		cliCfg.Roles = strings.Split(opts.rolesFlag, ",")
+		for i := range cliCfg.Roles {
+			cliCfg.Roles[i] = strings.TrimSpace(cliCfg.Roles[i])
+		}
+	}
+	def := config.Default()
+	merged := config.Merge(&def, &fileCfg, &cliCfg)
+
 	// Determine which roles to use.
 	roles := agents.AllRoles
-	if opts.rolesFlag != "" {
+	if len(merged.Roles) > 0 {
 		var parseErr error
-		roles, parseErr = agents.ParseRoles(opts.rolesFlag)
+		roles, parseErr = agents.ParseRoles(strings.Join(merged.Roles, ","))
 		if parseErr != nil {
 			return parseErr
 		}
@@ -95,6 +147,12 @@ func runReview(args []string) error {
 		return fmt.Errorf("failed to get PR diff: %w", err)
 	}
 
+	// Check diff size and warn if large.
+	sizeResult := sizecheck.Check(len(pr.Diff), merged.DiffWarnBytes, merged.DiffChunkBytes)
+	if sizeResult.Warn {
+		fmt.Fprintf(os.Stderr, "⚠️  %s\n", sizeResult.Message)
+	}
+
 	// Detect languages for skill module loading.
 	languages := agents.DetectLanguages(pr.Files)
 
@@ -107,8 +165,11 @@ func runReview(args []string) error {
 
 	// Dispatch agents.
 	orchestrator, orchErr := agents.NewOrchestrator(roles, agents.Options{
-		Verbose: opts.verbose,
-		DryRun:  opts.dryRun,
+		Verbose:      opts.verbose,
+		DryRun:       opts.dryRun,
+		Model:        merged.Model,
+		AgentTimeout: merged.TimeoutDuration(),
+		MaxRetries:   merged.MaxRetries,
 	}, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
@@ -121,8 +182,14 @@ func runReview(args []string) error {
 	}
 	elapsed := time.Since(start)
 
+	// Resolve format: CLI flag > config file > none.
+	formatFlag := opts.formatFlag
+	if formatFlag == "" {
+		formatFlag = merged.Format
+	}
+
 	// Output the results.
-	if err := outputResults(opts, pr, result, roles, elapsed); err != nil {
+	if err := outputResults(opts, pr, result, roles, elapsed, formatFlag); err != nil {
 		return err
 	}
 
@@ -142,8 +209,8 @@ func runReview(args []string) error {
 }
 
 // outputResults handles format selection, report generation, and file output.
-func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, roles []agents.Role, elapsed time.Duration) error {
-	if opts.formatFlag == "" {
+func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, roles []agents.Role, elapsed time.Duration, formatFlag string) error {
+	if formatFlag == "" {
 		fmt.Println(result.Summary)
 		return nil
 	}
@@ -160,12 +227,12 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 	}
 
 	var output string
-	ext := opts.formatFlag
+	ext := formatFlag
 	if ext == "markdown" {
 		ext = "md"
 	}
 
-	switch opts.formatFlag {
+	switch formatFlag {
 	case "md", "markdown":
 		output = report.Markdown(data)
 	case "html":
@@ -181,7 +248,7 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 			return fmt.Errorf("failed to generate JSON report: %w", jsonErr)
 		}
 	default:
-		return fmt.Errorf("unknown format: %s (available: md, html, json)", opts.formatFlag)
+		return fmt.Errorf("unknown format: %s (available: md, html, json)", formatFlag)
 	}
 
 	if opts.toStdout {

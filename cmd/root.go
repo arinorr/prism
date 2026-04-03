@@ -41,6 +41,10 @@ Options:
                    Available: know-it-all,architect,solver,editor,optimizer,sentinel,test-engineer
   --format         Output format: md, html, json (default: terminal summary)
                    Reports are saved to results/ directory
+  --model          Claude model to use (e.g. sonnet, opus, haiku)
+  --timeout        Per-agent timeout as a Go duration (default: 5m)
+  --max-retries    Number of retries per agent on failure (default: 1)
+  --config         Path to config file (default: .prism.yml)
   --stdout         Print report to terminal instead of saving to file
   -v, --verbose    Show detailed output (prompts, timing, raw responses)
   --dry-run        Show what would happen without calling Claude`)

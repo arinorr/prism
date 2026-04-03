@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,22 +35,27 @@ type Finding struct {
 
 // ReviewResult is the synthesized output from all agents.
 type ReviewResult struct {
-	Summary     string
-	Findings    []Finding
-	Suggestions []gh.Suggestion
+	Summary         string
+	Findings        []Finding
+	DedupedFindings []DedupedFinding
+	Suggestions     []gh.Suggestion
+	FailedAgents    []string
 }
 
 // Options controls orchestrator behavior.
 type Options struct {
-	Verbose bool
-	DryRun  bool
+	Verbose      bool
+	DryRun       bool
+	Model        string
+	AgentTimeout time.Duration
+	MaxRetries   int
 }
 
 // claudeRunner executes a claude command and returns its output.
-type claudeRunner func(args ...string) ([]byte, error)
+type claudeRunner func(ctx context.Context, args ...string) ([]byte, error)
 
-func defaultClaudeRunner(args ...string) ([]byte, error) {
-	return exec.Command("claude", args...).Output() // #nosec G204 -- binary is hardcoded "claude", args are internally constructed prompts
+func defaultClaudeRunner(ctx context.Context, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, "claude", args...).Output() // #nosec G204 -- binary is hardcoded "claude", args are internally constructed prompts
 }
 
 // Orchestrator manages the multi-agent review process.
@@ -115,13 +121,19 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 	}
 
 	// Phase 1: Dispatch all agents in parallel.
-	feedbacks, err := o.dispatchAgents(pr)
+	feedbacks, failedAgents, err := o.dispatchAgents(pr)
 	if err != nil {
 		return nil, err
 	}
 
 	// Phase 2: Synthesize feedback.
-	return o.synthesize(pr, feedbacks)
+	result, err := o.synthesize(pr, feedbacks)
+	if err != nil {
+		return nil, err
+	}
+	result.FailedAgents = failedAgents
+
+	return result, nil
 }
 
 func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
@@ -140,6 +152,16 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 		}
 	}
 
+	if o.opts.Verbose {
+		if o.opts.Model != "" {
+			fmt.Printf("\nModel: %s\n", o.opts.Model)
+		}
+		if o.opts.AgentTimeout > 0 {
+			fmt.Printf("Agent timeout: %s\n", o.opts.AgentTimeout)
+		}
+		fmt.Printf("Max retries: %d\n", o.opts.MaxRetries)
+	}
+
 	fmt.Printf("\nSample prompt (for %s):\n", o.roles[0].Name)
 	fmt.Println("───────────────────────────────────────")
 	prompt := buildAgentPrompt(o.roles[0], pr)
@@ -155,13 +177,14 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 	}, nil
 }
 
-func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
+func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, error) {
 	var (
-		mu        sync.Mutex
-		wg        sync.WaitGroup
-		feedbacks []Feedback
-		errs      []error
-		done      int
+		mu           sync.Mutex
+		wg           sync.WaitGroup
+		feedbacks    []Feedback
+		errs         []error
+		failedAgents []string
+		done         int
 	)
 
 	total := len(o.roles)
@@ -175,13 +198,14 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 			fmt.Printf("   🔍 [%s] reviewing...\n", r.Name)
 			mu.Unlock()
 
-			fb, err := o.runAgent(r, pr)
+			fb, err := o.runAgentWithRetry(r, pr)
 
 			mu.Lock()
 			defer mu.Unlock()
 			done++
 			if err != nil {
 				errs = append(errs, fmt.Errorf("[%s] %w", r.Name, err))
+				failedAgents = append(failedAgents, r.Name)
 				fmt.Printf("   ⚠️  [%s] failed (%d/%d done)\n", r.Name, done, total)
 			} else {
 				feedbacks = append(feedbacks, *fb)
@@ -193,11 +217,35 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, error) {
 	wg.Wait()
 	fmt.Println()
 
-	if len(feedbacks) == 0 {
-		return nil, fmt.Errorf("all agents failed: %w", errors.Join(errs...))
+	if len(failedAgents) > 0 && len(feedbacks) > 0 {
+		fmt.Printf("   ⚠️  %d agent(s) failed: %s\n\n", len(failedAgents), strings.Join(failedAgents, ", "))
 	}
 
-	return feedbacks, nil
+	if len(feedbacks) == 0 {
+		return nil, failedAgents, fmt.Errorf("all agents failed: %w", errors.Join(errs...))
+	}
+
+	return feedbacks, failedAgents, nil
+}
+
+func (o *Orchestrator) runAgentWithRetry(role Role, pr *gh.PR) (*Feedback, error) {
+	maxAttempts := o.opts.MaxRetries + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		fb, err := o.runAgent(role, pr)
+		if err == nil {
+			return fb, nil
+		}
+		lastErr = err
+		if attempt < maxAttempts {
+			fmt.Printf("   🔄 [%s] retry %d/%d...\n", role.Name, attempt, o.opts.MaxRetries)
+		}
+	}
+	return nil, lastErr
 }
 
 func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
@@ -208,14 +256,21 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 		fmt.Printf("   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
 	}
 
+	// Build context with optional timeout.
+	ctx := context.Background()
+	if o.opts.AgentTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.opts.AgentTimeout)
+		defer cancel()
+	}
+
+	// Build command args.
+	args := o.claudeBaseArgs()
+	args = append(args, "--output-format", "json", "--append-system-prompt", skill, "-p", prompt)
+
 	// Run claude with the role's skill and structured output.
 	start := time.Now()
-	out, err := o.run(
-		"--print",
-		"--output-format", "json",
-		"--append-system-prompt", skill,
-		"-p", prompt,
-	)
+	out, err := o.run(ctx, args...)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -249,11 +304,30 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	return fb, nil
 }
 
+// claudeBaseArgs returns the common args for all claude invocations.
+func (o *Orchestrator) claudeBaseArgs() []string {
+	args := []string{"--print"}
+	if o.opts.Model != "" {
+		args = append(args, "--model", o.opts.Model)
+	}
+	return args
+}
+
 func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResult, error) {
 	fmt.Println("   🧠 Synthesizing feedback from all agents...")
 	synthesisPrompt := buildSynthesisPrompt(pr, feedbacks)
 
-	out, err := o.run("--print", "-p", synthesisPrompt)
+	ctx := context.Background()
+	if o.opts.AgentTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.opts.AgentTimeout)
+		defer cancel()
+	}
+
+	args := o.claudeBaseArgs()
+	args = append(args, "-p", synthesisPrompt)
+
+	out, err := o.run(ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("synthesis failed: %w", err)
 	}
@@ -286,10 +360,14 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 		}
 	}
 
+	// Deduplicate findings.
+	dedupedFindings := Deduplicate(allFindings, len(feedbacks))
+
 	return &ReviewResult{
-		Summary:     summary,
-		Findings:    allFindings,
-		Suggestions: suggestions,
+		Summary:         summary,
+		Findings:        allFindings,
+		DedupedFindings: dedupedFindings,
+		Suggestions:     suggestions,
 	}, nil
 }
 

@@ -326,3 +326,126 @@ func TestGroupByFile_MultipleFiles(t *testing.T) {
 		t.Errorf("expected first group 'a.go', got %q", groups[0].file)
 	}
 }
+
+func dedupedTestData() *Data {
+	return &Data{
+		PR: &gh.PR{
+			Number: "99",
+			Title:  "Deduped test",
+			Files:  []gh.FileChange{{Path: "a.go"}},
+		},
+		Result: &agents.ReviewResult{
+			Summary: "Summary with deduped findings.",
+			DedupedFindings: []agents.DedupedFinding{
+				{
+					Finding:     agents.Finding{File: "a.go", Line: 10, Severity: "critical", Summary: "missing timeout", Detail: "Add context.WithTimeout"},
+					VoteCount:   5,
+					TotalAgents: 7,
+					Voters:      []string{"architect", "solver", "sentinel", "optimizer", "editor"},
+				},
+				{
+					Finding:     agents.Finding{File: "a.go", Line: 50, Severity: "info", Summary: "style note", Detail: "Minor style"},
+					VoteCount:   1,
+					TotalAgents: 7,
+					Voters:      []string{"editor"},
+				},
+			},
+			FailedAgents: []string{"Test Engineer", "Know-It-All"},
+		},
+		Roles:    []string{"Architect", "Solver"},
+		Duration: "2m30s",
+	}
+}
+
+func TestMarkdown_DedupedFindings(t *testing.T) {
+	d := dedupedTestData()
+	output := Markdown(d)
+	if !strings.Contains(output, "5/7") {
+		t.Error("expected vote count '5/7' in deduped markdown")
+	}
+	if !strings.Contains(output, "Votes") {
+		t.Error("expected 'Votes' column header in deduped markdown")
+	}
+	if !strings.Contains(output, "architect, solver, sentinel, optimizer, editor") {
+		t.Error("expected voter names in detail")
+	}
+}
+
+func TestMarkdown_FailedAgents(t *testing.T) {
+	d := dedupedTestData()
+	output := Markdown(d)
+	if !strings.Contains(output, "2 agent(s) failed") {
+		t.Error("expected failed agents notice in markdown")
+	}
+	if !strings.Contains(output, "Test Engineer") {
+		t.Error("expected failed agent name in markdown")
+	}
+}
+
+func TestHTML_FailedAgents(t *testing.T) {
+	d := dedupedTestData()
+	output, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "2 agent(s) failed") {
+		t.Error("expected failed agents notice in HTML")
+	}
+}
+
+func TestJSON_DedupedFindings(t *testing.T) {
+	d := dedupedTestData()
+	output, err := JSON(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "deduped_findings") {
+		t.Error("expected deduped_findings in JSON")
+	}
+	if !strings.Contains(output, "vote_count") {
+		t.Error("expected vote_count in JSON")
+	}
+	if !strings.Contains(output, "failed_agents") {
+		t.Error("expected failed_agents in JSON")
+	}
+	// Verify it's valid JSON.
+	var parsed map[string]interface{}
+	if jsonErr := json.Unmarshal([]byte(output), &parsed); jsonErr != nil {
+		t.Fatalf("JSON output is not valid: %v", jsonErr)
+	}
+}
+
+func TestGroupDedupedByFile(t *testing.T) {
+	findings := []agents.DedupedFinding{
+		{Finding: agents.Finding{File: "b.go", Line: 1, Severity: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Severity: "critical"}, VoteCount: 3},
+		{Finding: agents.Finding{File: "a.go", Line: 20, Severity: "warning"}, VoteCount: 2},
+	}
+	groups := groupDedupedByFile(findings)
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	if groups[0].file != "a.go" {
+		t.Errorf("expected first group 'a.go', got %q", groups[0].file)
+	}
+	if len(groups[0].findings) != 2 {
+		t.Errorf("expected 2 findings in a.go group, got %d", len(groups[0].findings))
+	}
+	// Within a.go, sorted by vote count desc.
+	if groups[0].findings[0].VoteCount != 3 {
+		t.Errorf("expected first finding to have 3 votes, got %d", groups[0].findings[0].VoteCount)
+	}
+}
+
+func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
+	findings := []agents.DedupedFinding{
+		{Finding: agents.Finding{File: "", Severity: "info"}, VoteCount: 1},
+	}
+	groups := groupDedupedByFile(findings)
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	if groups[0].file != "(general)" {
+		t.Errorf("expected '(general)' for empty file, got %q", groups[0].file)
+	}
+}

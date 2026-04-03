@@ -345,7 +345,7 @@ func testPR() *gh.PR {
 
 func TestOutputResults_NoFormat(t *testing.T) {
 	opts := &reviewOptions{}
-	err := outputResults(opts, testPR(), testResult(), nil, 0)
+	err := outputResults(opts, testPR(), testResult(), nil, 0, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestOutputResults_NoFormat(t *testing.T) {
 
 func TestOutputResults_Markdown(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "md", toStdout: true}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestOutputResults_Markdown(t *testing.T) {
 
 func TestOutputResults_MarkdownLong(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "markdown", toStdout: true}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestOutputResults_MarkdownLong(t *testing.T) {
 
 func TestOutputResults_HTML(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "html", toStdout: true}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestOutputResults_HTML(t *testing.T) {
 
 func TestOutputResults_JSON(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "json", toStdout: true}
-	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0)
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestOutputResults_JSON(t *testing.T) {
 
 func TestOutputResults_UnknownFormat(t *testing.T) {
 	opts := &reviewOptions{formatFlag: "xml"}
-	err := outputResults(opts, testPR(), testResult(), nil, 0)
+	err := outputResults(opts, testPR(), testResult(), nil, 0, opts.formatFlag)
 	if err == nil {
 		t.Fatal("expected error for unknown format")
 	}
@@ -418,7 +418,7 @@ func TestOutputResults_HandlesCommentNoSuggestions(t *testing.T) {
 	opts := &reviewOptions{comment: true}
 	result := &agents.ReviewResult{Summary: "Clean."}
 	pr := &gh.PR{Number: "1", Title: "Test"}
-	err := outputResults(opts, pr, result, nil, 0)
+	err := outputResults(opts, pr, result, nil, 0, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -485,6 +485,152 @@ func TestRunReview_BadRoles(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown role") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParseReviewArgs_ModelFlag(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--model", "sonnet"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.modelFlag != "sonnet" {
+		t.Errorf("expected model 'sonnet', got %q", opts.modelFlag)
+	}
+}
+
+func TestParseReviewArgs_ModelEquals(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--model=opus"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.modelFlag != "opus" {
+		t.Errorf("expected model 'opus', got %q", opts.modelFlag)
+	}
+}
+
+func TestParseReviewArgs_TimeoutFlag(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--timeout", "2m"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.timeoutFlag != "2m" {
+		t.Errorf("expected timeout '2m', got %q", opts.timeoutFlag)
+	}
+}
+
+func TestParseReviewArgs_TimeoutEquals(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--timeout=30s"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.timeoutFlag != "30s" {
+		t.Errorf("expected timeout '30s', got %q", opts.timeoutFlag)
+	}
+}
+
+func TestParseReviewArgs_MaxRetries(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--max-retries", "3"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.retriesFlag != 3 {
+		t.Errorf("expected retries 3, got %d", opts.retriesFlag)
+	}
+}
+
+func TestParseReviewArgs_MaxRetriesEquals(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--max-retries=0"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 0 is a valid value (no retries).
+	if opts.retriesFlag != 0 {
+		t.Errorf("expected retries 0, got %d", opts.retriesFlag)
+	}
+}
+
+func TestParseReviewArgs_ConfigFlag(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--config", "custom.yml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.configPath != "custom.yml" {
+		t.Errorf("expected config 'custom.yml', got %q", opts.configPath)
+	}
+}
+
+func TestParseReviewArgs_ConfigEquals(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--config=my.yml"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.configPath != "my.yml" {
+		t.Errorf("expected config 'my.yml', got %q", opts.configPath)
+	}
+}
+
+func TestParseReviewArgs_DefaultConfig(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.configPath != ".prism.yml" {
+		t.Errorf("expected default config '.prism.yml', got %q", opts.configPath)
+	}
+}
+
+func TestParseReviewArgs_AllNewFlags(t *testing.T) {
+	opts, err := parseReviewArgs([]string{
+		"42", "--model", "haiku", "--timeout", "1m",
+		"--max-retries", "2", "--config", "test.yml",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.modelFlag != "haiku" {
+		t.Errorf("expected model 'haiku', got %q", opts.modelFlag)
+	}
+	if opts.timeoutFlag != "1m" {
+		t.Errorf("expected timeout '1m', got %q", opts.timeoutFlag)
+	}
+	if opts.retriesFlag != 2 {
+		t.Errorf("expected retries 2, got %d", opts.retriesFlag)
+	}
+	if opts.configPath != "test.yml" {
+		t.Errorf("expected config 'test.yml', got %q", opts.configPath)
+	}
+}
+
+func TestOutputResults_MarkdownWithDedupedFindings(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "md", toStdout: true}
+	result := &agents.ReviewResult{
+		Summary: "Review complete.",
+		DedupedFindings: []agents.DedupedFinding{
+			{
+				Finding:     agents.Finding{File: "a.go", Line: 10, Severity: "warning", Summary: "test issue", Detail: "detail"},
+				VoteCount:   3,
+				TotalAgents: 5,
+				Voters:      []string{"architect", "solver", "sentinel"},
+			},
+		},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}}
+	err := outputResults(opts, pr, result, []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOutputResults_MarkdownWithFailedAgents(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "md", toStdout: true}
+	result := &agents.ReviewResult{
+		Summary:      "Partial review.",
+		FailedAgents: []string{"Sentinel", "Optimizer"},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}}
+	err := outputResults(opts, pr, result, []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -36,13 +36,56 @@ func Markdown(d *Data) string {
 	}
 	b.WriteString("\n\n---\n\n")
 
+	// Failed agents notice.
+	if len(d.Result.FailedAgents) > 0 {
+		fmt.Fprintf(&b, "> ⚠️ **%d agent(s) failed:** %s\n\n",
+			len(d.Result.FailedAgents), strings.Join(d.Result.FailedAgents, ", "))
+	}
+
 	// Summary from synthesis.
 	b.WriteString("## Summary\n\n")
 	b.WriteString(d.Result.Summary)
 	b.WriteString("\n\n")
 
-	// Findings grouped by file.
-	if len(d.Result.Findings) > 0 {
+	// Findings grouped by file — use deduped if available.
+	if len(d.Result.DedupedFindings) > 0 {
+		b.WriteString("---\n\n## Findings by File\n\n")
+		grouped := groupDedupedByFile(d.Result.DedupedFindings)
+		for _, group := range grouped {
+			fmt.Fprintf(&b, "### `%s`\n\n", group.file)
+			b.WriteString("| Line | Severity | Votes | Summary |\n")
+			b.WriteString("|------|----------|-------|---------|\n")
+			for i := range group.findings {
+				f := &group.findings[i]
+				line := "-"
+				if f.Line > 0 {
+					line = fmt.Sprintf("%d", f.Line)
+				}
+				votes := fmt.Sprintf("%d/%d", f.VoteCount, f.TotalAgents)
+				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
+					line, severityBadge(f.Severity), votes, f.Summary)
+			}
+			b.WriteString("\n")
+
+			// Details for warnings and criticals.
+			for i := range group.findings {
+				f := &group.findings[i]
+				if f.Severity == severityInfo {
+					continue
+				}
+				voters := strings.Join(f.Voters, ", ")
+				if f.Line > 0 {
+					fmt.Fprintf(&b, "**%s** (line %d, %d/%d agents: %s) — %s\n\n",
+						severityBadge(f.Severity), f.Line, f.VoteCount, f.TotalAgents, voters, f.Summary)
+				} else {
+					fmt.Fprintf(&b, "**%s** (%d/%d agents: %s) — %s\n\n",
+						severityBadge(f.Severity), f.VoteCount, f.TotalAgents, voters, f.Summary)
+				}
+				b.WriteString(f.Detail)
+				b.WriteString("\n\n")
+			}
+		}
+	} else if len(d.Result.Findings) > 0 {
 		b.WriteString("---\n\n## Findings by File\n\n")
 		grouped := groupByFile(d.Result.Findings)
 		for _, group := range grouped {
@@ -191,6 +234,12 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 	b.WriteString("</div>\n\n")
 
 	// Synthesis summary.
+	// Failed agents notice.
+	if len(d.Result.FailedAgents) > 0 {
+		fmt.Fprintf(&b, "<div style=\"background:var(--yellow-bg);color:var(--yellow);padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem\">⚠️ <strong>%d agent(s) failed:</strong> %s</div>\n",
+			len(d.Result.FailedAgents), esc(strings.Join(d.Result.FailedAgents, ", ")))
+	}
+
 	b.WriteString("<h2>Summary</h2>\n")
 	b.WriteString("<div class=\"summary\">\n")
 	b.WriteString(summaryHTML)
@@ -277,24 +326,37 @@ func JSON(d *Data) (string, error) {
 		roles = []string{}
 	}
 
+	dedupedFindings := d.Result.DedupedFindings
+	if dedupedFindings == nil {
+		dedupedFindings = []agents.DedupedFinding{}
+	}
+	failedAgents := d.Result.FailedAgents
+	if failedAgents == nil {
+		failedAgents = []string{}
+	}
+
 	output := struct {
-		PR          prSummary        `json:"pr"`
-		Summary     string           `json:"summary"`
-		Findings    []agents.Finding `json:"findings"`
-		Suggestions []suggestionJSON `json:"suggestions"`
-		Roles       []string         `json:"roles"`
-		Duration    string           `json:"duration,omitempty"`
+		PR              prSummary               `json:"pr"`
+		Summary         string                  `json:"summary"`
+		Findings        []agents.Finding        `json:"findings"`
+		DedupedFindings []agents.DedupedFinding `json:"deduped_findings"`
+		Suggestions     []suggestionJSON        `json:"suggestions"`
+		Roles           []string                `json:"roles"`
+		FailedAgents    []string                `json:"failed_agents"`
+		Duration        string                  `json:"duration,omitempty"`
 	}{
 		PR: prSummary{
 			Number: d.PR.Number,
 			Title:  d.PR.Title,
 			Files:  len(d.PR.Files),
 		},
-		Summary:     d.Result.Summary,
-		Findings:    findings,
-		Suggestions: suggestions,
-		Roles:       roles,
-		Duration:    d.Duration,
+		Summary:         d.Result.Summary,
+		Findings:        findings,
+		DedupedFindings: dedupedFindings,
+		Suggestions:     suggestions,
+		Roles:           roles,
+		FailedAgents:    failedAgents,
+		Duration:        d.Duration,
 	}
 
 	data, err := json.MarshalIndent(output, "", "  ")
@@ -325,6 +387,8 @@ func toSuggestionJSON(suggestions []gh.Suggestion) []suggestionJSON {
 	return out
 }
 
+const generalFile = "(general)"
+
 type fileGroup struct {
 	file     string
 	findings []agents.Finding
@@ -335,7 +399,7 @@ func groupByFile(findings []agents.Finding) []fileGroup {
 	for _, f := range findings {
 		file := f.File
 		if file == "" {
-			file = "(general)"
+			file = generalFile
 		}
 		byFile[file] = append(byFile[file], f)
 	}
@@ -351,6 +415,44 @@ func groupByFile(findings []agents.Finding) []fileGroup {
 			return fs[i].Line < fs[j].Line
 		})
 		groups = append(groups, fileGroup{file: file, findings: fs})
+	}
+
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].file < groups[j].file
+	})
+
+	return groups
+}
+
+type dedupedFileGroup struct {
+	file     string
+	findings []agents.DedupedFinding
+}
+
+func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
+	byFile := make(map[string][]agents.DedupedFinding)
+	for i := range findings {
+		file := findings[i].File
+		if file == "" {
+			file = generalFile
+		}
+		byFile[file] = append(byFile[file], findings[i])
+	}
+
+	groups := make([]dedupedFileGroup, 0, len(byFile))
+	for file, fs := range byFile {
+		sort.Slice(fs, func(i, j int) bool {
+			// Vote count desc first, then severity, then line.
+			if fs[i].VoteCount != fs[j].VoteCount {
+				return fs[i].VoteCount > fs[j].VoteCount
+			}
+			si, sj := severityOrder(fs[i].Severity), severityOrder(fs[j].Severity)
+			if si != sj {
+				return si < sj
+			}
+			return fs[i].Line < fs[j].Line
+		})
+		groups = append(groups, dedupedFileGroup{file: file, findings: fs})
 	}
 
 	sort.Slice(groups, func(i, j int) bool {
