@@ -144,6 +144,59 @@ func TestSeverityBadge(t *testing.T) {
 	}
 }
 
+func TestAgentColorClass(t *testing.T) {
+	tests := []struct {
+		role string
+		want string
+	}{
+		{"know-it-all", "agent-purple"},
+		{"architect", "agent-indigo"},
+		{"solver", "agent-teal"},
+		{"editor", "agent-orange"},
+		{"optimizer", "agent-green"},
+		{"sentinel", "agent-red"},
+		{"test-engineer", "agent-blue"},
+		{"unknown-role", "agent-default"},
+	}
+	for _, tt := range tests {
+		if got := agentColorClass(tt.role); got != tt.want {
+			t.Errorf("agentColorClass(%q) = %q, want %q", tt.role, got, tt.want)
+		}
+	}
+}
+
+func TestHTML_ContainsAgentBadges(t *testing.T) {
+	out, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "agent-badge") {
+		t.Error("HTML should contain agent-badge class")
+	}
+	if !strings.Contains(out, "solver") {
+		t.Error("HTML should contain solver agent name")
+	}
+}
+
+func TestHTML_UsesTemplate(t *testing.T) {
+	// Verify the template renders without errors for various data shapes.
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test"},
+		Result: &agents.ReviewResult{
+			Summary:  "Clean.",
+			Findings: nil,
+		},
+		Roles: []string{},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error for empty findings: %v", err)
+	}
+	if !strings.Contains(out, "PR #1") {
+		t.Error("HTML should contain PR number")
+	}
+}
+
 func TestHTML_SanitizesSummaryXSS(t *testing.T) {
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
