@@ -496,6 +496,22 @@ func TestSkill_ReturnsContent(t *testing.T) {
 	}
 }
 
+func TestDryRun_VerboseWithModelAndTimeout(t *testing.T) {
+	orch := &Orchestrator{
+		roles:  []Role{{Name: "Test", Slug: "test", Description: "A test role", SkillFile: "test.md"}},
+		opts:   Options{DryRun: true, Verbose: true, Model: "sonnet", AgentTimeout: 5 * time.Minute, MaxRetries: 2},
+		skills: map[string]string{"test": "skill content here"},
+	}
+	pr := &gh.PR{Number: "1", Title: "Test", Diff: "diff"}
+	result, err := orch.Review(pr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
 func TestSkill_MissingReturnsEmpty(t *testing.T) {
 	orch := &Orchestrator{skills: map[string]string{}}
 	role := Role{Slug: "nonexistent"}

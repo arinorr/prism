@@ -18,6 +18,17 @@ import (
 
 const defaultResultsDir = "results"
 
+// prClient abstracts the GitHub client for testability.
+type prClient interface {
+	GetPRDiff(prRef string) (*gh.PR, error)
+	PostComments(pr *gh.PR, suggestions []gh.Suggestion) error
+}
+
+// newGHClient creates a new GitHub client. Replaced in tests.
+var newGHClient = func() (prClient, error) {
+	return gh.NewClient()
+}
+
 // reviewOptions holds parsed CLI flags for the review command.
 type reviewOptions struct {
 	prRef       string
@@ -141,7 +152,7 @@ func runReview(args []string) error {
 	}
 
 	// Fetch PR diff.
-	client, err := gh.NewClient()
+	client, err := newGHClient()
 	if err != nil {
 		return fmt.Errorf("failed to initialize GitHub client: %w", err)
 	}

@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"html"
+	htmltemplate "html/template"
 	"sort"
 	"strings"
 
@@ -14,6 +14,12 @@ import (
 
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/gh"
+)
+
+const (
+	severityCritical = "critical"
+	severityWarning  = "warning"
+	severityInfo     = "info"
 )
 
 // Data holds everything needed to generate a report.
@@ -42,7 +48,6 @@ func Markdown(d *Data) string {
 			len(d.Result.FailedAgents), strings.Join(d.Result.FailedAgents, ", "))
 	}
 
-	// Summary from synthesis.
 	b.WriteString("## Summary\n\n")
 	b.WriteString(d.Result.Summary)
 	b.WriteString("\n\n")
@@ -102,7 +107,6 @@ func Markdown(d *Data) string {
 			}
 			b.WriteString("\n")
 
-			// Details for warnings and criticals.
 			for _, f := range group.findings {
 				if f.Severity == severityInfo {
 					continue
@@ -120,7 +124,6 @@ func Markdown(d *Data) string {
 		}
 	}
 
-	// Suggestions summary.
 	if len(d.Result.Suggestions) > 0 {
 		fmt.Fprintf(&b, "---\n\n*%d inline suggestions available. Use `--comment` to post them to the PR.*\n\n", len(d.Result.Suggestions))
 	}
@@ -130,11 +133,64 @@ func Markdown(d *Data) string {
 	return b.String()
 }
 
-// HTML generates a styled HTML report directly from the review data.
+// htmlTemplateData is the structured data passed to the HTML template.
+type htmlTemplateData struct {
+	PRNumber        string
+	PRTitle         string
+	FileCount       int
+	AgentCount      int
+	FindingCount    int
+	Duration        string
+	CriticalCount   int
+	WarningCount    int
+	InfoCount       int
+	SuggestionCount int
+	SummaryHTML     htmltemplate.HTML
+	FileGroups      []htmlFileGroup
+	FailedAgents    []string
+}
+
+type htmlFileGroup struct {
+	File          string
+	CriticalCount int
+	WarningCount  int
+	InfoCount     int
+	Findings      []htmlFinding
+}
+
+type htmlFinding struct {
+	Severity      string
+	SeverityClass string
+	Line          int
+	HasLine       bool
+	Role          string
+	RoleClass     string
+	Summary       string
+	Detail        string
+	HasDetail     bool
+}
+
+// agentColors maps role slugs to CSS color classes for badges.
+var agentColors = map[string]string{
+	"know-it-all":   "agent-purple",
+	"architect":     "agent-indigo",
+	"solver":        "agent-teal",
+	"editor":        "agent-orange",
+	"optimizer":     "agent-green",
+	"sentinel":      "agent-red",
+	"test-engineer": "agent-blue",
+}
+
+func agentColorClass(role string) string {
+	if c, ok := agentColors[role]; ok {
+		return c
+	}
+	return "agent-default"
+}
+
+// HTML generates a styled HTML report using Go's html/template.
 func HTML(d *Data) (string, error) {
-	// Convert the synthesis summary from markdown to HTML, then sanitize
-	// to strip any <script>, <iframe>, event handlers, etc. that could
-	// be injected via prompt injection of the LLM output.
+	// Convert synthesis summary from markdown to sanitized HTML.
 	var rawHTML bytes.Buffer
 	if err := goldmark.Convert([]byte(d.Result.Summary), &rawHTML); err != nil {
 		return "", fmt.Errorf("markdown to HTML conversion failed: %w", err)
@@ -142,7 +198,7 @@ func HTML(d *Data) (string, error) {
 	sanitizer := bluemonday.UGCPolicy()
 	summaryHTML := sanitizer.Sanitize(rawHTML.String())
 
-	// Count severities for the stats bar.
+	// Count severities.
 	var critCount, warnCount, infoCount int
 	for _, f := range d.Result.Findings {
 		switch f.Severity {
@@ -155,104 +211,13 @@ func HTML(d *Data) (string, error) {
 		}
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prism Review: PR #%s</title>
-<style>
-:root { --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de; --surface: #f6f8fa; --red: #cf222e; --red-bg: #ffebe9; --yellow: #9a6700; --yellow-bg: #fff8c5; --blue: #0969da; --blue-bg: #ddf4ff; --green: #1a7f37; --green-bg: #dafbe1; }
-* { box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.6; color: var(--fg); background: var(--bg); }
-h1 { font-size: 1.5rem; margin: 0; }
-h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bottom: 1px solid var(--border); }
-.header { border-bottom: 2px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.5rem; }
-.header .pr-title { color: var(--muted); font-size: 1rem; margin: 0.25rem 0 0.75rem; }
-.meta { display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
-.stats { display: flex; gap: 0.75rem; margin: 1.5rem 0; }
-.stat { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; }
-.stat-critical { background: var(--red-bg); color: var(--red); }
-.stat-warning { background: var(--yellow-bg); color: var(--yellow); }
-.stat-info { background: var(--blue-bg); color: var(--blue); }
-.stat-suggestions { background: var(--green-bg); color: var(--green); }
-.stat .num { font-size: 1.25rem; }
-.summary { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; margin: 1.5rem 0; }
-.summary h1, .summary h2, .summary h3 { font-size: 1.1rem; border: none; margin: 1rem 0 0.5rem; padding: 0; }
-.summary p { margin: 0.5rem 0; }
-.summary ul, .summary ol { padding-left: 1.5rem; }
-.summary table { border-collapse: collapse; width: 100%%; margin: 0.75rem 0; font-size: 0.85rem; }
-.summary th, .summary td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
-.summary th { background: var(--bg); }
-.summary pre { background: var(--bg); border: 1px solid var(--border); padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; }
-.summary code { background: var(--bg); padding: 0.15em 0.35em; border-radius: 3px; font-size: 0.85em; }
-.summary hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
-.file-group { border: 1px solid var(--border); border-radius: 8px; margin: 1rem 0; overflow: hidden; }
-.file-header { background: var(--surface); padding: 0.6rem 1rem; font-weight: 600; font-family: SFMono-Regular, Consolas, monospace; font-size: 0.9rem; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-.file-header:hover { background: #eaeef2; }
-.file-header .counts { display: flex; gap: 0.5rem; font-size: 0.75rem; font-weight: normal; font-family: -apple-system, sans-serif; }
-.file-header .counts span { padding: 0.15rem 0.5rem; border-radius: 10px; }
-.badge-critical { background: var(--red-bg); color: var(--red); }
-.badge-warning { background: var(--yellow-bg); color: var(--yellow); }
-.badge-info { background: var(--blue-bg); color: var(--blue); }
-.finding { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
-.finding:last-child { border-bottom: none; }
-.finding-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
-.finding-header .severity { font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
-.finding-header .line { font-size: 0.8rem; color: var(--muted); font-family: SFMono-Regular, Consolas, monospace; }
-.finding-header .role { font-size: 0.8rem; color: var(--muted); }
-.finding-summary { font-weight: 600; margin-bottom: 0.25rem; }
-.finding-detail { font-size: 0.9rem; color: var(--muted); line-height: 1.5; }
-.finding-detail code { background: var(--surface); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.85em; }
-.footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); text-align: center; }
-.footer a { color: var(--blue); text-decoration: none; }
-</style>
-</head>
-<body>
-
-<div class="header">
-  <h1>Prism Review: PR #%s</h1>
-  <div class="pr-title">%s</div>
-  <div class="meta">
-    <span>%d files changed</span>
-    <span>%d agents</span>
-    <span>%d findings</span>
-`, esc(d.PR.Number), esc(d.PR.Number), esc(d.PR.Title), len(d.PR.Files), len(d.Roles), len(d.Result.Findings))
-
-	if d.Duration != "" {
-		fmt.Fprintf(&b, "    <span>%s</span>\n", d.Duration)
-	}
-	b.WriteString("  </div>\n</div>\n\n")
-
-	// Stats bar.
-	b.WriteString("<div class=\"stats\">\n")
-	fmt.Fprintf(&b, "  <div class=\"stat stat-critical\"><span class=\"num\">%d</span> critical</div>\n", critCount)
-	fmt.Fprintf(&b, "  <div class=\"stat stat-warning\"><span class=\"num\">%d</span> warning</div>\n", warnCount)
-	fmt.Fprintf(&b, "  <div class=\"stat stat-info\"><span class=\"num\">%d</span> info</div>\n", infoCount)
-	fmt.Fprintf(&b, "  <div class=\"stat stat-suggestions\"><span class=\"num\">%d</span> suggestions</div>\n", len(d.Result.Suggestions))
-	b.WriteString("</div>\n\n")
-
-	// Synthesis summary.
-	// Failed agents notice.
-	if len(d.Result.FailedAgents) > 0 {
-		fmt.Fprintf(&b, "<div style=\"background:var(--yellow-bg);color:var(--yellow);padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem\">⚠️ <strong>%d agent(s) failed:</strong> %s</div>\n",
-			len(d.Result.FailedAgents), esc(strings.Join(d.Result.FailedAgents, ", ")))
-	}
-
-	b.WriteString("<h2>Summary</h2>\n")
-	b.WriteString("<div class=\"summary\">\n")
-	b.WriteString(summaryHTML)
-	b.WriteString("</div>\n\n")
-
-	// Findings grouped by file.
+	// Build template data.
+	var fileGroups []htmlFileGroup
 	if len(d.Result.Findings) > 0 {
-		b.WriteString("<h2>Findings by File</h2>\n\n")
-		grouped := groupByFile(d.Result.Findings)
-		for _, group := range grouped {
-			// Count per-file severities.
+		for _, g := range groupByFile(d.Result.Findings) {
 			var fc, fw, fi int
-			for _, f := range group.findings {
+			var findings []htmlFinding
+			for _, f := range g.findings {
 				switch f.Severity {
 				case severityCritical:
 					fc++
@@ -261,54 +226,215 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 				default:
 					fi++
 				}
-			}
-
-			b.WriteString("<div class=\"file-group\">\n")
-			fmt.Fprintf(&b, "  <div class=\"file-header\"><span>%s</span><div class=\"counts\">", esc(group.file))
-			if fc > 0 {
-				fmt.Fprintf(&b, "<span class=\"badge-critical\">%d critical</span>", fc)
-			}
-			if fw > 0 {
-				fmt.Fprintf(&b, "<span class=\"badge-warning\">%d warning</span>", fw)
-			}
-			if fi > 0 {
-				fmt.Fprintf(&b, "<span class=\"badge-info\">%d info</span>", fi)
-			}
-			b.WriteString("</div></div>\n")
-
-			for _, f := range group.findings {
-				severityClass := "badge-info"
+				sevClass := "badge-info"
 				switch f.Severity {
 				case severityCritical:
-					severityClass = "badge-critical"
+					sevClass = "badge-critical"
 				case severityWarning:
-					severityClass = "badge-warning"
+					sevClass = "badge-warning"
 				}
-
-				b.WriteString("  <div class=\"finding\">\n")
-				b.WriteString("    <div class=\"finding-header\">\n")
-				fmt.Fprintf(&b, "      <span class=\"severity %s\">%s</span>\n", severityClass, esc(f.Severity))
-				if f.Line > 0 {
-					fmt.Fprintf(&b, "      <span class=\"line\">line %d</span>\n", f.Line)
-				}
-				fmt.Fprintf(&b, "      <span class=\"role\">%s</span>\n", esc(f.Role))
-				b.WriteString("    </div>\n")
-				fmt.Fprintf(&b, "    <div class=\"finding-summary\">%s</div>\n", esc(f.Summary))
-				if f.Detail != "" {
-					fmt.Fprintf(&b, "    <div class=\"finding-detail\">%s</div>\n", esc(f.Detail))
-				}
-				b.WriteString("  </div>\n")
+				findings = append(findings, htmlFinding{
+					Severity:      f.Severity,
+					SeverityClass: sevClass,
+					Line:          f.Line,
+					HasLine:       f.Line > 0,
+					Role:          f.Role,
+					RoleClass:     agentColorClass(f.Role),
+					Summary:       f.Summary,
+					Detail:        f.Detail,
+					HasDetail:     f.Detail != "",
+				})
 			}
-			b.WriteString("</div>\n\n")
+			fileGroups = append(fileGroups, htmlFileGroup{
+				File:          g.file,
+				CriticalCount: fc,
+				WarningCount:  fw,
+				InfoCount:     fi,
+				Findings:      findings,
+			})
 		}
 	}
 
-	// Footer.
-	b.WriteString("<div class=\"footer\">Generated by <a href=\"https://github.com/arinorr/prism\">Prism</a></div>\n")
-	b.WriteString("\n</body>\n</html>\n")
+	td := htmlTemplateData{
+		PRNumber:        d.PR.Number,
+		PRTitle:         d.PR.Title,
+		FileCount:       len(d.PR.Files),
+		AgentCount:      len(d.Roles),
+		FindingCount:    len(d.Result.Findings),
+		Duration:        d.Duration,
+		CriticalCount:   critCount,
+		WarningCount:    warnCount,
+		InfoCount:       infoCount,
+		SuggestionCount: len(d.Result.Suggestions),
+		SummaryHTML:     htmltemplate.HTML(summaryHTML), // #nosec G203 -- already sanitized by bluemonday
+		FileGroups:      fileGroups,
+		FailedAgents:    d.Result.FailedAgents,
+	}
 
-	return b.String(), nil
+	tmpl, err := htmltemplate.New("report").Parse(htmlReportTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse HTML template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, td); err != nil {
+		return "", fmt.Errorf("failed to execute HTML template: %w", err)
+	}
+
+	return buf.String(), nil
 }
+
+const htmlReportTemplate = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism Review: PR #{{.PRNumber}}</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
+  --surface: #f6f8fa;
+  --red: #cf222e; --red-bg: #ffebe9;
+  --yellow: #9a6700; --yellow-bg: #fff8c5;
+  --blue: #0969da; --blue-bg: #ddf4ff;
+  --green: #1a7f37; --green-bg: #dafbe1;
+}
+* { box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.6; color: var(--fg); background: var(--bg); }
+h1 { font-size: 1.5rem; margin: 0; }
+h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bottom: 1px solid var(--border); }
+
+/* Header */
+.header { border-bottom: 2px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.5rem; }
+.header .pr-title { color: var(--muted); font-size: 1rem; margin: 0.25rem 0 0.75rem; }
+.meta { display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
+
+/* Stats bar */
+.stats { display: flex; gap: 0.75rem; margin: 1.5rem 0; flex-wrap: wrap; }
+.stat { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; }
+.stat-critical { background: var(--red-bg); color: var(--red); }
+.stat-warning { background: var(--yellow-bg); color: var(--yellow); }
+.stat-info { background: var(--blue-bg); color: var(--blue); }
+.stat-suggestions { background: var(--green-bg); color: var(--green); }
+.stat .num { font-size: 1.25rem; }
+
+/* Summary */
+.summary { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; margin: 1.5rem 0; }
+.summary h1, .summary h2, .summary h3 { font-size: 1.1rem; border: none; margin: 1rem 0 0.5rem; padding: 0; }
+.summary p { margin: 0.5rem 0; }
+.summary ul, .summary ol { padding-left: 1.5rem; }
+.summary table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.85rem; }
+.summary th, .summary td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
+.summary th { background: var(--bg); }
+.summary pre { background: var(--bg); border: 1px solid var(--border); padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; }
+.summary code { background: var(--bg); padding: 0.15em 0.35em; border-radius: 3px; font-size: 0.85em; }
+.summary hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+
+/* Failed agents banner */
+.failed-banner { background: var(--yellow-bg); color: var(--yellow); padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600; }
+
+/* File groups */
+.file-group { border: 1px solid var(--border); border-radius: 8px; margin: 1rem 0; overflow: hidden; }
+.file-header { background: var(--surface); padding: 0.6rem 1rem; font-weight: 600; font-family: SFMono-Regular, Consolas, monospace; font-size: 0.9rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.file-header .counts { display: flex; gap: 0.5rem; font-size: 0.75rem; font-weight: normal; font-family: -apple-system, sans-serif; }
+.file-header .counts span { padding: 0.15rem 0.5rem; border-radius: 10px; }
+.badge-critical { background: var(--red-bg); color: var(--red); }
+.badge-warning { background: var(--yellow-bg); color: var(--yellow); }
+.badge-info { background: var(--blue-bg); color: var(--blue); }
+
+/* Findings */
+.finding { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+.finding:last-child { border-bottom: none; }
+.finding-meta { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
+.finding-meta .severity { font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.6rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.finding-meta .line { font-size: 0.8rem; color: var(--muted); font-family: SFMono-Regular, Consolas, monospace; }
+
+/* Agent badges */
+.agent-badge { font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 10px; border: 1.5px solid; }
+.agent-purple { background: #f5f0ff; color: #6e40c9; border-color: #d8b9ff; }
+.agent-indigo { background: #eef0ff; color: #4f46e5; border-color: #c7d2fe; }
+.agent-teal { background: #e6fffa; color: #0d9488; border-color: #99f6e4; }
+.agent-orange { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
+.agent-green { background: #ecfdf5; color: #15803d; border-color: #a7f3d0; }
+.agent-red { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.agent-blue { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.agent-default { background: var(--surface); color: var(--muted); border-color: var(--border); }
+
+.finding-summary { font-weight: 600; margin-bottom: 0.25rem; }
+.finding-detail { font-size: 0.9rem; color: var(--muted); line-height: 1.5; }
+
+/* Footer */
+.footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); text-align: center; }
+.footer a { color: var(--blue); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Prism Review: PR #{{.PRNumber}}</h1>
+  <div class="pr-title">{{.PRTitle}}</div>
+  <div class="meta">
+    <span>{{.FileCount}} files changed</span>
+    <span>{{.AgentCount}} agents</span>
+    <span>{{.FindingCount}} findings</span>
+    {{- if .Duration}}
+    <span>{{.Duration}}</span>
+    {{- end}}
+  </div>
+</div>
+
+{{- if .FailedAgents}}
+<div class="failed-banner">⚠️ {{len .FailedAgents}} agent(s) failed: {{range $i, $a := .FailedAgents}}{{if $i}}, {{end}}{{$a}}{{end}}</div>
+{{- end}}
+
+<div class="stats">
+  <div class="stat stat-critical"><span class="num">{{.CriticalCount}}</span> critical</div>
+  <div class="stat stat-warning"><span class="num">{{.WarningCount}}</span> warning</div>
+  <div class="stat stat-info"><span class="num">{{.InfoCount}}</span> info</div>
+  <div class="stat stat-suggestions"><span class="num">{{.SuggestionCount}}</span> suggestions</div>
+</div>
+
+<h2>Summary</h2>
+<div class="summary">
+{{.SummaryHTML}}
+</div>
+
+{{- if .FileGroups}}
+<h2>Findings by File</h2>
+{{range .FileGroups}}
+<div class="file-group">
+  <div class="file-header">
+    <span>{{.File}}</span>
+    <div class="counts">
+      {{- if gt .CriticalCount 0}}<span class="badge-critical">{{.CriticalCount}} critical</span>{{end}}
+      {{- if gt .WarningCount 0}}<span class="badge-warning">{{.WarningCount}} warning</span>{{end}}
+      {{- if gt .InfoCount 0}}<span class="badge-info">{{.InfoCount}} info</span>{{end}}
+    </div>
+  </div>
+  {{range .Findings}}
+  <div class="finding">
+    <div class="finding-meta">
+      <span class="severity {{.SeverityClass}}">{{.Severity}}</span>
+      {{- if .HasLine}}
+      <span class="line">line {{.Line}}</span>
+      {{- end}}
+      <span class="agent-badge {{.RoleClass}}">{{.Role}}</span>
+    </div>
+    <div class="finding-summary">{{.Summary}}</div>
+    {{- if .HasDetail}}
+    <div class="finding-detail">{{.Detail}}</div>
+    {{- end}}
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{- end}}
+
+<div class="footer">Generated by <a href="https://github.com/arinorr/prism">Prism</a></div>
+
+</body>
+</html>
+`
 
 // JSON outputs the review result as structured JSON.
 func JSON(d *Data) (string, error) {
@@ -406,7 +532,6 @@ func groupByFile(findings []agents.Finding) []fileGroup {
 
 	groups := make([]fileGroup, 0, len(byFile))
 	for file, fs := range byFile {
-		// Sort by severity (critical > warning > info), then by line.
 		sort.Slice(fs, func(i, j int) bool {
 			si, sj := severityOrder(fs[i].Severity), severityOrder(fs[j].Severity)
 			if si != sj {
@@ -442,7 +567,6 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 	groups := make([]dedupedFileGroup, 0, len(byFile))
 	for file, fs := range byFile {
 		sort.Slice(fs, func(i, j int) bool {
-			// Vote count desc first, then severity, then line.
 			if fs[i].VoteCount != fs[j].VoteCount {
 				return fs[i].VoteCount > fs[j].VoteCount
 			}
@@ -462,12 +586,6 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 	return groups
 }
 
-const (
-	severityCritical = "critical"
-	severityWarning  = "warning"
-	severityInfo     = "info"
-)
-
 func severityOrder(s string) int {
 	switch s {
 	case severityCritical:
@@ -477,11 +595,6 @@ func severityOrder(s string) int {
 	default:
 		return 2
 	}
-}
-
-// esc escapes a string for safe HTML output.
-func esc(s string) string {
-	return html.EscapeString(s)
 }
 
 func severityBadge(s string) string {

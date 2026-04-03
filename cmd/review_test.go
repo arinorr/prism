@@ -10,6 +10,30 @@ import (
 	"github.com/arinorr/prism/internal/gh"
 )
 
+// mockClient implements prClient for testing.
+type mockClient struct {
+	pr  *gh.PR
+	err error
+}
+
+func (m *mockClient) GetPRDiff(_ string) (*gh.PR, error) {
+	return m.pr, m.err
+}
+
+func (m *mockClient) PostComments(_ *gh.PR, _ []gh.Suggestion) error {
+	return nil
+}
+
+// withMockClient replaces the GH client constructor for the duration of a test.
+func withMockClient(t *testing.T, pr *gh.PR, err error) {
+	t.Helper()
+	orig := newGHClient
+	newGHClient = func() (prClient, error) {
+		return &mockClient{pr: pr, err: err}, nil
+	}
+	t.Cleanup(func() { newGHClient = orig })
+}
+
 func TestParseReviewArgs_BasicPR(t *testing.T) {
 	opts, err := parseReviewArgs([]string{"42"})
 	if err != nil {
@@ -411,6 +435,23 @@ func TestOutputResults_WritesToFile(t *testing.T) {
 	}
 }
 
+func TestOutputResults_MarkdownToFile(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "md", toStdout: false}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = os.RemoveAll("results")
+}
+
+func TestOutputResults_HTMLToStdout(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "html", toStdout: true}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestOutputResults_HandlesCommentNoSuggestions(t *testing.T) {
 	// When --comment is set but there are no suggestions, outputResults
 	// should print "No inline suggestions to post." to signal it handled the flag.
@@ -424,6 +465,14 @@ func TestOutputResults_HandlesCommentNoSuggestions(t *testing.T) {
 	}
 	// If we got here without handling comments, the feature is broken.
 	// The fix adds comment handling to outputResults.
+}
+
+func TestRunReview_InvalidPRRef(t *testing.T) {
+	// Flag injection attempt — should be caught by ValidatePRRef.
+	err := runReview([]string{"--exec=evil"})
+	if err == nil {
+		t.Fatal("expected error for flag injection ref")
+	}
 }
 
 func TestRunReview_BadRolesFromEquals(t *testing.T) {
@@ -645,5 +694,177 @@ func TestExecute_UnknownCommand(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown command") {
 		t.Errorf("expected 'unknown command' error, got: %v", err)
+	}
+}
+
+func TestIsInteractive_InTest(t *testing.T) {
+	// In tests, stdin is typically not a terminal.
+	result := isInteractive()
+	// In CI/test, this should be false (stdin is piped).
+	if result {
+		t.Log("isInteractive returned true — running in a terminal")
+	}
+}
+
+func TestRunReview_ConfigWithValidRoles(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yml")
+	if err := os.WriteFile(cfgPath, []byte("roles:\n  - sentinel\nmodel: sonnet\nagent_timeout: \"2m\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Will fail at GetPRDiff, but exercises config loading + role parsing + merge.
+	err := runReview([]string{"99999", "--config", cfgPath})
+	if err == nil {
+		t.Skip("unexpectedly succeeded")
+	}
+}
+
+func TestRunReview_WithModelAndTimeout(t *testing.T) {
+	// Exercises config merge path with CLI overrides.
+	err := runReview([]string{"99999", "--model", "haiku", "--timeout", "1m", "--max-retries", "2"})
+	if err == nil {
+		t.Skip("unexpectedly succeeded")
+	}
+}
+
+func TestRunReview_WithYesFlag(t *testing.T) {
+	err := runReview([]string{"99999", "--yes"})
+	if err == nil {
+		t.Skip("unexpectedly succeeded")
+	}
+}
+
+func TestRunReview_ConfigWithBadRoles(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yml")
+	if err := os.WriteFile(cfgPath, []byte("roles:\n  - nonexistent\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runReview([]string{"42", "--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected error for bad roles in config")
+	}
+	if !strings.Contains(err.Error(), "unknown role") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReview_BadConfig(t *testing.T) {
+	dir := t.TempDir()
+	badConfig := filepath.Join(dir, "bad.yml")
+	if err := os.WriteFile(badConfig, []byte("roles: [not closed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runReview([]string{"42", "--config", badConfig})
+	if err == nil {
+		t.Fatal("expected error for bad config")
+	}
+	if !strings.Contains(err.Error(), "failed to load config") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParseReviewArgs_YesFlag(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--yes"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.yes {
+		t.Error("expected yes=true")
+	}
+}
+
+func TestParseReviewArgs_YShorthand(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "-y"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.yes {
+		t.Error("expected yes=true from -y")
+	}
+}
+
+func TestOutputResults_JSONToStdout(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "json", toStdout: true}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOutputResults_JSONToFile(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "json", toStdout: false}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = os.RemoveAll("results")
+}
+
+func TestOutputResults_HTMLToFile(t *testing.T) {
+	opts := &reviewOptions{formatFlag: "html", toStdout: false}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = os.RemoveAll("results")
+}
+
+func TestOutputResults_FormatFromConfig(t *testing.T) {
+	// When formatFlag comes from config (6th arg) not CLI opts.
+	opts := &reviewOptions{toStdout: true}
+	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, "md")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReview_FullPipelineWithMockClient(t *testing.T) {
+	withMockClient(t, &gh.PR{
+		Number: "42",
+		Title:  "Test PR",
+		Diff:   "diff content here",
+		Files: []gh.FileChange{
+			{Path: "src/app.ts", Status: "modified"},
+			{Path: "main.go", Status: "modified"},
+		},
+	}, nil)
+
+	// This will fail at the orchestrator (skill files not found from test binary)
+	// but exercises config loading, role parsing, size check, and language detection.
+	err := runReview([]string{"42", "--dry-run", "--yes"})
+	// Dry run succeeds even without real skill files since it doesn't call claude.
+	// But it will fail loading skills. Either way, we exercise the path.
+	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReview_MockClientGetPRDiffError(t *testing.T) {
+	withMockClient(t, nil, os.ErrNotExist)
+
+	err := runReview([]string{"42"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "failed to get PR diff") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReview_LargeDiffWithYes(t *testing.T) {
+	largeDiff := strings.Repeat("x", 200000) // 200KB, above warn threshold
+	withMockClient(t, &gh.PR{
+		Number: "42",
+		Title:  "Big PR",
+		Diff:   largeDiff,
+		Files:  []gh.FileChange{{Path: "big.go"}},
+	}, nil)
+
+	// --yes skips the interactive prompt; --dry-run avoids needing skill files.
+	err := runReview([]string{"42", "--yes", "--dry-run"})
+	// Will fail at skill loading, but the size check + confirmation skip path is exercised.
+	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

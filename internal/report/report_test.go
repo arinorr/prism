@@ -144,6 +144,59 @@ func TestSeverityBadge(t *testing.T) {
 	}
 }
 
+func TestAgentColorClass(t *testing.T) {
+	tests := []struct {
+		role string
+		want string
+	}{
+		{"know-it-all", "agent-purple"},
+		{"architect", "agent-indigo"},
+		{"solver", "agent-teal"},
+		{"editor", "agent-orange"},
+		{"optimizer", "agent-green"},
+		{"sentinel", "agent-red"},
+		{"test-engineer", "agent-blue"},
+		{"unknown-role", "agent-default"},
+	}
+	for _, tt := range tests {
+		if got := agentColorClass(tt.role); got != tt.want {
+			t.Errorf("agentColorClass(%q) = %q, want %q", tt.role, got, tt.want)
+		}
+	}
+}
+
+func TestHTML_ContainsAgentBadges(t *testing.T) {
+	out, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "agent-badge") {
+		t.Error("HTML should contain agent-badge class")
+	}
+	if !strings.Contains(out, "solver") {
+		t.Error("HTML should contain solver agent name")
+	}
+}
+
+func TestHTML_UsesTemplate(t *testing.T) {
+	// Verify the template renders without errors for various data shapes.
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test"},
+		Result: &agents.ReviewResult{
+			Summary:  "Clean.",
+			Findings: nil,
+		},
+		Roles: []string{},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error for empty findings: %v", err)
+	}
+	if !strings.Contains(out, "PR #1") {
+		t.Error("HTML should contain PR number")
+	}
+}
+
 func TestHTML_SanitizesSummaryXSS(t *testing.T) {
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
@@ -447,5 +500,55 @@ func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
 	}
 	if groups[0].file != "(general)" {
 		t.Errorf("expected '(general)' for empty file, got %q", groups[0].file)
+	}
+}
+
+func TestGroupDedupedByFile_MultipleFiles(t *testing.T) {
+	findings := []agents.DedupedFinding{
+		{Finding: agents.Finding{File: "c.go", Line: 1, Severity: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Severity: "critical"}, VoteCount: 5},
+		{Finding: agents.Finding{File: "a.go", Line: 20, Severity: "warning"}, VoteCount: 2},
+		{Finding: agents.Finding{File: "b.go", Line: 5, Severity: "critical"}, VoteCount: 3},
+	}
+	groups := groupDedupedByFile(findings)
+	if len(groups) != 3 {
+		t.Fatalf("expected 3 groups, got %d", len(groups))
+	}
+	// Sorted alphabetically by file.
+	if groups[0].file != "a.go" || groups[1].file != "b.go" || groups[2].file != "c.go" {
+		t.Errorf("expected [a.go, b.go, c.go], got [%s, %s, %s]", groups[0].file, groups[1].file, groups[2].file)
+	}
+}
+
+func TestHTML_FailedAgentsBanner(t *testing.T) {
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
+		Result: &agents.ReviewResult{
+			Summary:      "Partial.",
+			FailedAgents: []string{"Sentinel", "Optimizer"},
+		},
+		Roles: []string{"Test"},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "failed") {
+		t.Error("HTML should contain failed agents banner")
+	}
+	if !strings.Contains(out, "Sentinel") {
+		t.Error("HTML should list failed agent names")
+	}
+}
+
+func TestMarkdown_NoFailedAgents(t *testing.T) {
+	d := &Data{
+		PR:     &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
+		Result: &agents.ReviewResult{Summary: "Clean."},
+		Roles:  []string{"Test"},
+	}
+	out := Markdown(d)
+	if strings.Contains(out, "failed") {
+		t.Error("should not contain failed agents notice when none failed")
 	}
 }
