@@ -151,12 +151,10 @@ func TestGetPRDiff_RoutesToGH(t *testing.T) {
 				t.Errorf("expected gh command, got %q", name)
 			}
 			switch callCount {
-			case 1: // gh pr view --json metadata
-				return []byte(`{"number":42,"title":"Test PR","body":"desc","headRefOid":"abc123"}`), nil
+			case 1: // gh pr view --json metadata+files (combined)
+				return []byte(`{"number":42,"title":"Test PR","body":"desc","headRefOid":"abc123","files":[{"path":"main.go","additions":1,"deletions":0}]}`), nil
 			case 2: // gh pr diff
 				return []byte("+ added line\n"), nil
-			case 3: // gh pr view --json files
-				return []byte(`{"files":[{"path":"main.go","additions":1,"deletions":0}]}`), nil
 			}
 			return nil, fmt.Errorf("unexpected call %d", callCount)
 		},
@@ -181,8 +179,8 @@ func TestGetPRDiff_RoutesToGH(t *testing.T) {
 	if pr.Files[0].Path != "main.go" {
 		t.Errorf("expected file 'main.go', got %q", pr.Files[0].Path)
 	}
-	if callCount != 3 {
-		t.Errorf("expected 3 calls, got %d", callCount)
+	if callCount != 2 {
+		t.Errorf("expected 2 calls, got %d", callCount)
 	}
 }
 
@@ -225,7 +223,7 @@ func TestGetPRDiffGH_DiffError(t *testing.T) {
 		run: func(name string, args ...string) ([]byte, error) {
 			callCount++
 			if callCount == 1 {
-				return []byte(`{"number":1,"title":"t","body":"b","headRefOid":"sha"}`), nil
+				return []byte(`{"number":1,"title":"t","body":"b","headRefOid":"sha","files":[]}`), nil
 			}
 			return nil, fmt.Errorf("diff error")
 		},
@@ -235,56 +233,6 @@ func TestGetPRDiffGH_DiffError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "gh pr diff failed") {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestGetPRDiffGH_FilesError(t *testing.T) {
-	callCount := 0
-	client := &Client{
-		useGH: true,
-		run: func(name string, args ...string) ([]byte, error) {
-			callCount++
-			switch callCount {
-			case 1:
-				return []byte(`{"number":1,"title":"t","body":"b","headRefOid":"sha"}`), nil
-			case 2:
-				return []byte("diff"), nil
-			}
-			return nil, fmt.Errorf("files error")
-		},
-	}
-	_, err := client.GetPRDiff("1")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "gh pr view files failed") {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestGetPRDiffGH_InvalidFilesJSON(t *testing.T) {
-	callCount := 0
-	client := &Client{
-		useGH: true,
-		run: func(name string, args ...string) ([]byte, error) {
-			callCount++
-			switch callCount {
-			case 1:
-				return []byte(`{"number":1,"title":"t","body":"b","headRefOid":"sha"}`), nil
-			case 2:
-				return []byte("diff"), nil
-			case 3:
-				return []byte("bad json"), nil
-			}
-			return nil, fmt.Errorf("unexpected")
-		},
-	}
-	_, err := client.GetPRDiff("1")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "failed to parse files") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

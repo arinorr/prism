@@ -801,22 +801,6 @@ func TestRunAgent_Timeout(t *testing.T) {
 	}
 }
 
-func TestClaudeBaseArgs_NoModel(t *testing.T) {
-	orch := &Orchestrator{opts: Options{}}
-	args := orch.claudeBaseArgs()
-	if len(args) != 1 || args[0] != "--print" {
-		t.Errorf("expected [--print], got %v", args)
-	}
-}
-
-func TestClaudeBaseArgs_WithModel(t *testing.T) {
-	orch := &Orchestrator{opts: Options{Model: "opus"}}
-	args := orch.claudeBaseArgs()
-	if len(args) != 3 || args[1] != "--model" || args[2] != "opus" {
-		t.Errorf("expected [--print --model opus], got %v", args)
-	}
-}
-
 func TestSynthesize_Success(t *testing.T) {
 	orch := &Orchestrator{
 		opts: Options{},

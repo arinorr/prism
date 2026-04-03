@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,10 @@ type Options struct {
 	Model        string
 	AgentTimeout time.Duration
 	MaxRetries   int
+	// Out receives progress messages (agent status, timing). Defaults to os.Stdout.
+	Out io.Writer
+	// ErrOut receives error/warning messages. Defaults to os.Stderr.
+	ErrOut io.Writer
 }
 
 // Orchestrator manages the multi-agent review process.
@@ -57,6 +62,36 @@ type Orchestrator struct {
 	opts   Options
 	skills map[string]string // immutable after construction
 	llm    llm.LLM
+}
+
+func (o *Orchestrator) out() io.Writer {
+	if o.opts.Out != nil {
+		return o.opts.Out
+	}
+	return os.Stdout
+}
+
+func (o *Orchestrator) errOut() io.Writer {
+	if o.opts.ErrOut != nil {
+		return o.opts.ErrOut
+	}
+	return os.Stderr
+}
+
+// logf writes a formatted progress message. Errors writing to the progress
+// writer are intentionally ignored — progress output is best-effort.
+func (o *Orchestrator) logf(format string, args ...any) {
+	_, _ = fmt.Fprintf(o.out(), format, args...)
+}
+
+// logln writes a progress message with a trailing newline.
+func (o *Orchestrator) logln(args ...any) {
+	_, _ = fmt.Fprintln(o.out(), args...)
+}
+
+// errLogf writes a formatted error/warning message.
+func (o *Orchestrator) errLogf(format string, args ...any) {
+	_, _ = fmt.Fprintf(o.errOut(), format, args...)
 }
 
 // NewOrchestrator creates a new orchestrator with the given roles, LLM backend,
@@ -135,36 +170,36 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 		return nil, fmt.Errorf("no roles selected")
 	}
 
-	fmt.Println("🏜️  DRY RUN — no agents will be called")
-	fmt.Printf("Diff size: %d bytes\n\n", len(pr.Diff))
+	o.logln("🏜️  DRY RUN — no agents will be called")
+	o.logf("Diff size: %d bytes\n\n", len(pr.Diff))
 
-	fmt.Printf("Agents that would run (%d):\n", len(o.roles))
+	o.logf("Agents that would run (%d):\n", len(o.roles))
 	for _, r := range o.roles {
-		fmt.Printf("   • %s — %s\n", r.Name, r.Description)
+		o.logf("   • %s — %s\n", r.Name, r.Description)
 		if o.opts.Verbose {
-			fmt.Printf("     Skill file: %s (%d bytes)\n", r.SkillFile, len(o.skill(r)))
+			o.logf("     Skill file: %s (%d bytes)\n", r.SkillFile, len(o.skill(r)))
 		}
 	}
 
 	if o.opts.Verbose {
 		if o.opts.Model != "" {
-			fmt.Printf("\nModel: %s\n", o.opts.Model)
+			o.logf("\nModel: %s\n", o.opts.Model)
 		}
 		if o.opts.AgentTimeout > 0 {
-			fmt.Printf("Agent timeout: %s\n", o.opts.AgentTimeout)
+			o.logf("Agent timeout: %s\n", o.opts.AgentTimeout)
 		}
-		fmt.Printf("Max retries: %d\n", o.opts.MaxRetries)
+		o.logf("Max retries: %d\n", o.opts.MaxRetries)
 	}
 
-	fmt.Printf("\nSample prompt (for %s):\n", o.roles[0].Name)
-	fmt.Println("───────────────────────────────────────")
+	o.logf("\nSample prompt (for %s):\n", o.roles[0].Name)
+	o.logln("───────────────────────────────────────")
 	prompt := buildAgentPrompt(o.roles[0], pr)
 	if len(prompt) > previewMaxBytes {
-		fmt.Printf("%s\n... (%d bytes total)\n", truncateUTF8(prompt, previewMaxBytes), len(prompt))
+		o.logf("%s\n... (%d bytes total)\n", truncateUTF8(prompt, previewMaxBytes), len(prompt))
 	} else {
-		fmt.Println(prompt)
+		o.logln(prompt)
 	}
-	fmt.Println("───────────────────────────────────────")
+	o.logln("───────────────────────────────────────")
 
 	return &ReviewResult{
 		Summary: "[dry run — no review performed]",
@@ -189,7 +224,7 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, error) {
 			defer wg.Done()
 
 			mu.Lock()
-			fmt.Printf("   🔍 [%s] reviewing...\n", r.Name)
+			o.logf("   🔍 [%s] reviewing...\n", r.Name)
 			mu.Unlock()
 
 			fb, err := o.runAgentWithRetry(r, pr)
@@ -200,19 +235,19 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, error) {
 			if err != nil {
 				errs = append(errs, fmt.Errorf("[%s] %w", r.Name, err))
 				failedAgents = append(failedAgents, r.Name)
-				fmt.Printf("   ⚠️  [%s] failed (%d/%d done)\n", r.Name, done, total)
+				o.logf("   ⚠️  [%s] failed (%d/%d done)\n", r.Name, done, total)
 			} else {
 				feedbacks = append(feedbacks, *fb)
-				fmt.Printf("   ✅ [%s] %d findings (%d/%d done)\n", r.Name, len(fb.Findings), done, total)
+				o.logf("   ✅ [%s] %d findings (%d/%d done)\n", r.Name, len(fb.Findings), done, total)
 			}
 		}(role)
 	}
 
 	wg.Wait()
-	fmt.Println()
+	o.logln()
 
 	if len(failedAgents) > 0 && len(feedbacks) > 0 {
-		fmt.Printf("   ⚠️  %d agent(s) failed: %s\n\n", len(failedAgents), strings.Join(failedAgents, ", "))
+		o.logf("   ⚠️  %d agent(s) failed: %s\n\n", len(failedAgents), strings.Join(failedAgents, ", "))
 	}
 
 	if len(feedbacks) == 0 {
@@ -236,7 +271,7 @@ func (o *Orchestrator) runAgentWithRetry(role Role, pr *gh.PR) (*Feedback, error
 		}
 		lastErr = err
 		if attempt < maxAttempts {
-			fmt.Printf("   🔄 [%s] retry %d/%d...\n", role.Name, attempt, o.opts.MaxRetries)
+			o.logf("   🔄 [%s] retry %d/%d...\n", role.Name, attempt, o.opts.MaxRetries)
 		}
 	}
 	return nil, lastErr
@@ -247,7 +282,7 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	skill := o.skill(role)
 
 	if o.opts.Verbose {
-		fmt.Printf("   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
+		o.logf("   📝 [%s] prompt: %d bytes, skill: %d bytes\n", role.Name, len(prompt), len(skill))
 	}
 
 	// Build context with optional timeout.
@@ -269,20 +304,20 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 
 	if err != nil {
 		if o.opts.Verbose {
-			fmt.Fprintf(os.Stderr, "   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
+			o.errLogf("   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
 		}
 		return nil, err
 	}
 
 	if o.opts.Verbose {
-		fmt.Printf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(response))
+		o.logf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(response))
 	}
 
 	// Extract the structured feedback from the response text.
 	fb, err := parseFeedback(role.Slug, response)
 	if err != nil {
 		if o.opts.Verbose {
-			fmt.Fprintf(os.Stderr, "   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(response, previewMaxBytes))
+			o.errLogf("   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(response, previewMaxBytes))
 		}
 		return nil, fmt.Errorf("failed to parse feedback: %w", err)
 	}
@@ -290,18 +325,8 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	return fb, nil
 }
 
-// claudeBaseArgs returns the common args for all claude invocations.
-// Retained for compatibility with tests that verify model flag passing.
-func (o *Orchestrator) claudeBaseArgs() []string {
-	args := []string{"--print"}
-	if o.opts.Model != "" {
-		args = append(args, "--model", o.opts.Model)
-	}
-	return args
-}
-
 func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResult, error) {
-	fmt.Println("   🧠 Synthesizing feedback from all agents...")
+	o.logln("   🧠 Synthesizing feedback from all agents...")
 	synthesisPrompt := buildSynthesisPrompt(pr, feedbacks)
 
 	// Build context with optional timeout.
@@ -328,7 +353,7 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 			f.Role = fb.Role
 			allFindings = append(allFindings, f)
 			// Only create PR comments for warning and critical — info would flood the PR.
-			if f.File != "" && f.Line > 0 && f.Severity != "info" {
+			if f.File != "" && f.Line > 0 && f.Severity != SeverityInfo {
 				suggestions = append(suggestions, gh.Suggestion{
 					File: f.File,
 					Line: f.Line,

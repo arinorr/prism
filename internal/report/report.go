@@ -16,10 +16,11 @@ import (
 	"github.com/arinorr/prism/internal/gh"
 )
 
+// Use severity constants from agents package to avoid duplication.
 const (
-	severityCritical = "critical"
-	severityWarning  = "warning"
-	severityInfo     = "info"
+	severityCritical = agents.SeverityCritical
+	severityWarning  = agents.SeverityWarning
+	severityInfo     = agents.SeverityInfo
 )
 
 // Data holds everything needed to generate a report.
@@ -168,6 +169,8 @@ type htmlFinding struct {
 	Summary       string
 	Detail        string
 	HasDetail     bool
+	VoteCount     int
+	TotalAgents   int
 }
 
 // agentColors maps role slugs to CSS color classes for badges.
@@ -198,22 +201,77 @@ func HTML(d *Data) (string, error) {
 	sanitizer := bluemonday.UGCPolicy()
 	summaryHTML := sanitizer.Sanitize(rawHTML.String())
 
-	// Count severities.
+	// Build template data — prefer deduped findings when available.
 	var critCount, warnCount, infoCount int
-	for _, f := range d.Result.Findings {
-		switch f.Severity {
-		case severityCritical:
-			critCount++
-		case severityWarning:
-			warnCount++
-		default:
-			infoCount++
-		}
-	}
-
-	// Build template data.
+	var findingCount int
 	var fileGroups []htmlFileGroup
-	if len(d.Result.Findings) > 0 {
+
+	if len(d.Result.DedupedFindings) > 0 {
+		findingCount = len(d.Result.DedupedFindings)
+		for i := range d.Result.DedupedFindings {
+			switch d.Result.DedupedFindings[i].Severity {
+			case severityCritical:
+				critCount++
+			case severityWarning:
+				warnCount++
+			default:
+				infoCount++
+			}
+		}
+		for _, g := range groupDedupedByFile(d.Result.DedupedFindings) {
+			var fc, fw, fi int
+			var findings []htmlFinding
+			for i := range g.findings {
+				f := &g.findings[i]
+				switch f.Severity {
+				case severityCritical:
+					fc++
+				case severityWarning:
+					fw++
+				default:
+					fi++
+				}
+				sevClass := "badge-info"
+				switch f.Severity {
+				case severityCritical:
+					sevClass = "badge-critical"
+				case severityWarning:
+					sevClass = "badge-warning"
+				}
+				findings = append(findings, htmlFinding{
+					Severity:      f.Severity,
+					SeverityClass: sevClass,
+					Line:          f.Line,
+					HasLine:       f.Line > 0,
+					Role:          f.Role,
+					RoleClass:     agentColorClass(f.Role),
+					Summary:       f.Summary,
+					Detail:        f.Detail,
+					HasDetail:     f.Detail != "",
+					VoteCount:     f.VoteCount,
+					TotalAgents:   f.TotalAgents,
+				})
+			}
+			fileGroups = append(fileGroups, htmlFileGroup{
+				File:          g.file,
+				CriticalCount: fc,
+				WarningCount:  fw,
+				InfoCount:     fi,
+				Findings:      findings,
+			})
+		}
+	} else {
+		findingCount = len(d.Result.Findings)
+		for _, f := range d.Result.Findings {
+			switch f.Severity {
+			case severityCritical:
+				critCount++
+			case severityWarning:
+				warnCount++
+			default:
+				infoCount++
+			}
+		}
 		for _, g := range groupByFile(d.Result.Findings) {
 			var fc, fw, fi int
 			var findings []htmlFinding
@@ -260,7 +318,7 @@ func HTML(d *Data) (string, error) {
 		PRTitle:         d.PR.Title,
 		FileCount:       len(d.PR.Files),
 		AgentCount:      len(d.Roles),
-		FindingCount:    len(d.Result.Findings),
+		FindingCount:    findingCount,
 		Duration:        d.Duration,
 		CriticalCount:   critCount,
 		WarningCount:    warnCount,
@@ -360,6 +418,9 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 .agent-blue { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
 .agent-default { background: var(--surface); color: var(--muted); border-color: var(--border); }
 
+/* Vote count badge */
+.vote-count { font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.6rem; border-radius: 10px; background: var(--green-bg); color: var(--green); border: 1.5px solid var(--green); }
+
 .finding-summary { font-weight: 600; margin-bottom: 0.25rem; }
 .finding-detail { font-size: 0.9rem; color: var(--muted); line-height: 1.5; }
 
@@ -418,7 +479,11 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
       {{- if .HasLine}}
       <span class="line">line {{.Line}}</span>
       {{- end}}
+      {{- if gt .VoteCount 0}}
+      <span class="vote-count">{{.VoteCount}}/{{.TotalAgents}}</span>
+      {{- else}}
       <span class="agent-badge {{.RoleClass}}">{{.Role}}</span>
+      {{- end}}
     </div>
     <div class="finding-summary">{{.Summary}}</div>
     {{- if .HasDetail}}
@@ -586,16 +651,8 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 	return groups
 }
 
-func severityOrder(s string) int {
-	switch s {
-	case severityCritical:
-		return 0
-	case severityWarning:
-		return 1
-	default:
-		return 2
-	}
-}
+// severityOrder delegates to the canonical implementation in the agents package.
+var severityOrder = agents.SeverityOrder
 
 func severityBadge(s string) string {
 	switch s {

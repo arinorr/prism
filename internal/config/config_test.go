@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -12,8 +13,8 @@ func TestDefault(t *testing.T) {
 	if d.AgentTimeout != "5m" {
 		t.Errorf("expected timeout '5m', got %q", d.AgentTimeout)
 	}
-	if d.MaxRetries != 1 {
-		t.Errorf("expected retries 1, got %d", d.MaxRetries)
+	if d.MaxRetriesVal() != 1 {
+		t.Errorf("expected retries 1, got %d", d.MaxRetriesVal())
 	}
 	if d.DiffWarnBytes != 153600 {
 		t.Errorf("expected warn 153600, got %d", d.DiffWarnBytes)
@@ -57,8 +58,8 @@ diff_chunk_bytes: 200000
 	if cfg.AgentTimeout != "2m" {
 		t.Errorf("expected timeout '2m', got %q", cfg.AgentTimeout)
 	}
-	if cfg.MaxRetries != 3 {
-		t.Errorf("expected retries 3, got %d", cfg.MaxRetries)
+	if cfg.MaxRetriesVal() != 3 {
+		t.Errorf("expected retries 3, got %d", cfg.MaxRetriesVal())
 	}
 	if cfg.DiffWarnBytes != 100000 {
 		t.Errorf("expected warn 100000, got %d", cfg.DiffWarnBytes)
@@ -82,12 +83,12 @@ func TestLoad_PartialYAML(t *testing.T) {
 	if cfg.Model != "opus" {
 		t.Errorf("expected model 'opus', got %q", cfg.Model)
 	}
-	// Unset fields should be zero values.
+	// Unset fields should be nil/zero.
 	if len(cfg.Roles) != 0 {
 		t.Errorf("expected empty roles, got %v", cfg.Roles)
 	}
-	if cfg.MaxRetries != 0 {
-		t.Errorf("expected retries 0, got %d", cfg.MaxRetries)
+	if cfg.MaxRetries != nil {
+		t.Errorf("expected nil MaxRetries, got %v", cfg.MaxRetries)
 	}
 }
 
@@ -115,10 +116,29 @@ func TestLoad_MalformedYAML(t *testing.T) {
 	}
 }
 
+func TestLoad_ExplicitZeroRetries(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".prism.yml")
+	if err := os.WriteFile(path, []byte("max_retries: 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxRetries == nil {
+		t.Fatal("expected non-nil MaxRetries for explicit 0")
+	}
+	if *cfg.MaxRetries != 0 {
+		t.Errorf("expected 0 retries, got %d", *cfg.MaxRetries)
+	}
+}
+
 func TestMerge_CLIOverridesFileOverridesDefaults(t *testing.T) {
 	def := Config{
 		AgentTimeout:  "5m",
-		MaxRetries:    1,
+		MaxRetries:    IntPtr(1),
 		DiffWarnBytes: 150000,
 	}
 	file := Config{
@@ -137,8 +157,8 @@ func TestMerge_CLIOverridesFileOverridesDefaults(t *testing.T) {
 	if merged.AgentTimeout != "1m" {
 		t.Errorf("expected timeout from CLI '1m', got %q", merged.AgentTimeout)
 	}
-	if merged.MaxRetries != 1 {
-		t.Errorf("expected retries from default 1, got %d", merged.MaxRetries)
+	if merged.MaxRetriesVal() != 1 {
+		t.Errorf("expected retries from default 1, got %d", merged.MaxRetriesVal())
 	}
 	if merged.DiffWarnBytes != 150000 {
 		t.Errorf("expected warn from default 150000, got %d", merged.DiffWarnBytes)
@@ -146,16 +166,26 @@ func TestMerge_CLIOverridesFileOverridesDefaults(t *testing.T) {
 }
 
 func TestMerge_ZeroValuesDoNotOverride(t *testing.T) {
-	def := Config{MaxRetries: 2, Model: "opus"}
-	file := Config{} // all zero
-	cli := Config{}  // all zero
+	def := Config{MaxRetries: IntPtr(2), Model: "opus"}
+	file := Config{} // all zero/nil
+	cli := Config{}  // all zero/nil
 
 	merged := Merge(&def, &file, &cli)
-	if merged.MaxRetries != 2 {
-		t.Errorf("zero file/cli should not override default, got retries %d", merged.MaxRetries)
+	if merged.MaxRetriesVal() != 2 {
+		t.Errorf("nil file/cli should not override default, got retries %d", merged.MaxRetriesVal())
 	}
 	if merged.Model != "opus" {
 		t.Errorf("zero file/cli should not override default, got model %q", merged.Model)
+	}
+}
+
+func TestMerge_ExplicitZeroOverridesDefault(t *testing.T) {
+	def := Config{MaxRetries: IntPtr(3)}
+	cli := Config{MaxRetries: IntPtr(0)} // explicitly disable retries
+
+	merged := Merge(&def, &Config{}, &cli)
+	if merged.MaxRetriesVal() != 0 {
+		t.Errorf("explicit 0 should override default, got retries %d", merged.MaxRetriesVal())
 	}
 }
 
@@ -177,7 +207,7 @@ func TestMerge_AllFieldsFromFile(t *testing.T) {
 		Model:          "opus",
 		Format:         "html",
 		AgentTimeout:   "3m",
-		MaxRetries:     2,
+		MaxRetries:     IntPtr(2),
 		DiffWarnBytes:  100000,
 		DiffChunkBytes: 200000,
 	}
@@ -193,8 +223,8 @@ func TestMerge_AllFieldsFromFile(t *testing.T) {
 	if merged.AgentTimeout != "3m" {
 		t.Errorf("expected timeout '3m', got %q", merged.AgentTimeout)
 	}
-	if merged.MaxRetries != 2 {
-		t.Errorf("expected retries 2, got %d", merged.MaxRetries)
+	if merged.MaxRetriesVal() != 2 {
+		t.Errorf("expected retries 2, got %d", merged.MaxRetriesVal())
 	}
 	if merged.DiffWarnBytes != 100000 {
 		t.Errorf("expected warn 100000, got %d", merged.DiffWarnBytes)
@@ -204,6 +234,20 @@ func TestMerge_AllFieldsFromFile(t *testing.T) {
 	}
 	if len(merged.Roles) != 1 || merged.Roles[0] != "sentinel" {
 		t.Errorf("expected roles [sentinel], got %v", merged.Roles)
+	}
+}
+
+func TestMaxRetriesVal_Nil(t *testing.T) {
+	cfg := Config{}
+	if cfg.MaxRetriesVal() != 0 {
+		t.Errorf("expected 0 for nil, got %d", cfg.MaxRetriesVal())
+	}
+}
+
+func TestMaxRetriesVal_Set(t *testing.T) {
+	cfg := Config{MaxRetries: IntPtr(5)}
+	if cfg.MaxRetriesVal() != 5 {
+		t.Errorf("expected 5, got %d", cfg.MaxRetriesVal())
 	}
 }
 
@@ -237,5 +281,20 @@ func TestTimeoutDuration_Invalid(t *testing.T) {
 	cfg := Config{AgentTimeout: "not-a-duration"}
 	if d := cfg.TimeoutDuration(); d != 0 {
 		t.Errorf("expected 0 for invalid timeout, got %v", d)
+	}
+}
+
+func TestLoad_InvalidTimeout(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".prism.yml")
+	if err := os.WriteFile(path, []byte("agent_timeout: \"5 minutes\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid duration in config")
+	}
+	if !strings.Contains(err.Error(), "invalid agent_timeout") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

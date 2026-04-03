@@ -21,7 +21,6 @@ type PR struct {
 // FileChange represents a single file's changes in the PR.
 type FileChange struct {
 	Path   string
-	Patch  string
 	Status string // added, modified, removed, renamed
 }
 
@@ -87,8 +86,8 @@ func (c *Client) GetPRDiff(prRef string) (*PR, error) {
 }
 
 func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
-	// Get PR metadata.
-	out, err := c.run("gh", "pr", "view", prRef, "--json", "number,title,body,headRefOid")
+	// Get PR metadata and files in a single call.
+	out, err := c.run("gh", "pr", "view", prRef, "--json", "number,title,body,headRefOid,files")
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view failed: %w", err)
 	}
@@ -98,52 +97,38 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 		Title      string `json:"title"`
 		Body       string `json:"body"`
 		HeadRefOid string `json:"headRefOid"`
-	}
-	if err := json.Unmarshal(out, &meta); err != nil {
-		return nil, fmt.Errorf("failed to parse PR metadata: %w", err)
-	}
-
-	// Get the diff.
-	diff, err := c.run("gh", "pr", "diff", prRef)
-	if err != nil {
-		return nil, fmt.Errorf("gh pr diff failed: %w", err)
-	}
-
-	// Get changed files.
-	filesOut, err := c.run("gh", "pr", "view", prRef, "--json", "files")
-	if err != nil {
-		return nil, fmt.Errorf("gh pr view files failed: %w", err)
-	}
-
-	var filesData struct {
-		Files []struct {
+		Files      []struct {
 			Path      string `json:"path"`
 			Additions int    `json:"additions"`
 			Deletions int    `json:"deletions"`
 		} `json:"files"`
 	}
-	if err := json.Unmarshal(filesOut, &filesData); err != nil {
-		return nil, fmt.Errorf("failed to parse files: %w", err)
+	if err := json.Unmarshal(out, &meta); err != nil {
+		return nil, fmt.Errorf("failed to parse PR metadata: %w", err)
 	}
 
-	files := make([]FileChange, len(filesData.Files))
-	for i, f := range filesData.Files {
+	// Get the diff (no JSON equivalent for this).
+	diff, err := c.run("gh", "pr", "diff", prRef)
+	if err != nil {
+		return nil, fmt.Errorf("gh pr diff failed: %w", err)
+	}
+
+	files := make([]FileChange, len(meta.Files))
+	for i, f := range meta.Files {
 		files[i] = FileChange{
 			Path:   f.Path,
 			Status: "modified",
 		}
 	}
 
-	pr := &PR{
+	return &PR{
 		Number:  fmt.Sprintf("%d", meta.Number),
 		Title:   meta.Title,
 		Body:    meta.Body,
 		Diff:    string(diff),
 		HeadSHA: meta.HeadRefOid,
 		Files:   files,
-	}
-
-	return pr, nil
+	}, nil
 }
 
 func (c *Client) getPRDiffGit(prRef string) (*PR, error) {

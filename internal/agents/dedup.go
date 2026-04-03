@@ -56,14 +56,9 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 		if len(f.Detail) > len(groups[idx].Detail) {
 			groups[idx].Detail = f.Detail
 		}
-		if severityOrder(f.Severity) < severityOrder(groups[idx].Severity) {
+		if SeverityOrder(f.Severity) < SeverityOrder(groups[idx].Severity) {
 			groups[idx].Severity = f.Severity
 		}
-	}
-
-	// Set TotalAgents on all groups.
-	for i := range groups {
-		groups[i].TotalAgents = totalAgents
 	}
 
 	// Sort: vote count desc, severity asc, file asc, line asc.
@@ -71,7 +66,7 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 		if groups[i].VoteCount != groups[j].VoteCount {
 			return groups[i].VoteCount > groups[j].VoteCount
 		}
-		si, sj := severityOrder(groups[i].Severity), severityOrder(groups[j].Severity)
+		si, sj := SeverityOrder(groups[i].Severity), SeverityOrder(groups[j].Severity)
 		if si != sj {
 			return si < sj
 		}
@@ -84,16 +79,19 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 	return groups
 }
 
+// Severity level constants. Exported for use by the report package.
 const (
-	severityCritical = "critical"
-	severityWarning  = "warning"
+	SeverityCritical = "critical"
+	SeverityWarning  = "warning"
+	SeverityInfo     = "info"
 )
 
-func severityOrder(s string) int {
+// SeverityOrder returns a sort key for severity (0=critical, 1=warning, 2=info).
+func SeverityOrder(s string) int {
 	switch s {
-	case severityCritical:
+	case SeverityCritical:
 		return 0
-	case severityWarning:
+	case SeverityWarning:
 		return 1
 	default:
 		return 2

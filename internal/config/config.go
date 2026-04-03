@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -10,21 +11,26 @@ import (
 )
 
 // Config holds prism settings from .prism.yml and CLI flags.
+// Pointer fields (MaxRetries) use nil to distinguish "not set" from
+// an explicit zero value, which is meaningful (e.g. 0 retries = disabled).
 type Config struct {
 	Roles          []string `yaml:"roles"`
 	Model          string   `yaml:"model"`
 	Format         string   `yaml:"format"`
 	AgentTimeout   string   `yaml:"agent_timeout"`
-	MaxRetries     int      `yaml:"max_retries"`
+	MaxRetries     *int     `yaml:"max_retries"`
 	DiffWarnBytes  int      `yaml:"diff_warn_bytes"`
 	DiffChunkBytes int      `yaml:"diff_chunk_bytes"`
 }
+
+// IntPtr returns a pointer to the given int. Convenience for config construction.
+func IntPtr(n int) *int { return &n }
 
 // Default returns a Config with sensible defaults.
 func Default() Config {
 	return Config{
 		AgentTimeout:   "5m",
-		MaxRetries:     1,
+		MaxRetries:     IntPtr(1),
 		DiffWarnBytes:  153600, // 150 KB
 		DiffChunkBytes: 307200, // 300 KB
 	}
@@ -45,6 +51,14 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
 	}
+
+	// Validate duration strings early so typos are caught at load time.
+	if cfg.AgentTimeout != "" {
+		if _, err := time.ParseDuration(cfg.AgentTimeout); err != nil {
+			return Config{}, fmt.Errorf("invalid agent_timeout %q: %w", cfg.AgentTimeout, err)
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -74,7 +88,7 @@ func mergeInto(dst, src *Config) {
 	if src.AgentTimeout != "" {
 		dst.AgentTimeout = src.AgentTimeout
 	}
-	if src.MaxRetries > 0 {
+	if src.MaxRetries != nil {
 		dst.MaxRetries = src.MaxRetries
 	}
 	if src.DiffWarnBytes > 0 {
@@ -83,6 +97,14 @@ func mergeInto(dst, src *Config) {
 	if src.DiffChunkBytes > 0 {
 		dst.DiffChunkBytes = src.DiffChunkBytes
 	}
+}
+
+// MaxRetriesVal returns the MaxRetries value, defaulting to 0 if nil.
+func (c *Config) MaxRetriesVal() int {
+	if c.MaxRetries == nil {
+		return 0
+	}
+	return *c.MaxRetries
 }
 
 // TimeoutDuration parses the AgentTimeout string as a Go duration.
