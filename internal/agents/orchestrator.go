@@ -112,6 +112,7 @@ type ReviewResult struct {
 	HealthScore     HealthScore
 	Suggestions     []gh.Suggestion
 	FailedAgents    []string
+	Usage           llm.Usage // aggregated token usage across all LLM calls
 }
 
 // Options controls orchestrator behavior.
@@ -221,17 +222,18 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 	}
 
 	// Phase 1: Dispatch all agents in parallel.
-	feedbacks, failedAgents, err := o.dispatchAgents(pr)
+	feedbacks, failedAgents, agentUsage, err := o.dispatchAgents(pr)
 	if err != nil {
 		return nil, err
 	}
 
 	// Phase 2: Synthesize feedback.
-	result, err := o.synthesize(pr, feedbacks)
+	result, synthUsage, err := o.synthesize(pr, feedbacks)
 	if err != nil {
 		return nil, err
 	}
 	result.FailedAgents = failedAgents
+	result.Usage = agentUsage.Add(synthUsage)
 
 	return result, nil
 }
@@ -277,13 +279,14 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 	}, nil
 }
 
-func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, error) {
+func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, llm.Usage, error) {
 	var (
 		mu           sync.Mutex
 		wg           sync.WaitGroup
 		feedbacks    []Feedback
 		errs         []error
 		failedAgents []string
+		totalUsage   llm.Usage
 		done         int
 	)
 
@@ -298,10 +301,11 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, error) {
 			o.logf("   🔍 [%s] reviewing...\n", r.Name)
 			mu.Unlock()
 
-			fb, err := o.runAgentWithRetry(r, pr)
+			fb, usage, err := o.runAgentWithRetry(r, pr)
 
 			mu.Lock()
 			defer mu.Unlock()
+			totalUsage = totalUsage.Add(usage)
 			done++
 			if err != nil {
 				errs = append(errs, fmt.Errorf("[%s] %w", r.Name, err))
@@ -322,33 +326,35 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, error) {
 	}
 
 	if len(feedbacks) == 0 {
-		return nil, failedAgents, fmt.Errorf("all agents failed: %w", errors.Join(errs...))
+		return nil, failedAgents, totalUsage, fmt.Errorf("all agents failed: %w", errors.Join(errs...))
 	}
 
-	return feedbacks, failedAgents, nil
+	return feedbacks, failedAgents, totalUsage, nil
 }
 
-func (o *Orchestrator) runAgentWithRetry(role Role, pr *gh.PR) (*Feedback, error) {
+func (o *Orchestrator) runAgentWithRetry(role Role, pr *gh.PR) (*Feedback, llm.Usage, error) {
 	maxAttempts := o.opts.MaxRetries + 1
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
 
 	var lastErr error
+	var totalUsage llm.Usage
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		fb, err := o.runAgent(role, pr)
+		fb, usage, err := o.runAgent(role, pr)
+		totalUsage = totalUsage.Add(usage)
 		if err == nil {
-			return fb, nil
+			return fb, totalUsage, nil
 		}
 		lastErr = err
 		if attempt < maxAttempts {
 			o.logf("   🔄 [%s] retry %d/%d...\n", role.Name, attempt, o.opts.MaxRetries)
 		}
 	}
-	return nil, lastErr
+	return nil, totalUsage, lastErr
 }
 
-func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
+func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, llm.Usage, error) {
 	prompt := buildAgentPrompt(role, pr)
 	skill := o.skill(role)
 
@@ -365,7 +371,7 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 	}
 
 	start := time.Now()
-	response, err := o.llm.Complete(ctx, llm.Request{
+	response, usage, err := o.llm.Complete(ctx, llm.Request{
 		SystemPrompt: skill,
 		UserPrompt:   prompt,
 		JSONOutput:   true,
@@ -377,11 +383,12 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 		if o.opts.Verbose {
 			o.errLogf("   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
 		}
-		return nil, err
+		return nil, usage, err
 	}
 
 	if o.opts.Verbose {
-		o.logf("   ⏱️  [%s] completed in %s (%d bytes response)\n", role.Name, elapsed.Round(time.Millisecond), len(response))
+		o.logf("   ⏱️  [%s] completed in %s (%d tokens, $%.4f)\n",
+			role.Name, elapsed.Round(time.Millisecond), usage.TotalTokens(), usage.CostUSD)
 	}
 
 	// Extract the structured feedback from the response text.
@@ -390,13 +397,13 @@ func (o *Orchestrator) runAgent(role Role, pr *gh.PR) (*Feedback, error) {
 		if o.opts.Verbose {
 			o.errLogf("   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(response, previewMaxBytes))
 		}
-		return nil, fmt.Errorf("failed to parse feedback: %w", err)
+		return nil, usage, fmt.Errorf("failed to parse feedback: %w", err)
 	}
 
-	return fb, nil
+	return fb, usage, nil
 }
 
-func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResult, error) {
+func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResult, llm.Usage, error) {
 	o.logln("   🧠 Synthesizing feedback from all agents...")
 	synthesisPrompt := buildSynthesisPrompt(pr, feedbacks)
 
@@ -408,12 +415,12 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 		defer cancel()
 	}
 
-	summary, err := o.llm.Complete(ctx, llm.Request{
+	summary, usage, err := o.llm.Complete(ctx, llm.Request{
 		UserPrompt: synthesisPrompt,
 		Model:      o.opts.Model,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("synthesis failed: %w", err)
+		return nil, usage, fmt.Errorf("synthesis failed: %w", err)
 	}
 
 	// Collect all findings and derive inline suggestions from warning+ findings.
@@ -446,7 +453,7 @@ func (o *Orchestrator) synthesize(pr *gh.PR, feedbacks []Feedback) (*ReviewResul
 		DedupedFindings: dedupedFindings,
 		HealthScore:     healthScore,
 		Suggestions:     suggestions,
-	}, nil
+	}, usage, nil
 }
 
 func buildAgentPrompt(_ Role, pr *gh.PR) string {

@@ -264,6 +264,11 @@ func runReview(args []string) error {
 	}
 	elapsed := time.Since(start)
 
+	// Print usage summary.
+	u := result.Usage
+	fmt.Printf("   📊 Tokens: %dk input, %dk output | Cost: $%.2f | Time: %s\n\n",
+		u.InputTokens/1000, u.OutputTokens/1000, u.CostUSD, elapsed.Round(time.Second))
+
 	// Resolve format: CLI flag > config file > none.
 	formatFlag := opts.formatFlag
 	if formatFlag == "" {
@@ -306,6 +311,7 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 		Result:   result,
 		Roles:    roleNames,
 		Duration: elapsed.Round(time.Second).String(),
+		Usage:    result.Usage,
 	}
 
 	var output string

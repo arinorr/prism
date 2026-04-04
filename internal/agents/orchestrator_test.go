@@ -538,7 +538,7 @@ func TestRunAgent_Success(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "body", Diff: "diff"}
-	fb, err := orch.runAgent(role, pr)
+	fb, _, err := orch.runAgent(role, pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestRunAgent_VerifiesRequest(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "body", Diff: "diff"}
-	_, err := orch.runAgent(role, pr)
+	_, _, err := orch.runAgent(role, pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestRunAgent_Verbose(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, err := orch.runAgent(role, pr)
+	_, _, err := orch.runAgent(role, pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -598,7 +598,7 @@ func TestRunAgent_CommandFailure(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, err := orch.runAgent(role, pr)
+	_, _, err := orch.runAgent(role, pr)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -615,7 +615,7 @@ func TestRunAgent_InvalidJSON(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, err := orch.runAgent(role, pr)
+	_, _, err := orch.runAgent(role, pr)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -630,7 +630,7 @@ func TestRunAgent_WithModel(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, err := orch.runAgent(role, pr)
+	_, _, err := orch.runAgent(role, pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -651,7 +651,7 @@ func TestDispatchAgents_AllSucceed(t *testing.T) {
 		llm:    mockLLMFindings(finding),
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	feedbacks, failedAgents, err := orch.dispatchAgents(pr)
+	feedbacks, failedAgents, _, err := orch.dispatchAgents(pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -671,7 +671,7 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 		llm:    &llmtest.Mock{Err: fmt.Errorf("fail")},
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, failedAgents, err := orch.dispatchAgents(pr)
+	_, failedAgents, _, err := orch.dispatchAgents(pr)
 	if err == nil {
 		t.Fatal("expected error when all agents fail")
 	}
@@ -687,11 +687,11 @@ func TestDispatchAgents_PartialFailure(t *testing.T) {
 	// Both agents get JSONOutput=true calls, so both succeed here.
 	// The important thing is that dispatchAgents tolerates partial failure.
 	mock := &llmtest.Mock{
-		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, llm.Usage, error) {
 			if req.JSONOutput {
-				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}]}`, nil
+				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"s","detail":"d"}]}`, llm.Usage{}, nil
 			}
-			return "", fmt.Errorf("fail")
+			return "", llm.Usage{}, fmt.Errorf("fail")
 		},
 	}
 	orch := &Orchestrator{
@@ -701,7 +701,7 @@ func TestDispatchAgents_PartialFailure(t *testing.T) {
 		llm:    mock,
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	feedbacks, _, err := orch.dispatchAgents(pr)
+	feedbacks, _, _, err := orch.dispatchAgents(pr)
 	if err != nil {
 		t.Fatalf("partial failure should not error: %v", err)
 	}
@@ -713,12 +713,12 @@ func TestDispatchAgents_PartialFailure(t *testing.T) {
 func TestRunAgentWithRetry_SucceedsOnSecondAttempt(t *testing.T) {
 	attempt := 0
 	mock := &llmtest.Mock{
-		CompleteFunc: func(_ context.Context, _ llm.Request) (string, error) {
+		CompleteFunc: func(_ context.Context, _ llm.Request) (string, llm.Usage, error) {
 			attempt++
 			if attempt == 1 {
-				return "", fmt.Errorf("transient failure")
+				return "", llm.Usage{}, fmt.Errorf("transient failure")
 			}
-			return `{"findings":[]}`, nil
+			return `{"findings":[]}`, llm.Usage{}, nil
 		},
 	}
 	orch := &Orchestrator{
@@ -728,7 +728,7 @@ func TestRunAgentWithRetry_SucceedsOnSecondAttempt(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	fb, err := orch.runAgentWithRetry(role, pr)
+	fb, _, err := orch.runAgentWithRetry(role, pr)
 	if err != nil {
 		t.Fatalf("expected success on retry, got: %v", err)
 	}
@@ -748,7 +748,7 @@ func TestRunAgentWithRetry_ExhaustedRetries(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, err := orch.runAgentWithRetry(role, pr)
+	_, _, err := orch.runAgentWithRetry(role, pr)
 	if err == nil {
 		t.Fatal("expected error after exhausted retries")
 	}
@@ -757,9 +757,9 @@ func TestRunAgentWithRetry_ExhaustedRetries(t *testing.T) {
 func TestRunAgentWithRetry_NoRetries(t *testing.T) {
 	attempt := 0
 	mock := &llmtest.Mock{
-		CompleteFunc: func(_ context.Context, _ llm.Request) (string, error) {
+		CompleteFunc: func(_ context.Context, _ llm.Request) (string, llm.Usage, error) {
 			attempt++
-			return "", fmt.Errorf("fail")
+			return "", llm.Usage{}, fmt.Errorf("fail")
 		},
 	}
 	orch := &Orchestrator{
@@ -769,7 +769,7 @@ func TestRunAgentWithRetry_NoRetries(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, err := orch.runAgentWithRetry(role, pr)
+	_, _, err := orch.runAgentWithRetry(role, pr)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -780,12 +780,12 @@ func TestRunAgentWithRetry_NoRetries(t *testing.T) {
 
 func TestRunAgent_Timeout(t *testing.T) {
 	mock := &llmtest.Mock{
-		CompleteFunc: func(ctx context.Context, _ llm.Request) (string, error) {
+		CompleteFunc: func(ctx context.Context, _ llm.Request) (string, llm.Usage, error) {
 			select {
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return "", llm.Usage{}, ctx.Err()
 			case <-time.After(5 * time.Second):
-				return "", fmt.Errorf("should not reach here")
+				return "", llm.Usage{}, fmt.Errorf("should not reach here")
 			}
 		},
 	}
@@ -796,7 +796,7 @@ func TestRunAgent_Timeout(t *testing.T) {
 	}
 	role := Role{Name: "Test", Slug: "test"}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, err := orch.runAgent(role, pr)
+	_, _, err := orch.runAgent(role, pr)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -813,7 +813,7 @@ func TestSynthesize_Success(t *testing.T) {
 			{File: "a.go", Line: 10, Risk: "warning", Summary: "issue", Detail: "detail"},
 		}},
 	}
-	result, err := orch.synthesize(pr, feedbacks)
+	result, _, err := orch.synthesize(pr, feedbacks)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -835,7 +835,7 @@ func TestSynthesize_VerifiesRequest(t *testing.T) {
 	mock := &llmtest.Mock{Response: "summary"}
 	orch := &Orchestrator{opts: Options{}, llm: mock}
 	pr := &gh.PR{Title: "Test"}
-	_, err := orch.synthesize(pr, []Feedback{})
+	_, _, err := orch.synthesize(pr, []Feedback{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -862,7 +862,7 @@ func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
 			{File: "a.go", Line: 5, Risk: "info", Summary: "note", Detail: "d"},
 		}},
 	}
-	result, err := orch.synthesize(pr, feedbacks)
+	result, _, err := orch.synthesize(pr, feedbacks)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -877,7 +877,7 @@ func TestSynthesize_CommandFailure(t *testing.T) {
 		llm:  &llmtest.Mock{Err: fmt.Errorf("synthesis error")},
 	}
 	pr := &gh.PR{Title: "Test"}
-	_, err := orch.synthesize(pr, []Feedback{})
+	_, _, err := orch.synthesize(pr, []Feedback{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -889,14 +889,14 @@ func TestSynthesize_CommandFailure(t *testing.T) {
 func TestReview_FullPipeline(t *testing.T) {
 	callCount := 0
 	mock := &llmtest.Mock{
-		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, llm.Usage, error) {
 			callCount++
 			if req.JSONOutput {
 				// Agent call — return findings.
-				return `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`, nil
+				return `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`, llm.Usage{}, nil
 			}
 			// Synthesis call.
-			return "Review complete.", nil
+			return "Review complete.", llm.Usage{}, nil
 		},
 	}
 	orch := &Orchestrator{
@@ -926,11 +926,11 @@ func TestReview_FullPipeline(t *testing.T) {
 
 func TestReview_FailedAgentsTracked(t *testing.T) {
 	mock := &llmtest.Mock{
-		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, llm.Usage, error) {
 			if req.JSONOutput {
-				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"ok","detail":"d"}]}`, nil
+				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"ok","detail":"d"}]}`, llm.Usage{}, nil
 			}
-			return "Summary", nil
+			return "Summary", llm.Usage{}, nil
 		},
 	}
 	orch := &Orchestrator{

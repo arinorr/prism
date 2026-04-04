@@ -32,18 +32,27 @@ func newWithRunner(run commandRunner) *Adapter {
 	return &Adapter{run: run}
 }
 
-// Complete sends a prompt to Claude via the CLI and returns the response text.
-// When req.JSONOutput is true, it passes --output-format json and unwraps the
-// {"result": "..."} envelope that Claude CLI produces.
-func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, error) {
-	args := []string{"--print"}
+// cliEnvelope is the full JSON response from `claude --print --output-format json`.
+type cliEnvelope struct {
+	Result       string  `json:"result"`
+	TotalCostUSD float64 `json:"total_cost_usd"`
+	DurationMS   int     `json:"duration_ms"`
+	Usage        struct {
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	} `json:"usage"`
+}
+
+// Complete sends a prompt to Claude via the CLI and returns the response text
+// along with token usage metrics.
+func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, llm.Usage, error) {
+	// Always use JSON output to get usage metrics.
+	args := []string{"--print", "--output-format", "json"}
 
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
-	}
-
-	if req.JSONOutput {
-		args = append(args, "--output-format", "json")
 	}
 
 	if req.SystemPrompt != "" {
@@ -54,31 +63,22 @@ func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, error)
 
 	out, err := a.run(ctx, "claude", args...)
 	if err != nil {
-		return "", fmt.Errorf("claude command failed: %w", err)
+		return "", llm.Usage{}, fmt.Errorf("claude command failed: %w", err)
 	}
 
-	// When --output-format json is used, Claude wraps the response in
-	// {"result": "..."}. Unwrap it to return clean text.
-	if req.JSONOutput {
-		return unwrapEnvelope(out)
+	var env cliEnvelope
+	if err := json.Unmarshal(out, &env); err != nil {
+		return "", llm.Usage{}, fmt.Errorf("failed to parse claude response envelope: %w", err)
 	}
 
-	// For non-JSON requests (like synthesis), try to unwrap the envelope
-	// but fall back to raw output if it's not JSON.
-	result, unwrapErr := unwrapEnvelope(out)
-	if unwrapErr != nil {
-		return string(out), nil
+	usage := llm.Usage{
+		InputTokens:              env.Usage.InputTokens,
+		OutputTokens:             env.Usage.OutputTokens,
+		CacheCreationInputTokens: env.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     env.Usage.CacheReadInputTokens,
+		CostUSD:                  env.TotalCostUSD,
+		DurationMS:               env.DurationMS,
 	}
-	return result, nil
-}
 
-// unwrapEnvelope extracts the "result" field from Claude's JSON envelope.
-func unwrapEnvelope(data []byte) (string, error) {
-	var envelope struct {
-		Result string `json:"result"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return "", fmt.Errorf("failed to parse claude response envelope: %w", err)
-	}
-	return envelope.Result, nil
+	return env.Result, usage, nil
 }
