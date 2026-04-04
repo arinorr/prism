@@ -1,34 +1,85 @@
+<div align="center">
+
 # Prism
 
-A multi-agent PR review tool that passes your code through 7 specialized lenses. Each agent reviews your changes from a distinct perspective, then findings are deduplicated, scored, and combined into a single actionable report.
+**Multi-agent PR review — 7 specialized lenses, one actionable report.**
 
-## How it works
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
+[![Claude](https://img.shields.io/badge/Claude-Anthropic-cc785c?style=flat-square&logo=anthropic&logoColor=white)](https://www.anthropic.com)
+[![CI](https://img.shields.io/github/actions/workflow/status/arinorr/prism/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/arinorr/prism/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
+</div>
+
+---
+
+Single-pass AI review has blind spots. Prism dispatches 7 specialized Claude agents in parallel, deduplicates their findings by consensus, computes a health score, and delivers a single report with everything that matters.
+
+<!-- TODO: uncomment after running `vhs demo.tape` to generate the gif
+<div align="center">
+  <img src="demo.gif" alt="Prism demo" width="700">
+</div>
+-->
+
+## Table of Contents
+
+<details>
+<summary>Expand</summary>
+
+- [How it Works](#how-it-works)
+- [Quick Start](#quick-start)
+- [Install](#install)
+- [Commands](#commands)
+- [Options](#options)
+- [Configuration](#configuration)
+- [Reviewer Roles](#reviewer-roles)
+- [Health Score and Grading](#health-score-and-grading)
+- [Deduplication](#deduplication)
+- [Diff Compression](#diff-compression)
+- [Reports](#reports)
+- [Large Diffs](#large-diffs)
+- [GitHub Action](#github-action)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+</details>
+
+## How it Works
+
+```mermaid
+graph TD
+    A["PR Diff"] --> B["Compress & strip noise"]
+    B --> C["7 Claude agents review in parallel"]
+
+    C --> D["Know-It-All"]
+    C --> E["Architect"]
+    C --> F["Solver"]
+    C --> G["Editor"]
+    C --> H["Optimizer"]
+    C --> I["Sentinel"]
+    C --> J["Test Engineer"]
+
+    D --> K["Deduplicate findings, merge votes"]
+    E --> K
+    F --> K
+    G --> K
+    H --> K
+    I --> K
+    J --> K
+
+    K --> L["Health score · Grade · Verdict"]
+    L --> M["Report"]
+
+    style A fill:#ddf4ff,stroke:#0969da,color:#0969da
+    style B fill:#f6f8fa,stroke:#d0d7de
+    style C fill:#ddf4ff,stroke:#0969da,color:#0969da
+    style K fill:#fff8c5,stroke:#9a6700,color:#9a6700
+    style L fill:#dafbe1,stroke:#1a7f37,color:#1a7f37
+    style M fill:#dafbe1,stroke:#1a7f37,color:#1a7f37
 ```
-PR Diff ──> compress & strip noise
-                │
-                v
-            7 Claude agents review in parallel
-                │
-                ├── Know-It-All   (best practices, idioms, code smells)
-                ├── Architect     (system design, patterns, scalability)
-                ├── Solver        (correctness, edge cases, completeness)
-                ├── Editor        (readability, simplicity, clarity)
-                ├── Optimizer     (performance, complexity, allocations)
-                ├── Sentinel      (security, vulnerabilities, OWASP)
-                └── Test Engineer (test coverage, edge cases, flaky tests)
-                │
-                v
-            Deduplicate findings, merge votes
-                │
-                v
-            Health score (0–100), grade (A+ → F), verdict
-                │
-                v
-            Report (HTML default, plain, markdown, or JSON)
-```
 
-Single-pass AI review has blind spots. Prism uses multiple specialized perspectives to catch more issues and produce higher-quality feedback.
+<p align="right"><a href="#prism">back to top</a></p>
 
 ## Quick Start
 
@@ -49,9 +100,12 @@ prism review 42 --roles sentinel,solver,test-engineer
 prism review 42 --dry-run
 ```
 
+<p align="right"><a href="#prism">back to top</a></p>
+
 ## Install
 
-Requires **Go 1.24+**, the **gh CLI** (authenticated), and **Claude Code**.
+> [!IMPORTANT]
+> Requires **Go 1.24+**, the **[gh CLI](https://cli.github.com/)** (authenticated), and **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**.
 
 ```bash
 git clone https://github.com/arinorr/prism.git
@@ -61,6 +115,8 @@ go build -o prism .
 # Optional: move to your PATH
 sudo mv prism /usr/local/bin/
 ```
+
+<p align="right"><a href="#prism">back to top</a></p>
 
 ## Commands
 
@@ -89,6 +145,8 @@ Print the version.
 
 Show help and available options.
 
+<p align="right"><a href="#prism">back to top</a></p>
+
 ## Options
 
 | Flag | Description |
@@ -107,9 +165,17 @@ Show help and available options.
 | `-v`, `--verbose` | Show prompts, timing, token usage, and response details |
 | `--dry-run` | Preview what agents would run without calling Claude |
 
+<p align="right"><a href="#prism">back to top</a></p>
+
 ## Configuration
 
 Prism looks for a `.prism.yml` file in the current directory (override with `--config`). All fields are optional — CLI flags take precedence.
+
+> [!TIP]
+> Fields like `diff_context_lines`, `strip_patterns`, `diff_warn_bytes`, and `diff_chunk_bytes` are **config-file only** and have no CLI flag equivalents.
+
+<details>
+<summary>Example <code>.prism.yml</code></summary>
 
 ```yaml
 # .prism.yml
@@ -132,6 +198,10 @@ diff_warn_bytes: 153600   # Warn at 150 KB (default)
 diff_chunk_bytes: 307200  # Suggest splitting at 300 KB (default)
 ```
 
+</details>
+
+<p align="right"><a href="#prism">back to top</a></p>
+
 ## Reviewer Roles
 
 | Role | Focus |
@@ -144,27 +214,34 @@ diff_chunk_bytes: 307200  # Suggest splitting at 300 KB (default)
 | **Sentinel** | Injection, auth gaps, secrets, SSRF, OWASP top 10 |
 | **Test Engineer** | Test coverage, missing edge cases, flaky tests, regression |
 
-Agents automatically detect languages in the diff (currently Go and TypeScript/JavaScript) and load language-specific skill modules for deeper, idiomatic feedback.
+> [!NOTE]
+> Agents automatically detect languages in the diff (currently Go and TypeScript/JavaScript) and load language-specific skill modules for deeper, idiomatic feedback.
+
+<p align="right"><a href="#prism">back to top</a></p>
 
 ## Health Score and Grading
 
 After deduplication, Prism computes a **health score** (0–100) based on the severity, scope, and consensus of findings:
 
-| Grade | Score | Verdict |
-|-------|-------|---------|
-| A+ | 95–100 | Approve |
-| A | 90–94 | Approve |
-| B+ | 80–89 | Approve with suggestions |
-| B | 70–79 | Approve with suggestions |
-| C | 60–69 | Request changes |
-| D | 40–59 | Request changes |
-| F | 0–39 | Needs discussion |
+| Grade | Score | Verdict | Meaning |
+|:-----:|------:|---------|---------|
+| `A+` | 95–100 | Approve | Excellent |
+| `A`  | 90–94  | Approve | Very good |
+| `B+` | 80–89  | Approve with suggestions | Good |
+| `B`  | 70–79  | Approve with suggestions | Acceptable |
+| `C`  | 60–69  | Request changes | Needs work |
+| `D`  | 40–59  | Request changes | Significant issues |
+| `F`  | 0–39   | Needs discussion | Major problems |
 
-Findings scoped to **changed lines** are weighted more heavily than those about existing or codebase-level code. When multiple agents flag the same issue, their votes increase the finding's impact. See `internal/agents/score.go` for authoritative thresholds.
+Findings scoped to **changed lines** are weighted more heavily than those about existing or codebase-level code. When multiple agents flag the same issue, their votes increase the finding's impact. See [`internal/agents/score.go`](internal/agents/score.go) for authoritative thresholds.
+
+<p align="right"><a href="#prism">back to top</a></p>
 
 ## Deduplication
 
-When multiple agents report the same issue, Prism merges them into a single finding with a **vote count** showing how many agents agreed. Two findings are considered duplicates when they target the same file, are within 5 lines of each other, and have similar summaries (Jaccard similarity ≥ 0.4). Deduplicated findings are sorted by vote count, then severity.
+When multiple agents report the same issue, Prism merges them into a single finding with a **vote count** showing how many agents agreed. Two findings are considered duplicates when they target the same file, are within 5 lines of each other, and have similar summaries (Jaccard similarity >= 0.4). Deduplicated findings are sorted by vote count, then severity.
+
+<p align="right"><a href="#prism">back to top</a></p>
 
 ## Diff Compression
 
@@ -181,6 +258,8 @@ Tokens: 142k input, 18k output | Cost: $0.34 | Time: 1m12s
 ```
 
 Use `--verbose` for per-agent breakdowns.
+
+<p align="right"><a href="#prism">back to top</a></p>
 
 ## Reports
 
@@ -200,9 +279,16 @@ HTML reports include:
 
 Use `--stdout` to pipe reports to other tools instead.
 
+<p align="right"><a href="#prism">back to top</a></p>
+
 ## Large Diffs
 
-When a diff exceeds **150 KB**, Prism warns that review quality may be reduced. At **300 KB**, it suggests splitting the PR into smaller pieces. Use `-y` / `--yes` to skip these prompts in CI. Thresholds are configurable in `.prism.yml`.
+> [!WARNING]
+> When a diff exceeds **150 KB**, Prism warns that review quality may be reduced. At **300 KB**, it suggests splitting the PR into smaller pieces.
+
+Use `-y` / `--yes` to skip these prompts in CI. Thresholds are configurable in `.prism.yml`.
+
+<p align="right"><a href="#prism">back to top</a></p>
 
 ## GitHub Action
 
@@ -218,6 +304,8 @@ Prism ships as a GitHub Action for automated PR reviews:
 
 See [docs/github-action.md](docs/github-action.md) for full configuration.
 
+<p align="right"><a href="#prism">back to top</a></p>
+
 ## Development
 
 ```bash
@@ -229,6 +317,32 @@ make clean       # Remove build artifacts
 make review PR=2 # Build and review a PR
 ```
 
+<p align="right"><a href="#prism">back to top</a></p>
+
+## Roadmap
+
+- [x] Multi-agent parallel review
+- [x] Health scoring and grading (A+ through F)
+- [x] Finding deduplication with vote counts
+- [x] Diff compression and token optimization
+- [x] HTML, Markdown, JSON, and plain text reports
+- [x] GitHub Action for CI integration
+- [x] `.prism.yml` configuration file
+- [ ] Review modes (quick / standard / deep)
+- [ ] Codebase Expert role
+- [ ] Incremental reviews (re-review only changed files)
+- [ ] Agent SDK migration
+
+<p align="right"><a href="#prism">back to top</a></p>
+
 ## License
 
-MIT
+[MIT](LICENSE)
+
+---
+
+<div align="center">
+
+Built with [Claude](https://www.anthropic.com) by [Anthropic](https://www.anthropic.com)
+
+</div>
