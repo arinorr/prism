@@ -25,7 +25,7 @@ PR Diff ──> compress & strip noise
             Health score (0–100), grade (A+ → F), verdict
                 │
                 v
-            Report (plain, markdown, HTML, or JSON)
+            Report (HTML default, plain, markdown, or JSON)
 ```
 
 Single-pass AI review has blind spots. Prism uses multiple specialized perspectives to catch more issues and produce higher-quality feedback.
@@ -160,7 +160,7 @@ After deduplication, Prism computes a **health score** (0–100) based on the se
 | D | 40–59 | Request changes |
 | F | 0–39 | Needs discussion |
 
-Findings scoped to **changed lines** are weighted more heavily than those about existing or codebase-level code. When multiple agents flag the same issue, their votes increase the finding's impact.
+Findings scoped to **changed lines** are weighted more heavily than those about existing or codebase-level code. When multiple agents flag the same issue, their votes increase the finding's impact. See `internal/agents/score.go` for authoritative thresholds.
 
 ## Deduplication
 
