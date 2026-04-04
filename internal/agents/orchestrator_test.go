@@ -255,30 +255,35 @@ func TestFindingRoleStamped(t *testing.T) {
 	}
 }
 
-func TestBuildSynthesisPrompt(t *testing.T) {
-	pr := &gh.PR{Title: "Test PR"}
-	feedbacks := []Feedback{
-		{Role: "know-it-all", Findings: []Finding{{File: "a.go", Risk: "info", Summary: "test"}}},
-		{Role: "editor", Findings: []Finding{{File: "b.go", Risk: "warning", Summary: "test2"}}},
+func TestBuildDeterministicSummary(t *testing.T) {
+	findings := []DedupedFinding{
+		{Finding: Finding{Risk: "critical", Category: "bug", Scope: "changed", Summary: "nil pointer"}, VoteCount: 5, TotalAgents: 7},
+		{Finding: Finding{Risk: "warning", Category: "security", Scope: "changed", Summary: "missing auth"}, VoteCount: 3, TotalAgents: 7},
+		{Finding: Finding{Risk: "info", Category: "style", Scope: "existing", Summary: "naming"}, VoteCount: 1, TotalAgents: 7},
 	}
-	prompt := buildSynthesisPrompt(pr, feedbacks)
-	if !strings.Contains(prompt, "Test PR") {
-		t.Error("synthesis prompt should contain PR title")
+	score := HealthScore{Score: 72, Grade: "B", Verdict: "approve with suggestions"}
+	summary := buildDeterministicSummary(findings, score, 7)
+
+	if !strings.Contains(summary, "1 critical") {
+		t.Error("summary should mention critical count")
 	}
-	if !strings.Contains(prompt, "know-it-all") {
-		t.Error("synthesis prompt should contain agent feedback")
+	if !strings.Contains(summary, "1 warning") {
+		t.Error("summary should mention warning count")
 	}
-	if !strings.Contains(prompt, "editor") {
-		t.Error("synthesis prompt should contain all agents' feedback")
+	if !strings.Contains(summary, "7 agents") {
+		t.Error("summary should mention agent count")
 	}
-	if !strings.Contains(prompt, "<pr-title>") || !strings.Contains(prompt, "</pr-title>") {
-		t.Error("synthesis prompt should wrap title in delimiters")
+	if !strings.Contains(summary, "3 unique issues") {
+		t.Error("summary should mention total finding count")
 	}
-	if !strings.Contains(prompt, "<agent-feedback>") || !strings.Contains(prompt, "</agent-feedback>") {
-		t.Error("synthesis prompt should wrap feedback in delimiters")
+	if !strings.Contains(summary, "Agent Consensus") {
+		t.Error("summary should have consensus section for high-vote findings")
 	}
-	if !strings.Contains(prompt, "UNTRUSTED") {
-		t.Error("synthesis prompt should contain untrusted data warning")
+	if !strings.Contains(summary, "nil pointer") {
+		t.Error("consensus section should list high-vote finding")
+	}
+	if !strings.Contains(summary, "approve with suggestions") {
+		t.Error("summary should contain verdict")
 	}
 }
 
@@ -802,24 +807,14 @@ func TestRunAgent_Timeout(t *testing.T) {
 	}
 }
 
-func TestSynthesize_Success(t *testing.T) {
-	orch := &Orchestrator{
-		opts: &Options{},
-		llm:  mockLLM("Overall the code looks good."),
-	}
-	pr := &gh.PR{Title: "Test"}
+func TestCollectAndSummarize_Success(t *testing.T) {
+	orch := &Orchestrator{opts: &Options{}}
 	feedbacks := []Feedback{
 		{Role: "test", Findings: []Finding{
-			{File: "a.go", Line: 10, Risk: "warning", Summary: "issue", Detail: "detail"},
+			{File: "a.go", Line: 10, Risk: "warning", Category: "bug", Scope: "changed", Summary: "issue", Detail: "detail"},
 		}},
 	}
-	result, _, err := orch.synthesize(pr, feedbacks)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result.Summary, "looks good") {
-		t.Errorf("unexpected summary: %q", result.Summary)
-	}
+	result := orch.collectAndSummarize(feedbacks)
 	if len(result.Findings) != 1 {
 		t.Errorf("expected 1 finding, got %d", len(result.Findings))
 	}
@@ -829,75 +824,43 @@ func TestSynthesize_Success(t *testing.T) {
 	if len(result.DedupedFindings) != 1 {
 		t.Errorf("expected 1 deduped finding, got %d", len(result.DedupedFindings))
 	}
-}
-
-func TestSynthesize_VerifiesRequest(t *testing.T) {
-	mock := &llmtest.Mock{Response: "summary"}
-	orch := &Orchestrator{opts: &Options{}, llm: mock}
-	pr := &gh.PR{Title: "Test"}
-	_, _, err := orch.synthesize(pr, []Feedback{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if result.Summary == "" {
+		t.Error("expected non-empty deterministic summary")
 	}
-	if len(mock.Calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
-	}
-	req := mock.Calls[0]
-	if req.SystemPrompt != "" {
-		t.Errorf("synthesis should not have a system prompt, got %q", req.SystemPrompt)
-	}
-	if req.JSONOutput {
-		t.Error("synthesis should not request JSON output")
+	if !strings.Contains(result.Summary, "1 warning") {
+		t.Errorf("summary should mention warning count, got: %s", result.Summary)
 	}
 }
 
-func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
-	orch := &Orchestrator{
-		opts: &Options{},
-		llm:  mockLLM("summary"),
-	}
-	pr := &gh.PR{Title: "Test"}
+func TestCollectAndSummarize_InfoNotInSuggestions(t *testing.T) {
+	orch := &Orchestrator{opts: &Options{}}
 	feedbacks := []Feedback{
 		{Role: "test", Findings: []Finding{
-			{File: "a.go", Line: 5, Risk: "info", Summary: "note", Detail: "d"},
+			{File: "a.go", Line: 5, Risk: "info", Category: "style", Scope: "changed", Summary: "note", Detail: "d"},
 		}},
 	}
-	result, _, err := orch.synthesize(pr, feedbacks)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	result := orch.collectAndSummarize(feedbacks)
 	if len(result.Suggestions) != 0 {
 		t.Errorf("info findings should not become suggestions, got %d", len(result.Suggestions))
 	}
 }
 
-func TestSynthesize_CommandFailure(t *testing.T) {
-	orch := &Orchestrator{
-		opts: &Options{},
-		llm:  &llmtest.Mock{Err: fmt.Errorf("synthesis error")},
+func TestCollectAndSummarize_NoFindings(t *testing.T) {
+	orch := &Orchestrator{opts: &Options{}}
+	result := orch.collectAndSummarize([]Feedback{
+		{Role: "test", Findings: nil},
+	})
+	if len(result.Findings) != 0 {
+		t.Errorf("expected 0 findings, got %d", len(result.Findings))
 	}
-	pr := &gh.PR{Title: "Test"}
-	_, _, err := orch.synthesize(pr, []Feedback{})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "synthesis failed") {
-		t.Errorf("unexpected error: %v", err)
+	if result.HealthScore.Score != 100 {
+		t.Errorf("expected score 100 with no findings, got %d", result.HealthScore.Score)
 	}
 }
 
 func TestReview_FullPipeline(t *testing.T) {
-	callCount := 0
 	mock := &llmtest.Mock{
-		CompleteFunc: func(_ context.Context, req llm.Request) (string, llm.Usage, error) {
-			callCount++
-			if req.JSONOutput {
-				// Agent call — return findings.
-				return `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`, llm.Usage{}, nil
-			}
-			// Synthesis call.
-			return "Review complete.", llm.Usage{}, nil
-		},
+		Response: `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`,
 	}
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Test", Slug: "test"}},
@@ -910,8 +873,8 @@ func TestReview_FullPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result.Summary, "Review complete") {
-		t.Errorf("unexpected summary: %q", result.Summary)
+	if result.Summary == "" {
+		t.Error("expected non-empty deterministic summary")
 	}
 	if len(result.Findings) != 1 {
 		t.Errorf("expected 1 finding, got %d", len(result.Findings))
@@ -919,19 +882,15 @@ func TestReview_FullPipeline(t *testing.T) {
 	if len(result.FailedAgents) != 0 {
 		t.Errorf("expected no failed agents, got %v", result.FailedAgents)
 	}
-	if callCount != 2 {
-		t.Errorf("expected 2 LLM calls (1 agent + 1 synthesis), got %d", callCount)
+	// Only agent calls, no synthesis LLM call.
+	if len(mock.Calls) != 1 {
+		t.Errorf("expected 1 LLM call (agent only, no synthesis), got %d", len(mock.Calls))
 	}
 }
 
 func TestReview_FailedAgentsTracked(t *testing.T) {
 	mock := &llmtest.Mock{
-		CompleteFunc: func(_ context.Context, req llm.Request) (string, llm.Usage, error) {
-			if req.JSONOutput {
-				return `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"ok","detail":"d"}]}`, llm.Usage{}, nil
-			}
-			return "Summary", llm.Usage{}, nil
-		},
+		Response: `{"findings":[{"file":"a.go","line":1,"severity":"info","summary":"ok","detail":"d"}]}`,
 	}
 	orch := &Orchestrator{
 		roles:  []Role{{Name: "Good", Slug: "good"}, {Name: "Bad", Slug: "bad"}},
