@@ -14,14 +14,17 @@ import (
 // Pointer fields (MaxRetries) use nil to distinguish "not set" from
 // an explicit zero value, which is meaningful (e.g. 0 retries = disabled).
 type Config struct {
-	Roles          []string `yaml:"roles"`
-	Model          string   `yaml:"model"`
-	Format         string   `yaml:"format"`
-	AgentTimeout   string   `yaml:"agent_timeout"`
-	MaxRetries     *int     `yaml:"max_retries"`
-	MaxBudgetUSD   float64  `yaml:"max_budget_usd"`
-	DiffWarnBytes  int      `yaml:"diff_warn_bytes"`
-	DiffChunkBytes int      `yaml:"diff_chunk_bytes"`
+	Roles            []string `yaml:"roles"`
+	Model            string   `yaml:"model"`
+	Format           string   `yaml:"format"`
+	AgentTimeout     string   `yaml:"agent_timeout"`
+	MaxRetries       *int     `yaml:"max_retries"`
+	MaxBudgetUSD     float64  `yaml:"max_budget_usd"`
+	DiffContextLines *int     `yaml:"diff_context_lines"` // nil = use default (1), -1 = keep all
+	NoCompress       bool     `yaml:"no_compress"`
+	StripPatterns    []string `yaml:"strip_patterns"`
+	DiffWarnBytes    int      `yaml:"diff_warn_bytes"`
+	DiffChunkBytes   int      `yaml:"diff_chunk_bytes"`
 }
 
 // IntPtr returns a pointer to the given int. Convenience for config construction.
@@ -96,6 +99,15 @@ func mergeInto(dst, src *Config) {
 	if src.MaxBudgetUSD > 0 {
 		dst.MaxBudgetUSD = src.MaxBudgetUSD
 	}
+	if src.DiffContextLines != nil {
+		dst.DiffContextLines = src.DiffContextLines
+	}
+	if src.NoCompress {
+		dst.NoCompress = true
+	}
+	if len(src.StripPatterns) > 0 {
+		dst.StripPatterns = src.StripPatterns
+	}
 	if src.DiffWarnBytes > 0 {
 		dst.DiffWarnBytes = src.DiffWarnBytes
 	}
@@ -110,6 +122,14 @@ func (c *Config) MaxRetriesVal() int {
 		return 0
 	}
 	return *c.MaxRetries
+}
+
+// DiffContextLinesVal returns the configured context lines, defaulting to 1.
+func (c *Config) DiffContextLinesVal() int {
+	if c.DiffContextLines == nil {
+		return 1
+	}
+	return *c.DiffContextLines
 }
 
 // TimeoutDuration parses the AgentTimeout string as a Go duration.

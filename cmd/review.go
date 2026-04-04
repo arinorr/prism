@@ -11,6 +11,7 @@ import (
 
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/config"
+	"github.com/arinorr/prism/internal/diff"
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/llm/claude"
 	"github.com/arinorr/prism/internal/report"
@@ -47,6 +48,7 @@ type reviewOptions struct {
 	timeoutFlag string
 	retriesFlag int
 	budgetFlag  float64
+	noCompress  bool
 	configPath  string
 }
 
@@ -83,6 +85,8 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.dryRun = true
 		case "--yes", "-y":
 			opts.yes = true
+		case "--no-compress":
+			opts.noCompress = true
 		case "--stdout":
 			opts.toStdout = true
 		default:
@@ -251,6 +255,15 @@ func runReview(args []string) error {
 	}
 	fmt.Println()
 
+	// Build diff compression options.
+	diffOpts := diff.DefaultOptions()
+	if opts.noCompress || merged.NoCompress {
+		diffOpts = diff.NoCompression()
+	} else {
+		diffOpts.ContextLines = merged.DiffContextLinesVal()
+		diffOpts.ExtraPatterns = merged.StripPatterns
+	}
+
 	// Dispatch agents.
 	llmBackend := claude.New()
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
@@ -260,6 +273,7 @@ func runReview(args []string) error {
 		AgentTimeout: merged.TimeoutDuration(),
 		MaxRetries:   merged.MaxRetriesVal(),
 		MaxBudgetUSD: merged.MaxBudgetUSD,
+		DiffCompress: diffOpts,
 	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
