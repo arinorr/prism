@@ -36,6 +36,10 @@ type Request struct {
 	// Model overrides the default model for this request. Empty means
 	// use the provider's default.
 	Model string
+
+	// MaxBudgetUSD caps the maximum dollar spend for this request.
+	// Zero means no limit. Passed as --max-budget-usd to the Claude CLI.
+	MaxBudgetUSD float64
 }
 
 // Usage tracks token consumption and cost for a single LLM call.

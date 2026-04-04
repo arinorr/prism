@@ -11,7 +11,16 @@ type Role struct {
 	Slug        string
 	Description string
 	SkillFile   string // path to the Claude skill file
+	Model       string // preferred model for this role (empty = use global default)
 }
+
+// Model tier constants for per-role defaults.
+// These are aliases that the Claude CLI resolves to specific model versions.
+const (
+	ModelTierDeep     = "opus"   // deep reasoning: architecture, security
+	ModelTierStandard = "sonnet" // good reasoning: best practices, correctness, performance
+	ModelTierFast     = "haiku"  // pattern matching: style, testing
+)
 
 var (
 	RoleKnowItAll = Role{
@@ -19,42 +28,49 @@ var (
 		Slug:        "know-it-all",
 		Description: "Best practices, code smells, and language idioms",
 		SkillFile:   "skills/know-it-all.md",
+		Model:       ModelTierStandard,
 	}
 	RoleArchitect = Role{
 		Name:        "Architect",
 		Slug:        "architect",
 		Description: "Code patterns, system fit, scalability, and abstractions",
 		SkillFile:   "skills/architect.md",
+		Model:       ModelTierDeep,
 	}
 	RoleSolver = Role{
 		Name:        "Solver",
 		Slug:        "solver",
 		Description: "Problem coverage and solution completeness",
 		SkillFile:   "skills/solver.md",
+		Model:       ModelTierStandard,
 	}
 	RoleEditor = Role{
 		Name:        "Editor",
 		Slug:        "editor",
 		Description: "Readability, brevity, simplicity, and duplication",
 		SkillFile:   "skills/editor.md",
+		Model:       ModelTierFast,
 	}
 	RoleOptimizer = Role{
 		Name:        "Optimizer",
 		Slug:        "optimizer",
 		Description: "Performance, complexity, and optimization",
 		SkillFile:   "skills/optimizer.md",
+		Model:       ModelTierStandard,
 	}
 	RoleSentinel = Role{
 		Name:        "Sentinel",
 		Slug:        "sentinel",
 		Description: "Security vulnerabilities, dangerous code, and attack vectors",
 		SkillFile:   "skills/sentinel.md",
+		Model:       ModelTierDeep,
 	}
 	RoleTestEngineer = Role{
 		Name:        "Test Engineer",
 		Slug:        "test-engineer",
 		Description: "Test coverage, edge cases, and testing improvements",
 		SkillFile:   "skills/test-engineer.md",
+		Model:       ModelTierFast,
 	}
 
 	AllRoles = []Role{

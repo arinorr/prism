@@ -46,6 +46,7 @@ type reviewOptions struct {
 	modelFlag   string
 	timeoutFlag string
 	retriesFlag int
+	budgetFlag  float64
 	configPath  string
 }
 
@@ -98,6 +99,11 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 				if _, scanErr := fmt.Sscanf(v, "%d", &n); scanErr == nil {
 					opts.retriesFlag = n
 				}
+			} else if v, ok := parseStringFlag(args, &i, "--max-budget-usd"); ok {
+				var f float64
+				if _, scanErr := fmt.Sscanf(v, "%f", &f); scanErr == nil {
+					opts.budgetFlag = f
+				}
 			} else if v, ok := parseStringFlag(args, &i, "--config"); ok {
 				opts.configPath = v
 			} else if !strings.HasPrefix(args[i], "-") {
@@ -125,6 +131,7 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 		Model:        opts.modelFlag,
 		Format:       opts.formatFlag,
 		AgentTimeout: opts.timeoutFlag,
+		MaxBudgetUSD: opts.budgetFlag,
 	}
 	if opts.retriesFlag >= 0 {
 		cliCfg.MaxRetries = config.IntPtr(opts.retriesFlag)
@@ -246,12 +253,13 @@ func runReview(args []string) error {
 
 	// Dispatch agents.
 	llmBackend := claude.New()
-	orchestrator, orchErr := agents.NewOrchestrator(roles, agents.Options{
+	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
 		Verbose:      opts.verbose,
 		DryRun:       opts.dryRun,
 		Model:        merged.Model,
 		AgentTimeout: merged.TimeoutDuration(),
 		MaxRetries:   merged.MaxRetriesVal(),
+		MaxBudgetUSD: merged.MaxBudgetUSD,
 	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)

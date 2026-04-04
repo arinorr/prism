@@ -19,6 +19,7 @@ type Config struct {
 	Format         string   `yaml:"format"`
 	AgentTimeout   string   `yaml:"agent_timeout"`
 	MaxRetries     *int     `yaml:"max_retries"`
+	MaxBudgetUSD   float64  `yaml:"max_budget_usd"`
 	DiffWarnBytes  int      `yaml:"diff_warn_bytes"`
 	DiffChunkBytes int      `yaml:"diff_chunk_bytes"`
 }
@@ -91,6 +92,9 @@ func mergeInto(dst, src *Config) {
 	}
 	if src.MaxRetries != nil {
 		dst.MaxRetries = src.MaxRetries
+	}
+	if src.MaxBudgetUSD > 0 {
+		dst.MaxBudgetUSD = src.MaxBudgetUSD
 	}
 	if src.DiffWarnBytes > 0 {
 		dst.DiffWarnBytes = src.DiffWarnBytes

@@ -55,6 +55,10 @@ func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, llm.Us
 		args = append(args, "--model", req.Model)
 	}
 
+	if req.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", req.MaxBudgetUSD))
+	}
+
 	if req.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", req.SystemPrompt)
 	}

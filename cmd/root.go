@@ -44,6 +44,7 @@ Options:
   --model          Claude model to use (e.g. sonnet, opus, haiku)
   --timeout        Per-agent timeout as a Go duration (default: 5m)
   --max-retries    Number of retries per agent on failure (default: 1)
+  --max-budget-usd Maximum dollar spend per agent call (e.g. 0.50)
   --config         Path to config file (default: .prism.yml)
   --stdout         Print report to terminal instead of saving to file
   -y, --yes        Skip confirmation prompts (e.g. large diff warning)
