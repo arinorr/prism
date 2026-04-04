@@ -203,47 +203,14 @@ func TestHTML_UsesTemplate(t *testing.T) {
 	}
 }
 
-func TestHTML_SanitizesSummaryXSS(t *testing.T) {
-	d := &Data{
-		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
-		Result: &agents.ReviewResult{
-			Summary: "Good PR.\n\n<script>alert('xss')</script>\n\n[click](javascript:alert(1))",
-		},
-		Roles: []string{"Test"},
-	}
-	out, err := HTML(d)
+func TestHTML_DashboardRendered(t *testing.T) {
+	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(out, "<script>") {
-		t.Error("HTML summary should not contain <script> tags")
-	}
-	if strings.Contains(out, "javascript:") {
-		t.Error("HTML summary should not contain javascript: URLs")
-	}
-	// Benign markdown should still render.
-	if !strings.Contains(out, "Good PR.") {
-		t.Error("HTML summary should still contain safe text")
-	}
-}
-
-func TestHTML_SummaryPreservesSafeMarkdown(t *testing.T) {
-	d := &Data{
-		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
-		Result: &agents.ReviewResult{
-			Summary: "**Bold text** and `code` and [link](https://example.com)",
-		},
-		Roles: []string{"Test"},
-	}
-	out, err := HTML(d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(out, "<strong>Bold text</strong>") {
-		t.Error("HTML summary should preserve bold markdown")
-	}
-	if !strings.Contains(out, "<code>code</code>") {
-		t.Error("HTML summary should preserve code markdown")
+	// Dashboard should show risk breakdown.
+	if !strings.Contains(out, "Risk Breakdown") {
+		t.Error("HTML should contain Risk Breakdown card")
 	}
 }
 
@@ -298,19 +265,19 @@ func TestJSON_NilSlicesSerializeAsEmptyArrays(t *testing.T) {
 	}
 }
 
-func TestHTML_ContainsSeverityStats(t *testing.T) {
+func TestHTML_ContainsDashboard(t *testing.T) {
 	html, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(html, "stat-critical") {
-		t.Error("HTML should contain critical stat")
+	if !strings.Contains(html, "dashboard") {
+		t.Error("HTML should contain dashboard section")
 	}
-	if !strings.Contains(html, "stat-warning") {
-		t.Error("HTML should contain warning stat")
+	if !strings.Contains(html, "dash-card") {
+		t.Error("HTML should contain dashboard cards")
 	}
-	if !strings.Contains(html, "stat-info") {
-		t.Error("HTML should contain info stat")
+	if !strings.Contains(html, "badge-warning") {
+		t.Error("HTML should contain warning badge in dashboard")
 	}
 }
 

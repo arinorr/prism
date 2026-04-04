@@ -626,28 +626,18 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 .gauge-label { font-size: 0.9rem; color: var(--muted); margin-top: 0.25rem; }
 .gauge-verdict { font-weight: 600; font-size: 1rem; margin-top: 0.25rem; }
 
-/* Stats bar */
-.stats { display: flex; gap: 0.75rem; margin: 1.5rem 0; flex-wrap: wrap; }
-.stat { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; }
-.stat-critical { background: var(--red-bg); color: var(--red); }
-.stat-warning { background: var(--yellow-bg); color: var(--yellow); }
-.stat-info { background: var(--blue-bg); color: var(--blue); }
-.stat-suggestions { background: var(--green-bg); color: var(--green); }
-.stat .num { font-size: 1.25rem; }
-.scope-stats { display: flex; gap: 0.75rem; margin: 0 0 1.5rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
-.scope-stats span { padding: 0.3rem 0.75rem; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); }
-
-/* Summary */
-.summary { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; margin: 1.5rem 0; }
-.summary h1, .summary h2, .summary h3 { font-size: 1.1rem; border: none; margin: 1rem 0 0.5rem; padding: 0; }
-.summary p { margin: 0.5rem 0; }
-.summary ul, .summary ol { padding-left: 1.5rem; }
-.summary table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.85rem; }
-.summary th, .summary td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
-.summary th { background: var(--bg); }
-.summary pre { background: var(--bg); border: 1px solid var(--border); padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; }
-.summary code { background: var(--bg); padding: 0.15em 0.35em; border-radius: 3px; font-size: 0.85em; }
-.summary hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+/* Dashboard */
+.dashboard { margin: 1.5rem 0; }
+.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+@media (max-width: 640px) { .dashboard-grid { grid-template-columns: 1fr; } }
+.dash-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
+.dash-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.75rem; }
+.dash-items { display: flex; flex-direction: column; gap: 0.6rem; }
+.dash-row { display: flex; justify-content: space-between; align-items: center; }
+.dash-badge { font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+.dash-num { font-size: 1.5rem; font-weight: 800; color: var(--fg); }
+.dash-verdict { font-size: 1.15rem; font-weight: 700; color: var(--fg); margin-bottom: 0.25rem; text-transform: capitalize; }
+.dash-sub { font-size: 0.85rem; color: var(--muted); }
 
 /* Failed agents banner */
 .failed-banner { background: var(--yellow-bg); color: var(--yellow); padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600; }
@@ -733,20 +723,20 @@ details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; 
 
 {{- if gt .HealthScore.Score 0}}
 <div class="gauge-container">
-  <svg viewBox="0 0 200 130" width="260" height="169" role="img" aria-label="Health score: {{.HealthScore.Score}}/100 ({{.HealthScore.Grade}})">
+  <svg viewBox="0 0 200 140" width="280" height="196" role="img" aria-label="Health score: {{.HealthScore.Score}}/100 ({{.HealthScore.Grade}})">
     <!-- Background arc (gray) -->
-    <path d="M 20 105 A 80 80 0 0 1 180 105" fill="none" stroke="#e1e4e8" stroke-width="14" stroke-linecap="round"/>
+    <path d="M 20 110 A 80 80 0 0 1 180 110" fill="none" stroke="#e1e4e8" stroke-width="14" stroke-linecap="round"/>
     <!-- Score arc (colored by score) -->
-    <path d="M 20 105 A 80 80 0 0 1 180 105" fill="none" stroke="{{.GaugeColor}}" stroke-width="14" stroke-linecap="round"
-          stroke-dasharray="251" stroke-dashoffset="{{.GaugeDashOffset}}" style="transition: stroke-dashoffset 0.5s;"/>
+    <path d="M 20 110 A 80 80 0 0 1 180 110" fill="none" stroke="{{.GaugeColor}}" stroke-width="14" stroke-linecap="round"
+          stroke-dasharray="251" stroke-dashoffset="{{.GaugeDashOffset}}"/>
     <!-- Needle -->
-    <line x1="100" y1="105" x2="100" y2="35" stroke="var(--fg, #1f2328)" stroke-width="2.5" stroke-linecap="round"
-          transform="rotate({{.NeedleRotation}} 100 105)"/>
-    <circle cx="100" cy="105" r="5" fill="var(--fg, #1f2328)"/>
-    <!-- Score number -->
-    <text x="100" y="88" text-anchor="middle" font-size="32" font-weight="800" fill="var(--fg, #1f2328)">{{.HealthScore.Score}}</text>
-    <!-- Grade letter (large, colored) -->
-    <text x="100" y="125" text-anchor="middle" font-size="22" font-weight="800" fill="{{.GradeColor}}">{{.HealthScore.Grade}}</text>
+    <line x1="100" y1="110" x2="100" y2="40" stroke="var(--fg, #1f2328)" stroke-width="2.5" stroke-linecap="round"
+          transform="rotate({{.NeedleRotation}} 100 110)"/>
+    <circle cx="100" cy="110" r="5" fill="var(--fg, #1f2328)"/>
+    <!-- Grade letter (large, colored, above number) -->
+    <text x="100" y="80" text-anchor="middle" font-size="36" font-weight="800" fill="{{.GradeColor}}">{{.HealthScore.Grade}}</text>
+    <!-- Score number (below grade) -->
+    <text x="100" y="102" text-anchor="middle" font-size="18" font-weight="600" fill="var(--muted, #656d76)">{{.HealthScore.Score}} / 100</text>
   </svg>
   <div class="gauge-verdict">{{.HealthScore.Verdict}}</div>
 </div>
@@ -756,21 +746,30 @@ details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; 
 <div class="failed-banner">{{len .FailedAgents}} agent(s) failed: {{range $i, $a := .FailedAgents}}{{if $i}}, {{end}}{{$a}}{{end}}</div>
 {{- end}}
 
-<div class="stats">
-  <div class="stat stat-critical"><span class="num">{{.CriticalCount}}</span> critical</div>
-  <div class="stat stat-warning"><span class="num">{{.WarningCount}}</span> warning</div>
-  <div class="stat stat-info"><span class="num">{{.InfoCount}}</span> info</div>
-  <div class="stat stat-suggestions"><span class="num">{{.SuggestionCount}}</span> suggestions</div>
-</div>
-<div class="scope-stats">
-  <span>{{.ChangedCount}} in this PR</span>
-  <span>{{.ExistingCount}} pre-existing</span>
-  <span>{{.CodebaseCount}} codebase</span>
-</div>
-
-<h2>Summary</h2>
-<div class="summary">
-{{.SummaryHTML}}
+<div class="dashboard">
+  <div class="dashboard-grid">
+    <div class="dash-card">
+      <div class="dash-label">Risk Breakdown</div>
+      <div class="dash-items">
+        {{- if gt .CriticalCount 0}}<div class="dash-row"><span class="dash-badge badge-critical">critical</span><span class="dash-num">{{.CriticalCount}}</span></div>{{end}}
+        {{- if gt .WarningCount 0}}<div class="dash-row"><span class="dash-badge badge-warning">warning</span><span class="dash-num">{{.WarningCount}}</span></div>{{end}}
+        {{- if gt .InfoCount 0}}<div class="dash-row"><span class="dash-badge badge-info">info</span><span class="dash-num">{{.InfoCount}}</span></div>{{end}}
+      </div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-label">Scope</div>
+      <div class="dash-items">
+        {{- if gt .ChangedCount 0}}<div class="dash-row"><span>This PR</span><span class="dash-num">{{.ChangedCount}}</span></div>{{end}}
+        {{- if gt .ExistingCount 0}}<div class="dash-row"><span>Pre-existing</span><span class="dash-num">{{.ExistingCount}}</span></div>{{end}}
+        {{- if gt .CodebaseCount 0}}<div class="dash-row"><span>Codebase</span><span class="dash-num">{{.CodebaseCount}}</span></div>{{end}}
+      </div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-label">Verdict</div>
+      <div class="dash-verdict">{{.HealthScore.Verdict}}</div>
+      <div class="dash-sub">{{.FindingCount}} findings from {{.AgentCount}} agents</div>
+    </div>
+  </div>
 </div>
 
 {{- define "filegroup"}}
