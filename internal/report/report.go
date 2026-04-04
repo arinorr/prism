@@ -242,8 +242,10 @@ type htmlTemplateData struct {
 	CodebaseFindings []htmlFileGroup
 	FailedAgents     []string
 	HealthScore      agents.HealthScore
-	// NeedleRotation is the SVG rotation angle for the gauge needle (0=left, 180=right).
-	NeedleRotation int
+	NeedleRotation   int    // SVG rotation angle for gauge needle (0=left, 180=right)
+	GaugeColor       string // hex color for the gauge arc based on score
+	GradeColor       string // hex color for the grade letter
+	GaugeDashOffset  int    // SVG stroke-dashoffset for arc fill (0=full, 283=empty)
 }
 
 type htmlFileGroup struct {
@@ -412,6 +414,9 @@ func HTML(d *Data) (string, error) {
 		FailedAgents:     d.Result.FailedAgents,
 		HealthScore:      d.Result.HealthScore,
 		NeedleRotation:   int(float64(d.Result.HealthScore.Score) * 1.8), // 0-100 → 0-180 degrees
+		GaugeColor:       gaugeColor(d.Result.HealthScore.Score),
+		GradeColor:       gradeColor(d.Result.HealthScore.Score),
+		GaugeDashOffset:  283 - (d.Result.HealthScore.Score*283)/100, // 283 is approx circumference of semicircle
 	}
 
 	tmpl, err := htmltemplate.New("report").Parse(htmlReportTemplate)
@@ -728,23 +733,22 @@ details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; 
 
 {{- if gt .HealthScore.Score 0}}
 <div class="gauge-container">
-  <svg viewBox="0 0 200 120" width="240" height="144" role="img" aria-label="Health score gauge: {{.HealthScore.Score}}/100">
-    <!-- Red arc (left) -->
-    <path d="M 20 100 A 80 80 0 0 1 60 34" fill="none" stroke="#cf222e" stroke-width="12" stroke-linecap="round"/>
-    <!-- Yellow arc (center) -->
-    <path d="M 60 34 A 80 80 0 0 1 140 34" fill="none" stroke="#d4a72c" stroke-width="12" stroke-linecap="round"/>
-    <!-- Green arc (right) -->
-    <path d="M 140 34 A 80 80 0 0 1 180 100" fill="none" stroke="#1a7f37" stroke-width="12" stroke-linecap="round"/>
+  <svg viewBox="0 0 200 130" width="260" height="169" role="img" aria-label="Health score: {{.HealthScore.Score}}/100 ({{.HealthScore.Grade}})">
+    <!-- Background arc (gray) -->
+    <path d="M 20 105 A 80 80 0 0 1 180 105" fill="none" stroke="#e1e4e8" stroke-width="14" stroke-linecap="round"/>
+    <!-- Score arc (colored by score) -->
+    <path d="M 20 105 A 80 80 0 0 1 180 105" fill="none" stroke="{{.GaugeColor}}" stroke-width="14" stroke-linecap="round"
+          stroke-dasharray="251" stroke-dashoffset="{{.GaugeDashOffset}}" style="transition: stroke-dashoffset 0.5s;"/>
     <!-- Needle -->
-    <line x1="100" y1="100" x2="100" y2="30" stroke="#1f2328" stroke-width="2.5" stroke-linecap="round"
-          transform="rotate({{.NeedleRotation}} 100 100)" style="transform-origin: 100px 100px;"/>
-    <circle cx="100" cy="100" r="4" fill="#1f2328"/>
-    <!-- Score text -->
-    <text x="100" y="90" text-anchor="middle" font-size="28" font-weight="700" fill="#1f2328">{{.HealthScore.Score}}</text>
-    <text x="100" y="115" text-anchor="middle" font-size="14" font-weight="600" fill="#656d76">{{.HealthScore.Grade}}</text>
+    <line x1="100" y1="105" x2="100" y2="35" stroke="var(--fg, #1f2328)" stroke-width="2.5" stroke-linecap="round"
+          transform="rotate({{.NeedleRotation}} 100 105)"/>
+    <circle cx="100" cy="105" r="5" fill="var(--fg, #1f2328)"/>
+    <!-- Score number -->
+    <text x="100" y="88" text-anchor="middle" font-size="32" font-weight="800" fill="var(--fg, #1f2328)">{{.HealthScore.Score}}</text>
+    <!-- Grade letter (large, colored) -->
+    <text x="100" y="125" text-anchor="middle" font-size="22" font-weight="800" fill="{{.GradeColor}}">{{.HealthScore.Grade}}</text>
   </svg>
   <div class="gauge-verdict">{{.HealthScore.Verdict}}</div>
-  <div class="gauge-label">{{.HealthScore.Description}}</div>
 </div>
 {{- end}}
 
@@ -1010,5 +1014,29 @@ func severityBadge(s string) string {
 		return "🟡 warning"
 	default:
 		return "🔵 info"
+	}
+}
+
+// gaugeColor returns a hex color for the health gauge arc based on score.
+func gaugeColor(score int) string {
+	switch {
+	case score >= 80:
+		return "#1a7f37" // green
+	case score >= 60:
+		return "#d4a72c" // yellow
+	default:
+		return "#cf222e" // red
+	}
+}
+
+// gradeColor returns a hex color for the grade letter based on score.
+func gradeColor(score int) string {
+	switch {
+	case score >= 70:
+		return "#1a7f37" // green for A+, A, B+, B
+	case score >= 60:
+		return "#d4a72c" // yellow for C
+	default:
+		return "#cf222e" // red for D, F
 	}
 }
