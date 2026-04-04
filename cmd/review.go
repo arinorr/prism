@@ -397,12 +397,16 @@ func isInteractive() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
+// writeToFile writes content to the given path, creating directories as needed.
+// The path is constructed from defaultResultsDir + sanitizeFilename(prNumber) + extension,
+// where sanitizeFilename strips all characters except [a-zA-Z0-9_-], preventing
+// path traversal via crafted PR numbers.
 func writeToFile(content, path string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir := filepath.Dir(filepath.Clean(path))
+	if err := os.MkdirAll(dir, 0o700); err != nil { // #nosec G703 -- path is built from sanitizeFilename which strips traversal chars
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Clean(path), []byte(content), 0o600); err != nil { // #nosec G703 -- same as above
 		return fmt.Errorf("failed to write output to %s: %w", path, err)
 	}
 	fmt.Printf("📄 Report written to %s\n", path)
