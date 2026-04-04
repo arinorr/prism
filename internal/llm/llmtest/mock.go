@@ -20,23 +20,26 @@ type Mock struct {
 	// Err is returned by Complete if non-nil.
 	Err error
 
+	// UsageVal is the usage returned by Complete.
+	UsageVal llm.Usage
+
 	// Calls records each request passed to Complete.
 	Calls []llm.Request
 
 	// CompleteFunc, if set, is called instead of returning Response/Err.
 	// This allows per-call behavior in tests.
-	CompleteFunc func(ctx context.Context, req llm.Request) (string, error)
+	CompleteFunc func(ctx context.Context, req llm.Request) (string, llm.Usage, error)
 
 	mu sync.Mutex
 }
 
 // Complete satisfies the llm.LLM interface.
-func (m *Mock) Complete(ctx context.Context, req llm.Request) (string, error) {
+func (m *Mock) Complete(ctx context.Context, req llm.Request) (string, llm.Usage, error) {
 	m.mu.Lock()
 	m.Calls = append(m.Calls, req)
 	m.mu.Unlock()
 	if m.CompleteFunc != nil {
 		return m.CompleteFunc(ctx, req)
 	}
-	return m.Response, m.Err
+	return m.Response, m.UsageVal, m.Err
 }

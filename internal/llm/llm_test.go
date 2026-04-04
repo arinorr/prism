@@ -11,7 +11,7 @@ import (
 
 func TestMock_ReturnsResponse(t *testing.T) {
 	m := &llmtest.Mock{Response: "hello"}
-	resp, err := m.Complete(context.Background(), llm.Request{UserPrompt: "test"})
+	resp, _, err := m.Complete(context.Background(), llm.Request{UserPrompt: "test"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestMock_ReturnsResponse(t *testing.T) {
 
 func TestMock_ReturnsError(t *testing.T) {
 	m := &llmtest.Mock{Err: fmt.Errorf("fail")}
-	_, err := m.Complete(context.Background(), llm.Request{})
+	_, _, err := m.Complete(context.Background(), llm.Request{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -30,8 +30,8 @@ func TestMock_ReturnsError(t *testing.T) {
 
 func TestMock_RecordsCalls(t *testing.T) {
 	m := &llmtest.Mock{Response: "ok"}
-	_, _ = m.Complete(context.Background(), llm.Request{UserPrompt: "first"})
-	_, _ = m.Complete(context.Background(), llm.Request{UserPrompt: "second"})
+	_, _, _ = m.Complete(context.Background(), llm.Request{UserPrompt: "first"})
+	_, _, _ = m.Complete(context.Background(), llm.Request{UserPrompt: "second"})
 	if len(m.Calls) != 2 {
 		t.Fatalf("expected 2 calls, got %d", len(m.Calls))
 	}
@@ -45,11 +45,11 @@ func TestMock_RecordsCalls(t *testing.T) {
 
 func TestMock_CompleteFunc(t *testing.T) {
 	m := &llmtest.Mock{
-		CompleteFunc: func(_ context.Context, req llm.Request) (string, error) {
-			return "custom: " + req.UserPrompt, nil
+		CompleteFunc: func(_ context.Context, req llm.Request) (string, llm.Usage, error) {
+			return "custom: " + req.UserPrompt, llm.Usage{}, nil
 		},
 	}
-	resp, err := m.Complete(context.Background(), llm.Request{UserPrompt: "test"})
+	resp, _, err := m.Complete(context.Background(), llm.Request{UserPrompt: "test"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,11 +61,11 @@ func TestMock_CompleteFunc(t *testing.T) {
 func TestMock_CompleteFuncOverridesResponse(t *testing.T) {
 	m := &llmtest.Mock{
 		Response: "should not be returned",
-		CompleteFunc: func(_ context.Context, _ llm.Request) (string, error) {
-			return "from func", nil
+		CompleteFunc: func(_ context.Context, _ llm.Request) (string, llm.Usage, error) {
+			return "from func", llm.Usage{}, nil
 		},
 	}
-	resp, _ := m.Complete(context.Background(), llm.Request{})
+	resp, _, _ := m.Complete(context.Background(), llm.Request{})
 	if resp != "from func" {
 		t.Errorf("CompleteFunc should override Response, got %q", resp)
 	}

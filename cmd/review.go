@@ -11,6 +11,7 @@ import (
 
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/config"
+	"github.com/arinorr/prism/internal/diff"
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/llm/claude"
 	"github.com/arinorr/prism/internal/report"
@@ -46,6 +47,8 @@ type reviewOptions struct {
 	modelFlag   string
 	timeoutFlag string
 	retriesFlag int
+	budgetFlag  float64
+	noCompress  bool
 	configPath  string
 }
 
@@ -82,6 +85,8 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.dryRun = true
 		case "--yes", "-y":
 			opts.yes = true
+		case "--no-compress":
+			opts.noCompress = true
 		case "--stdout":
 			opts.toStdout = true
 		default:
@@ -97,6 +102,11 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 				var n int
 				if _, scanErr := fmt.Sscanf(v, "%d", &n); scanErr == nil {
 					opts.retriesFlag = n
+				}
+			} else if v, ok := parseStringFlag(args, &i, "--max-budget-usd"); ok {
+				var f float64
+				if _, scanErr := fmt.Sscanf(v, "%f", &f); scanErr == nil {
+					opts.budgetFlag = f
 				}
 			} else if v, ok := parseStringFlag(args, &i, "--config"); ok {
 				opts.configPath = v
@@ -125,6 +135,7 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 		Model:        opts.modelFlag,
 		Format:       opts.formatFlag,
 		AgentTimeout: opts.timeoutFlag,
+		MaxBudgetUSD: opts.budgetFlag,
 	}
 	if opts.retriesFlag >= 0 {
 		cliCfg.MaxRetries = config.IntPtr(opts.retriesFlag)
@@ -244,14 +255,25 @@ func runReview(args []string) error {
 	}
 	fmt.Println()
 
+	// Build diff compression options.
+	diffOpts := diff.DefaultOptions()
+	if opts.noCompress || merged.NoCompress {
+		diffOpts = diff.NoCompression()
+	} else {
+		diffOpts.ContextLines = merged.DiffContextLinesVal()
+		diffOpts.ExtraPatterns = merged.StripPatterns
+	}
+
 	// Dispatch agents.
 	llmBackend := claude.New()
-	orchestrator, orchErr := agents.NewOrchestrator(roles, agents.Options{
+	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
 		Verbose:      opts.verbose,
 		DryRun:       opts.dryRun,
 		Model:        merged.Model,
 		AgentTimeout: merged.TimeoutDuration(),
 		MaxRetries:   merged.MaxRetriesVal(),
+		MaxBudgetUSD: merged.MaxBudgetUSD,
+		DiffCompress: diffOpts,
 	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
@@ -263,6 +285,11 @@ func runReview(args []string) error {
 		return fmt.Errorf("review failed: %w", err)
 	}
 	elapsed := time.Since(start)
+
+	// Print usage summary.
+	u := result.Usage
+	fmt.Printf("   📊 Tokens: %dk input, %dk output | Cost: $%.2f | Time: %s\n\n",
+		u.InputTokens/1000, u.OutputTokens/1000, u.CostUSD, elapsed.Round(time.Second))
 
 	// Resolve format: CLI flag > config file > none.
 	formatFlag := opts.formatFlag
@@ -306,6 +333,7 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 		Result:   result,
 		Roles:    roleNames,
 		Duration: elapsed.Round(time.Second).String(),
+		Usage:    result.Usage,
 	}
 
 	var output string

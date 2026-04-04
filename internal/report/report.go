@@ -14,6 +14,7 @@ import (
 
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm"
 )
 
 // Use severity constants from agents package to avoid duplication.
@@ -29,6 +30,7 @@ type Data struct {
 	Result   *agents.ReviewResult
 	Roles    []string
 	Duration string
+	Usage    llm.Usage
 }
 
 // Markdown generates a markdown report from the review data.
@@ -877,6 +879,7 @@ func JSON(d *Data) (string, error) {
 		Suggestions     []suggestionJSON        `json:"suggestions"`
 		Roles           []string                `json:"roles"`
 		FailedAgents    []string                `json:"failed_agents"`
+		Usage           llm.Usage               `json:"usage"`
 		Duration        string                  `json:"duration,omitempty"`
 	}{
 		PR: prSummary{
@@ -891,6 +894,7 @@ func JSON(d *Data) (string, error) {
 		Suggestions:     suggestions,
 		Roles:           roles,
 		FailedAgents:    failedAgents,
+		Usage:           d.Usage,
 		Duration:        d.Duration,
 	}
 
