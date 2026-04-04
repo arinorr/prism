@@ -17,7 +17,10 @@ import (
 	"github.com/arinorr/prism/internal/sizecheck"
 )
 
-const defaultResultsDir = "results"
+const (
+	defaultResultsDir   = "results"
+	defaultFilenameSlug = "unknown"
+)
 
 // prClient abstracts the GitHub client for testability.
 type prClient interface {
@@ -136,6 +139,38 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 	return config.Merge(&def, &fileCfg, &cliCfg), nil
 }
 
+// validFormats lists the accepted values for --format.
+var validFormats = map[string]bool{
+	"":         true,
+	"plain":    true,
+	"md":       true,
+	"markdown": true,
+	"html":     true,
+	"json":     true,
+}
+
+// validateOptions performs fast, cheap validation of CLI flags so we can fail
+// before spending tokens on LLM calls or network requests.
+func validateOptions(opts *reviewOptions, merged *config.Config) error {
+	// Resolve effective format: CLI flag > merged config.
+	format := opts.formatFlag
+	if format == "" {
+		format = merged.Format
+	}
+	if !validFormats[format] {
+		return fmt.Errorf("invalid format: %q (available: plain, md, html, json)", format)
+	}
+
+	// Validate CLI timeout parses as a Go duration.
+	if opts.timeoutFlag != "" {
+		if _, err := time.ParseDuration(opts.timeoutFlag); err != nil {
+			return fmt.Errorf("invalid timeout: %q (must be a Go duration like 30s, 2m, 1h)", opts.timeoutFlag)
+		}
+	}
+
+	return nil
+}
+
 // resolveRoles determines which agent roles to use from the merged config.
 func resolveRoles(merged *config.Config) ([]agents.Role, error) {
 	if len(merged.Roles) > 0 {
@@ -182,6 +217,10 @@ func runReview(args []string) error {
 
 	merged, err := loadAndMergeConfig(opts)
 	if err != nil {
+		return err
+	}
+
+	if err := validateOptions(opts, &merged); err != nil {
 		return err
 	}
 
@@ -276,6 +315,9 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 	}
 
 	switch formatFlag {
+	case "plain":
+		fmt.Println(result.Summary)
+		return nil
 	case "md", "markdown":
 		output = report.Markdown(data)
 	case "html":
@@ -313,7 +355,7 @@ func sanitizeFilename(s string) string {
 	}
 	s = filenameAllowlist.ReplaceAllString(s, "")
 	if s == "" {
-		return "unknown"
+		return defaultFilenameSlug
 	}
 	return s
 }

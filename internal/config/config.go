@@ -29,6 +29,7 @@ func IntPtr(n int) *int { return &n }
 // Default returns a Config with sensible defaults.
 func Default() Config {
 	return Config{
+		Format:         "html",
 		AgentTimeout:   "5m",
 		MaxRetries:     IntPtr(1),
 		DiffWarnBytes:  153600, // 150 KB

@@ -22,9 +22,9 @@ func testData() *Data {
 		Result: &agents.ReviewResult{
 			Summary: "Overall looks good with minor issues.",
 			Findings: []agents.Finding{
-				{File: "widget.go", Line: 10, Severity: "critical", Summary: "Nil pointer", Detail: "Check for nil before dereferencing.", Role: "solver"},
-				{File: "widget.go", Line: 25, Severity: "warning", Summary: "Long function", Detail: "Consider extracting a helper.", Role: "editor"},
-				{File: "widget_test.go", Line: 5, Severity: "info", Summary: "Missing edge case", Detail: "Add a test for empty input.", Role: "test-engineer"},
+				{File: "widget.go", Line: 10, Risk: "critical", Summary: "Nil pointer", Detail: "Check for nil before dereferencing.", Role: "solver"},
+				{File: "widget.go", Line: 25, Risk: "warning", Summary: "Long function", Detail: "Consider extracting a helper.", Role: "editor"},
+				{File: "widget_test.go", Line: 5, Risk: "info", Summary: "Missing edge case", Detail: "Add a test for empty input.", Role: "test-engineer"},
 			},
 			Suggestions: []gh.Suggestion{
 				{File: "widget.go", Line: 10, Body: "Check for nil", Role: "solver"},
@@ -116,19 +116,19 @@ func TestJSON_ValidOutput(t *testing.T) {
 
 func TestGroupByFile_SortsBySeverity(t *testing.T) {
 	findings := []agents.Finding{
-		{File: "a.go", Severity: "info", Summary: "info item"},
-		{File: "a.go", Severity: "critical", Summary: "critical item"},
-		{File: "a.go", Severity: "warning", Summary: "warning item"},
+		{File: "a.go", Risk: "info", Summary: "info item"},
+		{File: "a.go", Risk: "critical", Summary: "critical item"},
+		{File: "a.go", Risk: "warning", Summary: "warning item"},
 	}
 	groups := groupByFile(findings)
 	if len(groups) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(groups))
 	}
-	if groups[0].findings[0].Severity != "critical" {
-		t.Errorf("expected critical first, got %q", groups[0].findings[0].Severity)
+	if groups[0].findings[0].Risk != "critical" {
+		t.Errorf("expected critical first, got %q", groups[0].findings[0].Risk)
 	}
-	if groups[0].findings[1].Severity != "warning" {
-		t.Errorf("expected warning second, got %q", groups[0].findings[1].Severity)
+	if groups[0].findings[1].Risk != "warning" {
+		t.Errorf("expected warning second, got %q", groups[0].findings[1].Risk)
 	}
 }
 
@@ -247,8 +247,8 @@ func TestMarkdown_NoLine0InDetails(t *testing.T) {
 		Result: &agents.ReviewResult{
 			Summary: "Test summary.",
 			Findings: []agents.Finding{
-				{File: "a.go", Line: 0, Severity: "warning", Summary: "General issue", Detail: "This is a general warning.", Role: "editor"},
-				{File: "a.go", Line: 10, Severity: "critical", Summary: "Specific issue", Detail: "This is on line 10.", Role: "solver"},
+				{File: "a.go", Line: 0, Risk: "warning", Summary: "General issue", Detail: "This is a general warning.", Role: "editor"},
+				{File: "a.go", Line: 10, Risk: "critical", Summary: "Specific issue", Detail: "This is on line 10.", Role: "solver"},
 			},
 		},
 		Roles: []string{"Editor", "Solver"},
@@ -327,7 +327,7 @@ func TestHTML_EscapesXSSInFindings(t *testing.T) {
 		Result: &agents.ReviewResult{
 			Summary: "Test summary.",
 			Findings: []agents.Finding{
-				{File: "<img src=x>.go", Line: 10, Severity: "critical", Summary: "<b>bold xss</b>", Detail: "<script>alert(1)</script>", Role: "sentinel"},
+				{File: "<img src=x>.go", Line: 10, Risk: "critical", Summary: "<b>bold xss</b>", Detail: "<script>alert(1)</script>", Role: "sentinel"},
 			},
 		},
 		Roles: []string{"Sentinel"},
@@ -354,7 +354,7 @@ func TestHTML_EscapesXSSInFindings(t *testing.T) {
 
 func TestGroupByFile_EmptyFile(t *testing.T) {
 	findings := []agents.Finding{
-		{File: "", Severity: "info", Summary: "general note"},
+		{File: "", Risk: "info", Summary: "general note"},
 	}
 	groups := groupByFile(findings)
 	if len(groups) != 1 {
@@ -367,8 +367,8 @@ func TestGroupByFile_EmptyFile(t *testing.T) {
 
 func TestGroupByFile_MultipleFiles(t *testing.T) {
 	findings := []agents.Finding{
-		{File: "b.go", Severity: "info", Summary: "b note"},
-		{File: "a.go", Severity: "warning", Summary: "a note"},
+		{File: "b.go", Risk: "info", Summary: "b note"},
+		{File: "a.go", Risk: "warning", Summary: "a note"},
 	}
 	groups := groupByFile(findings)
 	if len(groups) != 2 {
@@ -391,13 +391,13 @@ func dedupedTestData() *Data {
 			Summary: "Summary with deduped findings.",
 			DedupedFindings: []agents.DedupedFinding{
 				{
-					Finding:     agents.Finding{File: "a.go", Line: 10, Severity: "critical", Summary: "missing timeout", Detail: "Add context.WithTimeout"},
+					Finding:     agents.Finding{File: "a.go", Line: 10, Risk: "critical", Summary: "missing timeout", Detail: "Add context.WithTimeout"},
 					VoteCount:   5,
 					TotalAgents: 7,
 					Voters:      []string{"architect", "solver", "sentinel", "optimizer", "editor"},
 				},
 				{
-					Finding:     agents.Finding{File: "a.go", Line: 50, Severity: "info", Summary: "style note", Detail: "Minor style"},
+					Finding:     agents.Finding{File: "a.go", Line: 50, Risk: "info", Summary: "style note", Detail: "Minor style"},
 					VoteCount:   1,
 					TotalAgents: 7,
 					Voters:      []string{"editor"},
@@ -471,11 +471,11 @@ func TestHTML_DedupedFindingsPreferredOverRaw(t *testing.T) {
 		Result: &agents.ReviewResult{
 			Summary: "Test.",
 			Findings: []agents.Finding{
-				{File: "a.go", Line: 10, Severity: "warning", Summary: "raw finding", Role: "solver"},
+				{File: "a.go", Line: 10, Risk: "warning", Summary: "raw finding", Role: "solver"},
 			},
 			DedupedFindings: []agents.DedupedFinding{
 				{
-					Finding:     agents.Finding{File: "a.go", Line: 10, Severity: "warning", Summary: "deduped finding"},
+					Finding:     agents.Finding{File: "a.go", Line: 10, Risk: "warning", Summary: "deduped finding"},
 					VoteCount:   3,
 					TotalAgents: 5,
 					Voters:      []string{"solver", "architect", "sentinel"},
@@ -523,9 +523,9 @@ func TestJSON_DedupedFindings(t *testing.T) {
 
 func TestGroupDedupedByFile(t *testing.T) {
 	findings := []agents.DedupedFinding{
-		{Finding: agents.Finding{File: "b.go", Line: 1, Severity: "info"}, VoteCount: 1},
-		{Finding: agents.Finding{File: "a.go", Line: 10, Severity: "critical"}, VoteCount: 3},
-		{Finding: agents.Finding{File: "a.go", Line: 20, Severity: "warning"}, VoteCount: 2},
+		{Finding: agents.Finding{File: "b.go", Line: 1, Risk: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 3},
+		{Finding: agents.Finding{File: "a.go", Line: 20, Risk: "warning"}, VoteCount: 2},
 	}
 	groups := groupDedupedByFile(findings)
 	if len(groups) != 2 {
@@ -545,7 +545,7 @@ func TestGroupDedupedByFile(t *testing.T) {
 
 func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
 	findings := []agents.DedupedFinding{
-		{Finding: agents.Finding{File: "", Severity: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "", Risk: "info"}, VoteCount: 1},
 	}
 	groups := groupDedupedByFile(findings)
 	if len(groups) != 1 {
@@ -558,10 +558,10 @@ func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
 
 func TestGroupDedupedByFile_MultipleFiles(t *testing.T) {
 	findings := []agents.DedupedFinding{
-		{Finding: agents.Finding{File: "c.go", Line: 1, Severity: "info"}, VoteCount: 1},
-		{Finding: agents.Finding{File: "a.go", Line: 10, Severity: "critical"}, VoteCount: 5},
-		{Finding: agents.Finding{File: "a.go", Line: 20, Severity: "warning"}, VoteCount: 2},
-		{Finding: agents.Finding{File: "b.go", Line: 5, Severity: "critical"}, VoteCount: 3},
+		{Finding: agents.Finding{File: "c.go", Line: 1, Risk: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 5},
+		{Finding: agents.Finding{File: "a.go", Line: 20, Risk: "warning"}, VoteCount: 2},
+		{Finding: agents.Finding{File: "b.go", Line: 5, Risk: "critical"}, VoteCount: 3},
 	}
 	groups := groupDedupedByFile(findings)
 	if len(groups) != 3 {

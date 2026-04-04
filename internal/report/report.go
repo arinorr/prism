@@ -18,9 +18,9 @@ import (
 
 // Use severity constants from agents package to avoid duplication.
 const (
-	severityCritical = agents.SeverityCritical
-	severityWarning  = agents.SeverityWarning
-	severityInfo     = agents.SeverityInfo
+	severityCritical = agents.RiskCritical
+	severityWarning  = agents.RiskWarning
+	severityInfo     = agents.RiskInfo
 )
 
 // Data holds everything needed to generate a report.
@@ -59,7 +59,7 @@ func Markdown(d *Data) string {
 		grouped := groupDedupedByFile(d.Result.DedupedFindings)
 		for _, group := range grouped {
 			fmt.Fprintf(&b, "### `%s`\n\n", group.file)
-			b.WriteString("| Line | Severity | Votes | Summary |\n")
+			b.WriteString("| Line | Risk | Votes | Summary |\n")
 			b.WriteString("|------|----------|-------|---------|\n")
 			for i := range group.findings {
 				f := &group.findings[i]
@@ -69,23 +69,23 @@ func Markdown(d *Data) string {
 				}
 				votes := fmt.Sprintf("%d/%d", f.VoteCount, f.TotalAgents)
 				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-					line, severityBadge(f.Severity), votes, f.Summary)
+					line, severityBadge(f.Risk), votes, f.Summary)
 			}
 			b.WriteString("\n")
 
 			// Details for warnings and criticals.
 			for i := range group.findings {
 				f := &group.findings[i]
-				if f.Severity == severityInfo {
+				if f.Risk == severityInfo {
 					continue
 				}
 				voters := strings.Join(f.Voters, ", ")
 				if f.Line > 0 {
 					fmt.Fprintf(&b, "**%s** (line %d, %d/%d agents: %s) — %s\n\n",
-						severityBadge(f.Severity), f.Line, f.VoteCount, f.TotalAgents, voters, f.Summary)
+						severityBadge(f.Risk), f.Line, f.VoteCount, f.TotalAgents, voters, f.Summary)
 				} else {
 					fmt.Fprintf(&b, "**%s** (%d/%d agents: %s) — %s\n\n",
-						severityBadge(f.Severity), f.VoteCount, f.TotalAgents, voters, f.Summary)
+						severityBadge(f.Risk), f.VoteCount, f.TotalAgents, voters, f.Summary)
 				}
 				b.WriteString(f.Detail)
 				b.WriteString("\n\n")
@@ -96,28 +96,30 @@ func Markdown(d *Data) string {
 		grouped := groupByFile(d.Result.Findings)
 		for _, group := range grouped {
 			fmt.Fprintf(&b, "### `%s`\n\n", group.file)
-			b.WriteString("| Line | Severity | Agent | Summary |\n")
+			b.WriteString("| Line | Risk | Agent | Summary |\n")
 			b.WriteString("|------|----------|-------|---------|\n")
-			for _, f := range group.findings {
+			for i := range group.findings {
+				f := &group.findings[i]
 				line := "-"
 				if f.Line > 0 {
 					line = fmt.Sprintf("%d", f.Line)
 				}
 				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-					line, severityBadge(f.Severity), f.Role, f.Summary)
+					line, severityBadge(f.Risk), f.Role, f.Summary)
 			}
 			b.WriteString("\n")
 
-			for _, f := range group.findings {
-				if f.Severity == severityInfo {
+			for i := range group.findings {
+				f := &group.findings[i]
+				if f.Risk == severityInfo {
 					continue
 				}
 				if f.Line > 0 {
 					fmt.Fprintf(&b, "**%s** (line %d, %s) — %s\n\n",
-						severityBadge(f.Severity), f.Line, f.Role, f.Summary)
+						severityBadge(f.Risk), f.Line, f.Role, f.Summary)
 				} else {
 					fmt.Fprintf(&b, "**%s** (%s) — %s\n\n",
-						severityBadge(f.Severity), f.Role, f.Summary)
+						severityBadge(f.Risk), f.Role, f.Summary)
 				}
 				b.WriteString(f.Detail)
 				b.WriteString("\n\n")
@@ -160,17 +162,17 @@ type htmlFileGroup struct {
 }
 
 type htmlFinding struct {
-	Severity      string
-	SeverityClass string
-	Line          int
-	HasLine       bool
-	Role          string
-	RoleClass     string
-	Summary       string
-	Detail        string
-	HasDetail     bool
-	VoteCount     int
-	TotalAgents   int
+	Risk        string
+	RiskClass   string
+	Line        int
+	HasLine     bool
+	Role        string
+	RoleClass   string
+	Summary     string
+	Detail      string
+	HasDetail   bool
+	VoteCount   int
+	TotalAgents int
 }
 
 // agentColors maps role slugs to CSS color classes for badges.
@@ -209,7 +211,7 @@ func HTML(d *Data) (string, error) {
 	if len(d.Result.DedupedFindings) > 0 {
 		findingCount = len(d.Result.DedupedFindings)
 		for i := range d.Result.DedupedFindings {
-			switch d.Result.DedupedFindings[i].Severity {
+			switch d.Result.DedupedFindings[i].Risk {
 			case severityCritical:
 				critCount++
 			case severityWarning:
@@ -223,7 +225,7 @@ func HTML(d *Data) (string, error) {
 			var findings []htmlFinding
 			for i := range g.findings {
 				f := &g.findings[i]
-				switch f.Severity {
+				switch f.Risk {
 				case severityCritical:
 					fc++
 				case severityWarning:
@@ -232,24 +234,24 @@ func HTML(d *Data) (string, error) {
 					fi++
 				}
 				sevClass := "badge-info"
-				switch f.Severity {
+				switch f.Risk {
 				case severityCritical:
 					sevClass = "badge-critical"
 				case severityWarning:
 					sevClass = "badge-warning"
 				}
 				findings = append(findings, htmlFinding{
-					Severity:      f.Severity,
-					SeverityClass: sevClass,
-					Line:          f.Line,
-					HasLine:       f.Line > 0,
-					Role:          f.Role,
-					RoleClass:     agentColorClass(f.Role),
-					Summary:       f.Summary,
-					Detail:        f.Detail,
-					HasDetail:     f.Detail != "",
-					VoteCount:     f.VoteCount,
-					TotalAgents:   f.TotalAgents,
+					Risk:        f.Risk,
+					RiskClass:   sevClass,
+					Line:        f.Line,
+					HasLine:     f.Line > 0,
+					Role:        f.Role,
+					RoleClass:   agentColorClass(f.Role),
+					Summary:     f.Summary,
+					Detail:      f.Detail,
+					HasDetail:   f.Detail != "",
+					VoteCount:   f.VoteCount,
+					TotalAgents: f.TotalAgents,
 				})
 			}
 			fileGroups = append(fileGroups, htmlFileGroup{
@@ -262,8 +264,9 @@ func HTML(d *Data) (string, error) {
 		}
 	} else {
 		findingCount = len(d.Result.Findings)
-		for _, f := range d.Result.Findings {
-			switch f.Severity {
+		for i := range d.Result.Findings {
+			f := &d.Result.Findings[i]
+			switch f.Risk {
 			case severityCritical:
 				critCount++
 			case severityWarning:
@@ -275,8 +278,9 @@ func HTML(d *Data) (string, error) {
 		for _, g := range groupByFile(d.Result.Findings) {
 			var fc, fw, fi int
 			var findings []htmlFinding
-			for _, f := range g.findings {
-				switch f.Severity {
+			for j := range g.findings {
+				f := &g.findings[j]
+				switch f.Risk {
 				case severityCritical:
 					fc++
 				case severityWarning:
@@ -285,22 +289,22 @@ func HTML(d *Data) (string, error) {
 					fi++
 				}
 				sevClass := "badge-info"
-				switch f.Severity {
+				switch f.Risk {
 				case severityCritical:
 					sevClass = "badge-critical"
 				case severityWarning:
 					sevClass = "badge-warning"
 				}
 				findings = append(findings, htmlFinding{
-					Severity:      f.Severity,
-					SeverityClass: sevClass,
-					Line:          f.Line,
-					HasLine:       f.Line > 0,
-					Role:          f.Role,
-					RoleClass:     agentColorClass(f.Role),
-					Summary:       f.Summary,
-					Detail:        f.Detail,
-					HasDetail:     f.Detail != "",
+					Risk:      f.Risk,
+					RiskClass: sevClass,
+					Line:      f.Line,
+					HasLine:   f.Line > 0,
+					Role:      f.Role,
+					RoleClass: agentColorClass(f.Role),
+					Summary:   f.Summary,
+					Detail:    f.Detail,
+					HasDetail: f.Detail != "",
 				})
 			}
 			fileGroups = append(fileGroups, htmlFileGroup{
@@ -475,7 +479,7 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
   {{range .Findings}}
   <div class="finding">
     <div class="finding-meta">
-      <span class="severity {{.SeverityClass}}">{{.Severity}}</span>
+      <span class="severity {{.RiskClass}}">{{.Risk}}</span>
       {{- if .HasLine}}
       <span class="line">line {{.Line}}</span>
       {{- end}}
@@ -587,18 +591,18 @@ type fileGroup struct {
 
 func groupByFile(findings []agents.Finding) []fileGroup {
 	byFile := make(map[string][]agents.Finding)
-	for _, f := range findings {
-		file := f.File
+	for i := range findings {
+		file := findings[i].File
 		if file == "" {
 			file = generalFile
 		}
-		byFile[file] = append(byFile[file], f)
+		byFile[file] = append(byFile[file], findings[i])
 	}
 
 	groups := make([]fileGroup, 0, len(byFile))
 	for file, fs := range byFile {
 		sort.Slice(fs, func(i, j int) bool {
-			si, sj := severityOrder(fs[i].Severity), severityOrder(fs[j].Severity)
+			si, sj := severityOrder(fs[i].Risk), severityOrder(fs[j].Risk)
 			if si != sj {
 				return si < sj
 			}
@@ -635,7 +639,7 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 			if fs[i].VoteCount != fs[j].VoteCount {
 				return fs[i].VoteCount > fs[j].VoteCount
 			}
-			si, sj := severityOrder(fs[i].Severity), severityOrder(fs[j].Severity)
+			si, sj := severityOrder(fs[i].Risk), severityOrder(fs[j].Risk)
 			if si != sj {
 				return si < sj
 			}

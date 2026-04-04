@@ -39,7 +39,7 @@ Options:
   --comment        Post suggestions as inline PR comments (requires gh cli)
   --roles          Comma-separated list of roles to use (default: all)
                    Available: know-it-all,architect,solver,editor,optimizer,sentinel,test-engineer
-  --format         Output format: md, html, json (default: terminal summary)
+  --format         Output format: plain, md, html, json (default: html)
                    Reports are saved to results/ directory
   --model          Claude model to use (e.g. sonnet, opus, haiku)
   --timeout        Per-agent timeout as a Go duration (default: 5m)

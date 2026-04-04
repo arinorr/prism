@@ -27,7 +27,7 @@ func TestParseFeedback_DirectJSON(t *testing.T) {
 		t.Fatalf("expected 1 finding, got %d", len(fb.Findings))
 	}
 	f := fb.Findings[0]
-	if f.File != "main.go" || f.Line != 10 || f.Severity != "warning" {
+	if f.File != "main.go" || f.Line != 10 || f.Risk != "warning" {
 		t.Errorf("unexpected finding: %+v", f)
 	}
 }
@@ -61,8 +61,8 @@ That concludes my review.`
 	if len(fb.Findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(fb.Findings))
 	}
-	if fb.Findings[0].Severity != "critical" {
-		t.Errorf("expected severity 'critical', got %q", fb.Findings[0].Severity)
+	if fb.Findings[0].Risk != "critical" {
+		t.Errorf("expected severity 'critical', got %q", fb.Findings[0].Risk)
 	}
 }
 
@@ -210,16 +210,16 @@ func TestSuggestionsFilterInfoSeverity(t *testing.T) {
 	// Simulate what synthesize does: only warning+ findings become suggestions.
 	feedbacks := []Feedback{
 		{Role: "editor", Findings: []Finding{
-			{File: "a.go", Line: 10, Severity: "info", Summary: "minor note", Detail: "detail"},
-			{File: "a.go", Line: 20, Severity: "warning", Summary: "should fix", Detail: "detail"},
-			{File: "a.go", Line: 30, Severity: "critical", Summary: "must fix", Detail: "detail"},
+			{File: "a.go", Line: 10, Risk: "info", Summary: "minor note", Detail: "detail"},
+			{File: "a.go", Line: 20, Risk: "warning", Summary: "should fix", Detail: "detail"},
+			{File: "a.go", Line: 30, Risk: "critical", Summary: "must fix", Detail: "detail"},
 		}},
 	}
 
 	var suggestions []gh.Suggestion
 	for _, fb := range feedbacks {
 		for _, f := range fb.Findings {
-			if f.File != "" && f.Line > 0 && (f.Severity == "warning" || f.Severity == "critical") {
+			if f.File != "" && f.Line > 0 && (f.Risk == "warning" || f.Risk == "critical") {
 				suggestions = append(suggestions, gh.Suggestion{
 					File: f.File,
 					Line: f.Line,
@@ -244,7 +244,7 @@ func TestFindingRoleStamped(t *testing.T) {
 	fb := Feedback{
 		Role: "sentinel",
 		Findings: []Finding{
-			{File: "a.go", Severity: "warning", Summary: "test"},
+			{File: "a.go", Risk: "warning", Summary: "test"},
 		},
 	}
 	// Simulate the role-stamping logic from synthesize.
@@ -258,8 +258,8 @@ func TestFindingRoleStamped(t *testing.T) {
 func TestBuildSynthesisPrompt(t *testing.T) {
 	pr := &gh.PR{Title: "Test PR"}
 	feedbacks := []Feedback{
-		{Role: "know-it-all", Findings: []Finding{{File: "a.go", Severity: "info", Summary: "test"}}},
-		{Role: "editor", Findings: []Finding{{File: "b.go", Severity: "warning", Summary: "test2"}}},
+		{Role: "know-it-all", Findings: []Finding{{File: "a.go", Risk: "info", Summary: "test"}}},
+		{Role: "editor", Findings: []Finding{{File: "b.go", Risk: "warning", Summary: "test2"}}},
 	}
 	prompt := buildSynthesisPrompt(pr, feedbacks)
 	if !strings.Contains(prompt, "Test PR") {
@@ -810,7 +810,7 @@ func TestSynthesize_Success(t *testing.T) {
 	pr := &gh.PR{Title: "Test"}
 	feedbacks := []Feedback{
 		{Role: "test", Findings: []Finding{
-			{File: "a.go", Line: 10, Severity: "warning", Summary: "issue", Detail: "detail"},
+			{File: "a.go", Line: 10, Risk: "warning", Summary: "issue", Detail: "detail"},
 		}},
 	}
 	result, err := orch.synthesize(pr, feedbacks)
@@ -859,7 +859,7 @@ func TestSynthesize_InfoNotInSuggestions(t *testing.T) {
 	pr := &gh.PR{Title: "Test"}
 	feedbacks := []Feedback{
 		{Role: "test", Findings: []Finding{
-			{File: "a.go", Line: 5, Severity: "info", Summary: "note", Detail: "d"},
+			{File: "a.go", Line: 5, Risk: "info", Summary: "note", Detail: "d"},
 		}},
 	}
 	result, err := orch.synthesize(pr, feedbacks)
@@ -947,5 +947,137 @@ func TestReview_FailedAgentsTracked(t *testing.T) {
 	// Both agents succeed in this test, so no failures.
 	if result == nil {
 		t.Fatal("expected non-nil result")
+	}
+}
+
+// NormalizeFinding tests.
+
+func TestNormalizeFinding_BackwardCompat(t *testing.T) {
+	f := Finding{}
+	NormalizeFinding(&f, "warning")
+	if f.Risk != "warning" {
+		t.Errorf("expected risk 'warning' from severity fallback, got %q", f.Risk)
+	}
+}
+
+func TestNormalizeFinding_RiskTakesPrecedence(t *testing.T) {
+	f := Finding{Risk: "critical"}
+	NormalizeFinding(&f, "info") // severity should be ignored
+	if f.Risk != "critical" {
+		t.Errorf("expected risk 'critical', got %q", f.Risk)
+	}
+}
+
+func TestNormalizeFinding_UnknownRisk(t *testing.T) {
+	f := Finding{Risk: "severe"}
+	NormalizeFinding(&f, "")
+	if f.Risk != RiskInfo {
+		t.Errorf("expected unknown risk to default to info, got %q", f.Risk)
+	}
+}
+
+func TestNormalizeFinding_UnknownCategory(t *testing.T) {
+	f := Finding{Risk: "warning", Category: "refactoring"}
+	NormalizeFinding(&f, "")
+	if f.Category != CategoryDesign {
+		t.Errorf("expected unknown category to default to design, got %q", f.Category)
+	}
+}
+
+func TestNormalizeFinding_ValidCategory(t *testing.T) {
+	for _, cat := range []string{"bug", "security", "design", "performance", "style", "testing"} {
+		f := Finding{Risk: "info", Category: cat}
+		NormalizeFinding(&f, "")
+		if f.Category != cat {
+			t.Errorf("expected category %q preserved, got %q", cat, f.Category)
+		}
+	}
+}
+
+func TestNormalizeFinding_UnknownScope(t *testing.T) {
+	f := Finding{Risk: "info", Scope: "global"}
+	NormalizeFinding(&f, "")
+	if f.Scope != ScopeChanged {
+		t.Errorf("expected unknown scope to default to changed, got %q", f.Scope)
+	}
+}
+
+func TestNormalizeFinding_ValidScopes(t *testing.T) {
+	for _, scope := range []string{"changed", "existing", "codebase"} {
+		f := Finding{Risk: "info", Scope: scope}
+		NormalizeFinding(&f, "")
+		if f.Scope != scope {
+			t.Errorf("expected scope %q preserved, got %q", scope, f.Scope)
+		}
+	}
+}
+
+func TestNormalizeFinding_ConfidenceDefault(t *testing.T) {
+	f := Finding{Risk: "info"}
+	NormalizeFinding(&f, "")
+	if f.Confidence != confidenceDefault {
+		t.Errorf("expected default confidence %f, got %f", confidenceDefault, f.Confidence)
+	}
+}
+
+func TestNormalizeFinding_ConfidenceClamp(t *testing.T) {
+	f := Finding{Risk: "info", Confidence: 1.5}
+	NormalizeFinding(&f, "")
+	if f.Confidence != 1.0 {
+		t.Errorf("expected clamped confidence 1.0, got %f", f.Confidence)
+	}
+
+	f2 := Finding{Risk: "info", Confidence: -0.5}
+	NormalizeFinding(&f2, "")
+	if f2.Confidence != 0 {
+		t.Errorf("expected clamped confidence 0, got %f", f2.Confidence)
+	}
+}
+
+func TestParseFeedback_DropsLowConfidence(t *testing.T) {
+	input := `{"findings": [
+		{"file": "a.go", "line": 1, "risk": "warning", "category": "bug", "confidence": 0.9, "summary": "real issue", "detail": "d"},
+		{"file": "b.go", "line": 2, "risk": "info", "category": "style", "confidence": 0.3, "summary": "weak guess", "detail": "d"},
+		{"file": "c.go", "line": 3, "risk": "warning", "category": "design", "confidence": 0.5, "summary": "borderline", "detail": "d"}
+	]}`
+	fb, err := parseFeedback("test", input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// confidence 0.3 should be dropped, 0.5 and 0.9 kept.
+	if len(fb.Findings) != 2 {
+		t.Fatalf("expected 2 findings (dropped low confidence), got %d", len(fb.Findings))
+	}
+}
+
+func TestParseFeedback_NewFormat(t *testing.T) {
+	input := `{"findings": [{"file": "a.go", "line": 10, "risk": "warning", "category": "bug", "scope": "changed", "confidence": 0.8, "summary": "issue", "detail": "fix it", "code_example": "// before\n// after"}]}`
+	fb, err := parseFeedback("test", input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fb.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(fb.Findings))
+	}
+	f := fb.Findings[0]
+	if f.Risk != "warning" || f.Category != "bug" || f.Scope != "changed" {
+		t.Errorf("unexpected: risk=%q category=%q scope=%q", f.Risk, f.Category, f.Scope)
+	}
+	if f.CodeExample == "" {
+		t.Error("expected code_example to be populated")
+	}
+}
+
+func TestParseFeedback_BackwardCompatSeverity(t *testing.T) {
+	input := `{"findings": [{"file": "a.go", "line": 1, "severity": "critical", "summary": "old format", "detail": "d"}]}`
+	fb, err := parseFeedback("test", input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fb.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(fb.Findings))
+	}
+	if fb.Findings[0].Risk != "critical" {
+		t.Errorf("expected risk 'critical' from severity fallback, got %q", fb.Findings[0].Risk)
 	}
 }

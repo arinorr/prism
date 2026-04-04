@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/arinorr/prism/internal/config"
+
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/gh"
 )
@@ -359,7 +361,7 @@ func TestExecute_NoArgs(t *testing.T) {
 func testResult() *agents.ReviewResult {
 	return &agents.ReviewResult{
 		Summary:  "Looks good.",
-		Findings: []agents.Finding{{File: "a.go", Line: 1, Severity: "info", Summary: "ok"}},
+		Findings: []agents.Finding{{File: "a.go", Line: 1, Risk: "info", Summary: "ok"}},
 	}
 }
 
@@ -656,7 +658,7 @@ func TestOutputResults_MarkdownWithDedupedFindings(t *testing.T) {
 		Summary: "Review complete.",
 		DedupedFindings: []agents.DedupedFinding{
 			{
-				Finding:     agents.Finding{File: "a.go", Line: 10, Severity: "warning", Summary: "test issue", Detail: "detail"},
+				Finding:     agents.Finding{File: "a.go", Line: 10, Risk: "warning", Summary: "test issue", Detail: "detail"},
 				VoteCount:   3,
 				TotalAgents: 5,
 				Voters:      []string{"architect", "solver", "sentinel"},
@@ -866,5 +868,77 @@ func TestRunReview_LargeDiffWithYes(t *testing.T) {
 	// Will fail at skill loading, but the size check + confirmation skip path is exercised.
 	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateOptions_ValidFormats(t *testing.T) {
+	for _, f := range []string{"plain", "md", "markdown", "html", "json", ""} {
+		opts := &reviewOptions{formatFlag: f}
+		merged := &config.Config{}
+		if err := validateOptions(opts, merged); err != nil {
+			t.Errorf("expected no error for format %q, got: %v", f, err)
+		}
+	}
+}
+
+func TestValidateOptions_InvalidFormat(t *testing.T) {
+	for _, f := range []string{"md,html", "xml", "csv"} {
+		opts := &reviewOptions{formatFlag: f}
+		merged := &config.Config{}
+		err := validateOptions(opts, merged)
+		if err == nil {
+			t.Errorf("expected error for format %q", f)
+			continue
+		}
+		if !strings.Contains(err.Error(), "invalid format") {
+			t.Errorf("expected 'invalid format' in error for %q, got: %v", f, err)
+		}
+	}
+}
+
+func TestValidateOptions_InvalidTimeout(t *testing.T) {
+	opts := &reviewOptions{timeoutFlag: "5 minutes"}
+	merged := &config.Config{}
+	err := validateOptions(opts, merged)
+	if err == nil {
+		t.Fatal("expected error for invalid timeout")
+	}
+	if !strings.Contains(err.Error(), "invalid timeout") {
+		t.Errorf("expected 'invalid timeout' in error, got: %v", err)
+	}
+}
+
+func TestValidateOptions_ValidTimeout(t *testing.T) {
+	for _, d := range []string{"2m", "30s"} {
+		opts := &reviewOptions{timeoutFlag: d}
+		merged := &config.Config{}
+		if err := validateOptions(opts, merged); err != nil {
+			t.Errorf("expected no error for timeout %q, got: %v", d, err)
+		}
+	}
+}
+
+func TestOutputResults_PlainFormat(t *testing.T) {
+	opts := &reviewOptions{}
+	err := outputResults(opts, testPR(), testResult(), nil, 0, "plain")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReview_InvalidFormatFailsFast(t *testing.T) {
+	withMockClient(t, &gh.PR{
+		Number: "42",
+		Title:  "Test PR",
+		Diff:   "diff content",
+		Files:  []gh.FileChange{{Path: "main.go", Status: "modified"}},
+	}, nil)
+
+	err := runReview([]string{"42", "--format", "xml"})
+	if err == nil {
+		t.Fatal("expected error for invalid format")
+	}
+	if !strings.Contains(err.Error(), "invalid format") {
+		t.Errorf("expected 'invalid format' error, got: %v", err)
 	}
 }

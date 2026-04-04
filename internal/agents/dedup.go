@@ -15,12 +15,20 @@ const (
 	jaccardThreshold = 0.4
 )
 
+// AgentDetail captures one agent's individual perspective on a finding.
+type AgentDetail struct {
+	Role        string `json:"role"`
+	Detail      string `json:"detail"`
+	CodeExample string `json:"code_example,omitempty"`
+}
+
 // DedupedFinding wraps a Finding with vote metadata from deduplication.
 type DedupedFinding struct {
 	Finding
-	VoteCount   int      `json:"vote_count"`
-	TotalAgents int      `json:"total_agents"`
-	Voters      []string `json:"voters"`
+	VoteCount    int           `json:"vote_count"`
+	TotalAgents  int           `json:"total_agents"`
+	Voters       []string      `json:"voters"`
+	AgentDetails []AgentDetail `json:"agent_details"`
 }
 
 // Deduplicate merges findings that refer to the same issue.
@@ -34,30 +42,37 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 
 	var groups []DedupedFinding
 
-	for _, f := range findings {
+	for fi := range findings {
+		f := &findings[fi]
 		idx := -1
 		for i := range groups {
-			if matchesGroup(&groups[i], &f) {
+			if matchesGroup(&groups[i], f) {
 				idx = i
 				break
 			}
 		}
+		ad := AgentDetail{Role: f.Role, Detail: f.Detail, CodeExample: f.CodeExample}
 		if idx < 0 {
 			groups = append(groups, DedupedFinding{
-				Finding:     f,
-				VoteCount:   1,
-				TotalAgents: totalAgents,
-				Voters:      []string{f.Role},
+				Finding:      *f,
+				VoteCount:    1,
+				TotalAgents:  totalAgents,
+				Voters:       []string{f.Role},
+				AgentDetails: []AgentDetail{ad},
 			})
 			continue
 		}
 		groups[idx].VoteCount++
 		groups[idx].Voters = append(groups[idx].Voters, f.Role)
+		groups[idx].AgentDetails = append(groups[idx].AgentDetails, ad)
 		if len(f.Detail) > len(groups[idx].Detail) {
 			groups[idx].Detail = f.Detail
 		}
-		if SeverityOrder(f.Severity) < SeverityOrder(groups[idx].Severity) {
-			groups[idx].Severity = f.Severity
+		if len(f.CodeExample) > len(groups[idx].CodeExample) {
+			groups[idx].CodeExample = f.CodeExample
+		}
+		if SeverityOrder(f.Risk) < SeverityOrder(groups[idx].Risk) {
+			groups[idx].Risk = f.Risk
 		}
 	}
 
@@ -66,7 +81,7 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 		if groups[i].VoteCount != groups[j].VoteCount {
 			return groups[i].VoteCount > groups[j].VoteCount
 		}
-		si, sj := SeverityOrder(groups[i].Severity), SeverityOrder(groups[j].Severity)
+		si, sj := SeverityOrder(groups[i].Risk), SeverityOrder(groups[j].Risk)
 		if si != sj {
 			return si < sj
 		}
