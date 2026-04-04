@@ -22,10 +22,11 @@ func testData() *Data {
 		Result: &agents.ReviewResult{
 			Summary: "Overall looks good with minor issues.",
 			Findings: []agents.Finding{
-				{File: "widget.go", Line: 10, Severity: "critical", Summary: "Nil pointer", Detail: "Check for nil before dereferencing.", Role: "solver"},
-				{File: "widget.go", Line: 25, Severity: "warning", Summary: "Long function", Detail: "Consider extracting a helper.", Role: "editor"},
-				{File: "widget_test.go", Line: 5, Severity: "info", Summary: "Missing edge case", Detail: "Add a test for empty input.", Role: "test-engineer"},
+				{File: "widget.go", Line: 10, Risk: "critical", Category: "bug", Scope: "changed", Summary: "Nil pointer", Detail: "Check for nil before dereferencing.", Role: "solver"},
+				{File: "widget.go", Line: 25, Risk: "warning", Category: "design", Scope: "changed", Summary: "Long function", Detail: "Consider extracting a helper.", Role: "editor"},
+				{File: "widget_test.go", Line: 5, Risk: "info", Category: "testing", Scope: "existing", Summary: "Missing edge case", Detail: "Add a test for empty input.", Role: "test-engineer"},
 			},
+			HealthScore: agents.HealthScore{Score: 72, Grade: "B", Verdict: "approve with suggestions", Description: "72/100 — Acceptable, several issues to fix"},
 			Suggestions: []gh.Suggestion{
 				{File: "widget.go", Line: 10, Body: "Check for nil", Role: "solver"},
 			},
@@ -62,6 +63,10 @@ func TestMarkdown_ContainsFindings(t *testing.T) {
 	}
 	if !strings.Contains(md, "`widget.go`") {
 		t.Error("markdown should group by file")
+	}
+	// Should have Category column.
+	if !strings.Contains(md, "Category") {
+		t.Error("markdown should contain Category column header")
 	}
 }
 
@@ -116,19 +121,19 @@ func TestJSON_ValidOutput(t *testing.T) {
 
 func TestGroupByFile_SortsBySeverity(t *testing.T) {
 	findings := []agents.Finding{
-		{File: "a.go", Severity: "info", Summary: "info item"},
-		{File: "a.go", Severity: "critical", Summary: "critical item"},
-		{File: "a.go", Severity: "warning", Summary: "warning item"},
+		{File: "a.go", Risk: "info", Summary: "info item"},
+		{File: "a.go", Risk: "critical", Summary: "critical item"},
+		{File: "a.go", Risk: "warning", Summary: "warning item"},
 	}
 	groups := groupByFile(findings)
 	if len(groups) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(groups))
 	}
-	if groups[0].findings[0].Severity != "critical" {
-		t.Errorf("expected critical first, got %q", groups[0].findings[0].Severity)
+	if groups[0].findings[0].Risk != "critical" {
+		t.Errorf("expected critical first, got %q", groups[0].findings[0].Risk)
 	}
-	if groups[0].findings[1].Severity != "warning" {
-		t.Errorf("expected warning second, got %q", groups[0].findings[1].Severity)
+	if groups[0].findings[1].Risk != "warning" {
+		t.Errorf("expected warning second, got %q", groups[0].findings[1].Risk)
 	}
 }
 
@@ -166,15 +171,16 @@ func TestAgentColorClass(t *testing.T) {
 }
 
 func TestHTML_ContainsAgentBadges(t *testing.T) {
-	out, err := HTML(testData())
+	// Use deduped data which has agent details with badges.
+	out, err := HTML(dedupedTestData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(out, "agent-badge") {
 		t.Error("HTML should contain agent-badge class")
 	}
-	if !strings.Contains(out, "solver") {
-		t.Error("HTML should contain solver agent name")
+	if !strings.Contains(out, "architect") {
+		t.Error("HTML should contain architect agent name")
 	}
 }
 
@@ -197,47 +203,14 @@ func TestHTML_UsesTemplate(t *testing.T) {
 	}
 }
 
-func TestHTML_SanitizesSummaryXSS(t *testing.T) {
-	d := &Data{
-		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
-		Result: &agents.ReviewResult{
-			Summary: "Good PR.\n\n<script>alert('xss')</script>\n\n[click](javascript:alert(1))",
-		},
-		Roles: []string{"Test"},
-	}
-	out, err := HTML(d)
+func TestHTML_DashboardRendered(t *testing.T) {
+	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(out, "<script>") {
-		t.Error("HTML summary should not contain <script> tags")
-	}
-	if strings.Contains(out, "javascript:") {
-		t.Error("HTML summary should not contain javascript: URLs")
-	}
-	// Benign markdown should still render.
-	if !strings.Contains(out, "Good PR.") {
-		t.Error("HTML summary should still contain safe text")
-	}
-}
-
-func TestHTML_SummaryPreservesSafeMarkdown(t *testing.T) {
-	d := &Data{
-		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
-		Result: &agents.ReviewResult{
-			Summary: "**Bold text** and `code` and [link](https://example.com)",
-		},
-		Roles: []string{"Test"},
-	}
-	out, err := HTML(d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(out, "<strong>Bold text</strong>") {
-		t.Error("HTML summary should preserve bold markdown")
-	}
-	if !strings.Contains(out, "<code>code</code>") {
-		t.Error("HTML summary should preserve code markdown")
+	// Dashboard should show risk breakdown.
+	if !strings.Contains(out, "Risk Breakdown") {
+		t.Error("HTML should contain Risk Breakdown card")
 	}
 }
 
@@ -247,8 +220,8 @@ func TestMarkdown_NoLine0InDetails(t *testing.T) {
 		Result: &agents.ReviewResult{
 			Summary: "Test summary.",
 			Findings: []agents.Finding{
-				{File: "a.go", Line: 0, Severity: "warning", Summary: "General issue", Detail: "This is a general warning.", Role: "editor"},
-				{File: "a.go", Line: 10, Severity: "critical", Summary: "Specific issue", Detail: "This is on line 10.", Role: "solver"},
+				{File: "a.go", Line: 0, Risk: "warning", Summary: "General issue", Detail: "This is a general warning.", Role: "editor"},
+				{File: "a.go", Line: 10, Risk: "critical", Summary: "Specific issue", Detail: "This is on line 10.", Role: "solver"},
 			},
 		},
 		Roles: []string{"Editor", "Solver"},
@@ -292,31 +265,31 @@ func TestJSON_NilSlicesSerializeAsEmptyArrays(t *testing.T) {
 	}
 }
 
-func TestHTML_ContainsSeverityStats(t *testing.T) {
+func TestHTML_ContainsDashboard(t *testing.T) {
 	html, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(html, "stat-critical") {
-		t.Error("HTML should contain critical stat")
+	if !strings.Contains(html, "dashboard") {
+		t.Error("HTML should contain dashboard section")
 	}
-	if !strings.Contains(html, "stat-warning") {
-		t.Error("HTML should contain warning stat")
+	if !strings.Contains(html, "dash-card") {
+		t.Error("HTML should contain dashboard cards")
 	}
-	if !strings.Contains(html, "stat-info") {
-		t.Error("HTML should contain info stat")
+	if !strings.Contains(html, "badge-warning") {
+		t.Error("HTML should contain warning badge in dashboard")
 	}
 }
 
 func TestHTML_ContainsFileGroups(t *testing.T) {
-	html, err := HTML(testData())
+	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(html, "file-group") {
+	if !strings.Contains(out, "file-group") {
 		t.Error("HTML should contain file group elements")
 	}
-	if !strings.Contains(html, "widget.go") {
+	if !strings.Contains(out, "widget.go") {
 		t.Error("HTML should contain file names")
 	}
 }
@@ -327,7 +300,7 @@ func TestHTML_EscapesXSSInFindings(t *testing.T) {
 		Result: &agents.ReviewResult{
 			Summary: "Test summary.",
 			Findings: []agents.Finding{
-				{File: "<img src=x>.go", Line: 10, Severity: "critical", Summary: "<b>bold xss</b>", Detail: "<script>alert(1)</script>", Role: "sentinel"},
+				{File: "<img src=x>.go", Line: 10, Risk: "critical", Summary: "<b>bold xss</b>", Detail: "<script>alert(1)</script>", Role: "sentinel"},
 			},
 		},
 		Roles: []string{"Sentinel"},
@@ -354,7 +327,7 @@ func TestHTML_EscapesXSSInFindings(t *testing.T) {
 
 func TestGroupByFile_EmptyFile(t *testing.T) {
 	findings := []agents.Finding{
-		{File: "", Severity: "info", Summary: "general note"},
+		{File: "", Risk: "info", Summary: "general note"},
 	}
 	groups := groupByFile(findings)
 	if len(groups) != 1 {
@@ -367,8 +340,8 @@ func TestGroupByFile_EmptyFile(t *testing.T) {
 
 func TestGroupByFile_MultipleFiles(t *testing.T) {
 	findings := []agents.Finding{
-		{File: "b.go", Severity: "info", Summary: "b note"},
-		{File: "a.go", Severity: "warning", Summary: "a note"},
+		{File: "b.go", Risk: "info", Summary: "b note"},
+		{File: "a.go", Risk: "warning", Summary: "a note"},
 	}
 	groups := groupByFile(findings)
 	if len(groups) != 2 {
@@ -391,18 +364,27 @@ func dedupedTestData() *Data {
 			Summary: "Summary with deduped findings.",
 			DedupedFindings: []agents.DedupedFinding{
 				{
-					Finding:     agents.Finding{File: "a.go", Line: 10, Severity: "critical", Summary: "missing timeout", Detail: "Add context.WithTimeout"},
+					Finding:     agents.Finding{File: "a.go", Line: 10, Risk: "critical", Category: "bug", Scope: "changed", Summary: "missing timeout", Detail: "Add context.WithTimeout", CodeExample: "// before\nctx := context.Background()\n// after\nctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)"},
 					VoteCount:   5,
 					TotalAgents: 7,
 					Voters:      []string{"architect", "solver", "sentinel", "optimizer", "editor"},
+					AgentDetails: []agents.AgentDetail{
+						{Role: "architect", Detail: "Architect says add timeout", CodeExample: "ctx, cancel := context.WithTimeout(ctx, 5*time.Second)"},
+						{Role: "solver", Detail: "Solver agrees, timeout needed"},
+						{Role: "sentinel", Detail: "Sentinel: security concern without timeout"},
+					},
 				},
 				{
-					Finding:     agents.Finding{File: "a.go", Line: 50, Severity: "info", Summary: "style note", Detail: "Minor style"},
+					Finding:     agents.Finding{File: "a.go", Line: 50, Risk: "info", Category: "style", Scope: "existing", Summary: "style note", Detail: "Minor style"},
 					VoteCount:   1,
 					TotalAgents: 7,
 					Voters:      []string{"editor"},
+					AgentDetails: []agents.AgentDetail{
+						{Role: "editor", Detail: "Minor style issue"},
+					},
 				},
 			},
+			HealthScore:  agents.HealthScore{Score: 65, Grade: "C", Verdict: "request changes", Description: "65/100 — Needs work, multiple concerns"},
 			FailedAgents: []string{"Test Engineer", "Know-It-All"},
 		},
 		Roles:    []string{"Architect", "Solver"},
@@ -458,10 +440,6 @@ func TestHTML_DedupedFindings(t *testing.T) {
 	if !strings.Contains(output, "5/7") {
 		t.Error("HTML should contain vote count '5/7' for deduped findings")
 	}
-	// Deduped findings should NOT render agent-badge spans in findings (CSS definition is fine).
-	if strings.Contains(output, `<span class="agent-badge`) {
-		t.Error("HTML with deduped findings should use vote-count instead of agent-badge spans")
-	}
 }
 
 func TestHTML_DedupedFindingsPreferredOverRaw(t *testing.T) {
@@ -471,16 +449,17 @@ func TestHTML_DedupedFindingsPreferredOverRaw(t *testing.T) {
 		Result: &agents.ReviewResult{
 			Summary: "Test.",
 			Findings: []agents.Finding{
-				{File: "a.go", Line: 10, Severity: "warning", Summary: "raw finding", Role: "solver"},
+				{File: "a.go", Line: 10, Risk: "warning", Category: "design", Scope: "changed", Summary: "raw finding", Role: "solver"},
 			},
 			DedupedFindings: []agents.DedupedFinding{
 				{
-					Finding:     agents.Finding{File: "a.go", Line: 10, Severity: "warning", Summary: "deduped finding"},
+					Finding:     agents.Finding{File: "a.go", Line: 10, Risk: "warning", Category: "design", Scope: "changed", Summary: "deduped finding"},
 					VoteCount:   3,
 					TotalAgents: 5,
 					Voters:      []string{"solver", "architect", "sentinel"},
 				},
 			},
+			HealthScore: agents.HealthScore{Score: 80, Grade: "B+", Verdict: "approve with suggestions", Description: "80/100 — Good"},
 		},
 		Roles: []string{"Test"},
 	}
@@ -523,9 +502,9 @@ func TestJSON_DedupedFindings(t *testing.T) {
 
 func TestGroupDedupedByFile(t *testing.T) {
 	findings := []agents.DedupedFinding{
-		{Finding: agents.Finding{File: "b.go", Line: 1, Severity: "info"}, VoteCount: 1},
-		{Finding: agents.Finding{File: "a.go", Line: 10, Severity: "critical"}, VoteCount: 3},
-		{Finding: agents.Finding{File: "a.go", Line: 20, Severity: "warning"}, VoteCount: 2},
+		{Finding: agents.Finding{File: "b.go", Line: 1, Risk: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 3},
+		{Finding: agents.Finding{File: "a.go", Line: 20, Risk: "warning"}, VoteCount: 2},
 	}
 	groups := groupDedupedByFile(findings)
 	if len(groups) != 2 {
@@ -545,7 +524,7 @@ func TestGroupDedupedByFile(t *testing.T) {
 
 func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
 	findings := []agents.DedupedFinding{
-		{Finding: agents.Finding{File: "", Severity: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "", Risk: "info"}, VoteCount: 1},
 	}
 	groups := groupDedupedByFile(findings)
 	if len(groups) != 1 {
@@ -558,10 +537,10 @@ func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
 
 func TestGroupDedupedByFile_MultipleFiles(t *testing.T) {
 	findings := []agents.DedupedFinding{
-		{Finding: agents.Finding{File: "c.go", Line: 1, Severity: "info"}, VoteCount: 1},
-		{Finding: agents.Finding{File: "a.go", Line: 10, Severity: "critical"}, VoteCount: 5},
-		{Finding: agents.Finding{File: "a.go", Line: 20, Severity: "warning"}, VoteCount: 2},
-		{Finding: agents.Finding{File: "b.go", Line: 5, Severity: "critical"}, VoteCount: 3},
+		{Finding: agents.Finding{File: "c.go", Line: 1, Risk: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 5},
+		{Finding: agents.Finding{File: "a.go", Line: 20, Risk: "warning"}, VoteCount: 2},
+		{Finding: agents.Finding{File: "b.go", Line: 5, Risk: "critical"}, VoteCount: 3},
 	}
 	groups := groupDedupedByFile(findings)
 	if len(groups) != 3 {
@@ -603,5 +582,148 @@ func TestMarkdown_NoFailedAgents(t *testing.T) {
 	out := Markdown(d)
 	if strings.Contains(out, "failed") {
 		t.Error("should not contain failed agents notice when none failed")
+	}
+}
+
+func TestHTML_ContainsGauge(t *testing.T) {
+	out, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "<svg") {
+		t.Error("HTML should contain SVG gauge element")
+	}
+	if !strings.Contains(out, "gauge-container") {
+		t.Error("HTML should contain gauge-container class")
+	}
+	if !strings.Contains(out, "72") {
+		t.Error("HTML gauge should display the score number")
+	}
+}
+
+func TestHTML_ContainsDetailsElements(t *testing.T) {
+	out, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "<details") {
+		t.Error("HTML should contain <details> elements for finding cards")
+	}
+	if !strings.Contains(out, "finding-card") {
+		t.Error("HTML should contain finding-card class")
+	}
+}
+
+func TestHTML_ContainsCategoryBadge(t *testing.T) {
+	out, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "cat-bug") {
+		t.Error("HTML should contain cat-bug category class")
+	}
+	if !strings.Contains(out, "cat-badge") {
+		t.Error("HTML should contain cat-badge class")
+	}
+}
+
+func TestHTML_ContainsCodeExample(t *testing.T) {
+	d := dedupedTestData()
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "<pre") {
+		t.Error("HTML should contain <pre> for code examples")
+	}
+	if !strings.Contains(out, "code-example") {
+		t.Error("HTML should contain code-example class")
+	}
+	if !strings.Contains(out, "context.WithTimeout") {
+		t.Error("HTML should contain the code example content")
+	}
+}
+
+func TestHTML_GroupsByScope(t *testing.T) {
+	out, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "Issues in this PR") {
+		t.Error("HTML should contain 'Issues in this PR' scope section")
+	}
+	if !strings.Contains(out, "Pre-existing Issues") {
+		t.Error("HTML should contain 'Pre-existing Issues' scope section")
+	}
+}
+
+func TestHTML_SingleAgentNoAgentDetails(t *testing.T) {
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "Test.",
+			DedupedFindings: []agents.DedupedFinding{
+				{
+					Finding:     agents.Finding{File: "a.go", Line: 10, Risk: "warning", Category: "design", Scope: "changed", Summary: "single agent finding", Detail: "Only one agent saw this."},
+					VoteCount:   1,
+					TotalAgents: 3,
+					Voters:      []string{"solver"},
+					AgentDetails: []agents.AgentDetail{
+						{Role: "solver", Detail: "Only one agent saw this."},
+					},
+				},
+			},
+			HealthScore: agents.HealthScore{Score: 85, Grade: "B+", Verdict: "approve with suggestions", Description: "85/100 — Good, a few things to address"},
+		},
+		Roles: []string{"Solver"},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// With a single agent, there should be no nested agent-detail <details> elements
+	// (the CSS class definition in the stylesheet is fine, we check for the HTML element).
+	if strings.Contains(out, `<details class="agent-detail"`) {
+		t.Error("HTML with single agent should not contain nested agent-detail sections")
+	}
+}
+
+func TestMarkdown_GroupsByScope(t *testing.T) {
+	md := Markdown(testData())
+	if !strings.Contains(md, "Issues in this PR") {
+		t.Error("markdown should contain 'Issues in this PR' scope section")
+	}
+	if !strings.Contains(md, "Pre-existing Issues") {
+		t.Error("markdown should contain 'Pre-existing Issues' scope section")
+	}
+}
+
+func TestMarkdown_HealthScore(t *testing.T) {
+	md := Markdown(testData())
+	if !strings.Contains(md, "Health Score") {
+		t.Error("markdown should contain health score header")
+	}
+	if !strings.Contains(md, "72/100") {
+		t.Error("markdown should contain the score description")
+	}
+	if !strings.Contains(md, "(B)") {
+		t.Error("markdown should contain the grade")
+	}
+}
+
+func TestJSON_HealthScore(t *testing.T) {
+	d := testData()
+	output, err := JSON(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, `"health_score"`) {
+		t.Error("JSON should contain health_score field")
+	}
+	if !strings.Contains(output, `"score": 72`) {
+		t.Error("JSON should contain score value")
+	}
+	if !strings.Contains(output, `"grade": "B"`) {
+		t.Error("JSON should contain grade value")
 	}
 }

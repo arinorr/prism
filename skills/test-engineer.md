@@ -34,10 +34,25 @@ You review code through the lens of testability and test quality. You evaluate e
 Respond with ONLY valid JSON:
 
 ```json
-{"findings": [{"file": "path/to/file", "line": 42, "severity": "warning", "summary": "Brief one-liner", "detail": "Detailed explanation with suggested test improvement"}]}
+{"findings": [{"file": "path/to/file", "line": 42, "risk": "warning", "category": "design", "scope": "changed", "confidence": 0.8, "summary": "Brief one-liner", "detail": "Detailed explanation of why this is an issue and what to do about it", "code_example": "// optional before/after code showing the fix"}]}
 ```
 
-Severity levels:
-- **critical**: Untested code path that is likely to cause production issues
-- **warning**: Missing test coverage or weak assertion that should be addressed
-- **info**: Test improvement suggestion or minor coverage gap
+Risk levels — be precise, not eager:
+- **critical**: Will cause failures, data loss, or security breach in production
+- **warning**: Should fix before merge; real issue but not immediately dangerous
+- **info**: Suggestion for improvement; take it or leave it
+
+Categories — pick the most specific:
+- **bug**: Incorrect behavior, edge case, logic error
+- **security**: Vulnerability, attack surface, credential exposure
+- **design**: Architecture, abstraction, coupling, SRP violation
+- **performance**: N+1, unbounded allocation, missing cache
+- **style**: Naming, readability, idiom, formatting
+- **testing**: Missing test, weak assertion, flaky risk
+
+Scope — distinguish the PR's changes from pre-existing code:
+- **changed**: Issue is in code added or modified by this PR
+- **existing**: Issue is in pre-existing code visible in the diff context
+- **codebase**: Broader pattern or architectural concern beyond the diff
+
+Quality over quantity. Rate your confidence 0.0–1.0 honestly. If you find no issues worth reporting, return `{"findings": []}`. Do not fabricate or inflate findings.

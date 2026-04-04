@@ -11,13 +11,17 @@ import (
 
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/config"
+	"github.com/arinorr/prism/internal/diff"
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/llm/claude"
 	"github.com/arinorr/prism/internal/report"
 	"github.com/arinorr/prism/internal/sizecheck"
 )
 
-const defaultResultsDir = "results"
+const (
+	defaultResultsDir   = "results"
+	defaultFilenameSlug = "unknown"
+)
 
 // prClient abstracts the GitHub client for testability.
 type prClient interface {
@@ -43,6 +47,8 @@ type reviewOptions struct {
 	modelFlag   string
 	timeoutFlag string
 	retriesFlag int
+	budgetFlag  float64
+	noCompress  bool
 	configPath  string
 }
 
@@ -79,6 +85,8 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.dryRun = true
 		case "--yes", "-y":
 			opts.yes = true
+		case "--no-compress":
+			opts.noCompress = true
 		case "--stdout":
 			opts.toStdout = true
 		default:
@@ -94,6 +102,11 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 				var n int
 				if _, scanErr := fmt.Sscanf(v, "%d", &n); scanErr == nil {
 					opts.retriesFlag = n
+				}
+			} else if v, ok := parseStringFlag(args, &i, "--max-budget-usd"); ok {
+				var f float64
+				if _, scanErr := fmt.Sscanf(v, "%f", &f); scanErr == nil {
+					opts.budgetFlag = f
 				}
 			} else if v, ok := parseStringFlag(args, &i, "--config"); ok {
 				opts.configPath = v
@@ -122,6 +135,7 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 		Model:        opts.modelFlag,
 		Format:       opts.formatFlag,
 		AgentTimeout: opts.timeoutFlag,
+		MaxBudgetUSD: opts.budgetFlag,
 	}
 	if opts.retriesFlag >= 0 {
 		cliCfg.MaxRetries = config.IntPtr(opts.retriesFlag)
@@ -134,6 +148,38 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 	}
 	def := config.Default()
 	return config.Merge(&def, &fileCfg, &cliCfg), nil
+}
+
+// validFormats lists the accepted values for --format.
+var validFormats = map[string]bool{
+	"":         true,
+	"plain":    true,
+	"md":       true,
+	"markdown": true,
+	"html":     true,
+	"json":     true,
+}
+
+// validateOptions performs fast, cheap validation of CLI flags so we can fail
+// before spending tokens on LLM calls or network requests.
+func validateOptions(opts *reviewOptions, merged *config.Config) error {
+	// Resolve effective format: CLI flag > merged config.
+	format := opts.formatFlag
+	if format == "" {
+		format = merged.Format
+	}
+	if !validFormats[format] {
+		return fmt.Errorf("invalid format: %q (available: plain, md, html, json)", format)
+	}
+
+	// Validate CLI timeout parses as a Go duration.
+	if opts.timeoutFlag != "" {
+		if _, err := time.ParseDuration(opts.timeoutFlag); err != nil {
+			return fmt.Errorf("invalid timeout: %q (must be a Go duration like 30s, 2m, 1h)", opts.timeoutFlag)
+		}
+	}
+
+	return nil
 }
 
 // resolveRoles determines which agent roles to use from the merged config.
@@ -185,6 +231,10 @@ func runReview(args []string) error {
 		return err
 	}
 
+	if err := validateOptions(opts, &merged); err != nil {
+		return err
+	}
+
 	roles, err := resolveRoles(&merged)
 	if err != nil {
 		return err
@@ -205,14 +255,25 @@ func runReview(args []string) error {
 	}
 	fmt.Println()
 
+	// Build diff compression options.
+	diffOpts := diff.DefaultOptions()
+	if opts.noCompress || merged.NoCompress {
+		diffOpts = diff.NoCompression()
+	} else {
+		diffOpts.ContextLines = merged.DiffContextLinesVal()
+		diffOpts.ExtraPatterns = merged.StripPatterns
+	}
+
 	// Dispatch agents.
 	llmBackend := claude.New()
-	orchestrator, orchErr := agents.NewOrchestrator(roles, agents.Options{
+	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
 		Verbose:      opts.verbose,
 		DryRun:       opts.dryRun,
 		Model:        merged.Model,
 		AgentTimeout: merged.TimeoutDuration(),
 		MaxRetries:   merged.MaxRetriesVal(),
+		MaxBudgetUSD: merged.MaxBudgetUSD,
+		DiffCompress: diffOpts,
 	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
@@ -224,6 +285,11 @@ func runReview(args []string) error {
 		return fmt.Errorf("review failed: %w", err)
 	}
 	elapsed := time.Since(start)
+
+	// Print usage summary.
+	u := result.Usage
+	fmt.Printf("   📊 Tokens: %dk input, %dk output | Cost: $%.2f | Time: %s\n\n",
+		u.InputTokens/1000, u.OutputTokens/1000, u.CostUSD, elapsed.Round(time.Second))
 
 	// Resolve format: CLI flag > config file > none.
 	formatFlag := opts.formatFlag
@@ -267,6 +333,7 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 		Result:   result,
 		Roles:    roleNames,
 		Duration: elapsed.Round(time.Second).String(),
+		Usage:    result.Usage,
 	}
 
 	var output string
@@ -276,6 +343,9 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 	}
 
 	switch formatFlag {
+	case "plain":
+		fmt.Println(result.Summary)
+		return nil
 	case "md", "markdown":
 		output = report.Markdown(data)
 	case "html":
@@ -313,7 +383,7 @@ func sanitizeFilename(s string) string {
 	}
 	s = filenameAllowlist.ReplaceAllString(s, "")
 	if s == "" {
-		return "unknown"
+		return defaultFilenameSlug
 	}
 	return s
 }
@@ -327,12 +397,16 @@ func isInteractive() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
+// writeToFile writes content to the given path, creating directories as needed.
+// The path is constructed from defaultResultsDir + sanitizeFilename(prNumber) + extension,
+// where sanitizeFilename strips all characters except [a-zA-Z0-9_-], preventing
+// path traversal via crafted PR numbers.
 func writeToFile(content, path string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir := filepath.Dir(filepath.Clean(path))
+	if err := os.MkdirAll(dir, 0o700); err != nil { // #nosec G703 -- path is built from sanitizeFilename which strips traversal chars
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Clean(path), []byte(content), 0o600); err != nil { // #nosec G703 -- same as above
 		return fmt.Errorf("failed to write output to %s: %w", path, err)
 	}
 	fmt.Printf("📄 Report written to %s\n", path)

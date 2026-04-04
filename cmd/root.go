@@ -39,12 +39,14 @@ Options:
   --comment        Post suggestions as inline PR comments (requires gh cli)
   --roles          Comma-separated list of roles to use (default: all)
                    Available: know-it-all,architect,solver,editor,optimizer,sentinel,test-engineer
-  --format         Output format: md, html, json (default: terminal summary)
+  --format         Output format: plain, md, html, json (default: html)
                    Reports are saved to results/ directory
   --model          Claude model to use (e.g. sonnet, opus, haiku)
   --timeout        Per-agent timeout as a Go duration (default: 5m)
   --max-retries    Number of retries per agent on failure (default: 1)
+  --max-budget-usd Maximum dollar spend per agent call (e.g. 0.50)
   --config         Path to config file (default: .prism.yml)
+  --no-compress    Disable diff compression (send raw diff to agents)
   --stdout         Print report to terminal instead of saving to file
   -y, --yes        Skip confirmation prompts (e.g. large diff warning)
   -v, --verbose    Show detailed output (prompts, timing, raw responses)

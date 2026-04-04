@@ -14,13 +14,14 @@ import (
 
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm"
 )
 
 // Use severity constants from agents package to avoid duplication.
 const (
-	severityCritical = agents.SeverityCritical
-	severityWarning  = agents.SeverityWarning
-	severityInfo     = agents.SeverityInfo
+	severityCritical = agents.RiskCritical
+	severityWarning  = agents.RiskWarning
+	severityInfo     = agents.RiskInfo
 )
 
 // Data holds everything needed to generate a report.
@@ -29,6 +30,7 @@ type Data struct {
 	Result   *agents.ReviewResult
 	Roles    []string
 	Duration string
+	Usage    llm.Usage
 }
 
 // Markdown generates a markdown report from the review data.
@@ -37,6 +39,13 @@ func Markdown(d *Data) string {
 
 	fmt.Fprintf(&b, "# Prism Review: PR #%s\n\n", d.PR.Number)
 	fmt.Fprintf(&b, "**%s**\n\n", d.PR.Title)
+
+	// Health score header.
+	if d.Result.HealthScore.Score > 0 || d.Result.HealthScore.Grade != "" {
+		fmt.Fprintf(&b, "## Health Score: %s (%s) — %s\n\n",
+			d.Result.HealthScore.Description, d.Result.HealthScore.Grade, d.Result.HealthScore.Verdict)
+	}
+
 	fmt.Fprintf(&b, "Files changed: %d | Agents: %s", len(d.PR.Files), strings.Join(d.Roles, ", "))
 	if d.Duration != "" {
 		fmt.Fprintf(&b, " | Duration: %s", d.Duration)
@@ -53,74 +62,90 @@ func Markdown(d *Data) string {
 	b.WriteString(d.Result.Summary)
 	b.WriteString("\n\n")
 
-	// Findings grouped by file — use deduped if available.
+	// Findings grouped by scope, then by file — use deduped if available.
 	if len(d.Result.DedupedFindings) > 0 {
-		b.WriteString("---\n\n## Findings by File\n\n")
-		grouped := groupDedupedByFile(d.Result.DedupedFindings)
-		for _, group := range grouped {
-			fmt.Fprintf(&b, "### `%s`\n\n", group.file)
-			b.WriteString("| Line | Severity | Votes | Summary |\n")
-			b.WriteString("|------|----------|-------|---------|\n")
-			for i := range group.findings {
-				f := &group.findings[i]
-				line := "-"
-				if f.Line > 0 {
-					line = fmt.Sprintf("%d", f.Line)
+		byScope := groupDedupedByScope(d.Result.DedupedFindings)
+		for _, section := range byScope {
+			fmt.Fprintf(&b, "---\n\n## %s\n\n", section.title)
+			for _, group := range section.groups {
+				fmt.Fprintf(&b, "### `%s`\n\n", group.file)
+				b.WriteString("| Line | Risk | Category | Votes | Summary |\n")
+				b.WriteString("|------|----------|----------|-------|---------|\n")
+				for i := range group.findings {
+					f := &group.findings[i]
+					line := "-"
+					if f.Line > 0 {
+						line = fmt.Sprintf("%d", f.Line)
+					}
+					votes := fmt.Sprintf("%d/%d", f.VoteCount, f.TotalAgents)
+					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
+						line, severityBadge(f.Risk), f.Category, votes, f.Summary)
 				}
-				votes := fmt.Sprintf("%d/%d", f.VoteCount, f.TotalAgents)
-				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-					line, severityBadge(f.Severity), votes, f.Summary)
-			}
-			b.WriteString("\n")
+				b.WriteString("\n")
 
-			// Details for warnings and criticals.
-			for i := range group.findings {
-				f := &group.findings[i]
-				if f.Severity == severityInfo {
-					continue
+				// Details for warnings and criticals.
+				for i := range group.findings {
+					f := &group.findings[i]
+					if f.Risk == severityInfo {
+						continue
+					}
+					voters := strings.Join(f.Voters, ", ")
+					if f.Line > 0 {
+						fmt.Fprintf(&b, "**%s** (line %d, %d/%d agents: %s) — %s\n\n",
+							severityBadge(f.Risk), f.Line, f.VoteCount, f.TotalAgents, voters, f.Summary)
+					} else {
+						fmt.Fprintf(&b, "**%s** (%d/%d agents: %s) — %s\n\n",
+							severityBadge(f.Risk), f.VoteCount, f.TotalAgents, voters, f.Summary)
+					}
+					b.WriteString(f.Detail)
+					b.WriteString("\n\n")
+					if f.CodeExample != "" {
+						b.WriteString("```\n")
+						b.WriteString(f.CodeExample)
+						b.WriteString("\n```\n\n")
+					}
 				}
-				voters := strings.Join(f.Voters, ", ")
-				if f.Line > 0 {
-					fmt.Fprintf(&b, "**%s** (line %d, %d/%d agents: %s) — %s\n\n",
-						severityBadge(f.Severity), f.Line, f.VoteCount, f.TotalAgents, voters, f.Summary)
-				} else {
-					fmt.Fprintf(&b, "**%s** (%d/%d agents: %s) — %s\n\n",
-						severityBadge(f.Severity), f.VoteCount, f.TotalAgents, voters, f.Summary)
-				}
-				b.WriteString(f.Detail)
-				b.WriteString("\n\n")
 			}
 		}
 	} else if len(d.Result.Findings) > 0 {
-		b.WriteString("---\n\n## Findings by File\n\n")
-		grouped := groupByFile(d.Result.Findings)
-		for _, group := range grouped {
-			fmt.Fprintf(&b, "### `%s`\n\n", group.file)
-			b.WriteString("| Line | Severity | Agent | Summary |\n")
-			b.WriteString("|------|----------|-------|---------|\n")
-			for _, f := range group.findings {
-				line := "-"
-				if f.Line > 0 {
-					line = fmt.Sprintf("%d", f.Line)
+		byScope := groupRawByScope(d.Result.Findings)
+		for _, section := range byScope {
+			fmt.Fprintf(&b, "---\n\n## %s\n\n", section.title)
+			for _, group := range section.groups {
+				fmt.Fprintf(&b, "### `%s`\n\n", group.file)
+				b.WriteString("| Line | Risk | Category | Agent | Summary |\n")
+				b.WriteString("|------|----------|----------|-------|---------|\n")
+				for i := range group.findings {
+					f := &group.findings[i]
+					line := "-"
+					if f.Line > 0 {
+						line = fmt.Sprintf("%d", f.Line)
+					}
+					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
+						line, severityBadge(f.Risk), f.Category, f.Role, f.Summary)
 				}
-				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-					line, severityBadge(f.Severity), f.Role, f.Summary)
-			}
-			b.WriteString("\n")
+				b.WriteString("\n")
 
-			for _, f := range group.findings {
-				if f.Severity == severityInfo {
-					continue
+				for i := range group.findings {
+					f := &group.findings[i]
+					if f.Risk == severityInfo {
+						continue
+					}
+					if f.Line > 0 {
+						fmt.Fprintf(&b, "**%s** (line %d, %s) — %s\n\n",
+							severityBadge(f.Risk), f.Line, f.Role, f.Summary)
+					} else {
+						fmt.Fprintf(&b, "**%s** (%s) — %s\n\n",
+							severityBadge(f.Risk), f.Role, f.Summary)
+					}
+					b.WriteString(f.Detail)
+					b.WriteString("\n\n")
+					if f.CodeExample != "" {
+						b.WriteString("```\n")
+						b.WriteString(f.CodeExample)
+						b.WriteString("\n```\n\n")
+					}
 				}
-				if f.Line > 0 {
-					fmt.Fprintf(&b, "**%s** (line %d, %s) — %s\n\n",
-						severityBadge(f.Severity), f.Line, f.Role, f.Summary)
-				} else {
-					fmt.Fprintf(&b, "**%s** (%s) — %s\n\n",
-						severityBadge(f.Severity), f.Role, f.Summary)
-				}
-				b.WriteString(f.Detail)
-				b.WriteString("\n\n")
 			}
 		}
 	}
@@ -134,21 +159,93 @@ func Markdown(d *Data) string {
 	return b.String()
 }
 
+type scopeSection struct {
+	title  string
+	groups []dedupedFileGroup
+}
+
+type rawScopeSection struct {
+	title  string
+	groups []fileGroup
+}
+
+// scopeTitles maps scope values to their markdown section titles.
+var scopeTitles = map[string]string{
+	agents.ScopeChanged:  "Issues in this PR",
+	agents.ScopeExisting: "Pre-existing Issues",
+	agents.ScopeCodebase: "Codebase Notes",
+}
+
+func groupDedupedByScope(findings []agents.DedupedFinding) []scopeSection {
+	scoped := map[string][]agents.DedupedFinding{}
+	for i := range findings {
+		scope := findings[i].Scope
+		if scope == "" {
+			scope = agents.ScopeChanged
+		}
+		scoped[scope] = append(scoped[scope], findings[i])
+	}
+
+	var sections []scopeSection
+	for _, s := range []string{agents.ScopeChanged, agents.ScopeExisting, agents.ScopeCodebase} {
+		if fs, ok := scoped[s]; ok && len(fs) > 0 {
+			sections = append(sections, scopeSection{
+				title:  scopeTitles[s],
+				groups: groupDedupedByFile(fs),
+			})
+		}
+	}
+	return sections
+}
+
+func groupRawByScope(findings []agents.Finding) []rawScopeSection {
+	scoped := map[string][]agents.Finding{}
+	for i := range findings {
+		scope := findings[i].Scope
+		if scope == "" {
+			scope = agents.ScopeChanged
+		}
+		scoped[scope] = append(scoped[scope], findings[i])
+	}
+
+	var sections []rawScopeSection
+	for _, s := range []string{agents.ScopeChanged, agents.ScopeExisting, agents.ScopeCodebase} {
+		if fs, ok := scoped[s]; ok && len(fs) > 0 {
+			sections = append(sections, rawScopeSection{
+				title:  scopeTitles[s],
+				groups: groupByFile(fs),
+			})
+		}
+	}
+	return sections
+}
+
 // htmlTemplateData is the structured data passed to the HTML template.
 type htmlTemplateData struct {
-	PRNumber        string
-	PRTitle         string
-	FileCount       int
-	AgentCount      int
-	FindingCount    int
-	Duration        string
-	CriticalCount   int
-	WarningCount    int
-	InfoCount       int
-	SuggestionCount int
-	SummaryHTML     htmltemplate.HTML
-	FileGroups      []htmlFileGroup
-	FailedAgents    []string
+	PRNumber         string
+	PRTitle          string
+	FileCount        int
+	AgentCount       int
+	FindingCount     int
+	Duration         string
+	CriticalCount    int
+	WarningCount     int
+	InfoCount        int
+	ChangedCount     int
+	ExistingCount    int
+	CodebaseCount    int
+	SuggestionCount  int
+	SummaryHTML      htmltemplate.HTML
+	FileGroups       []htmlFileGroup
+	ChangedFindings  []htmlFileGroup
+	ExistingFindings []htmlFileGroup
+	CodebaseFindings []htmlFileGroup
+	FailedAgents     []string
+	HealthScore      agents.HealthScore
+	NeedleRotation   int    // SVG rotation angle for gauge needle (0=left, 180=right)
+	GaugeColor       string // hex color for the gauge arc based on score
+	GradeColor       string // hex color for the grade letter
+	GaugeDashOffset  int    // SVG stroke-dashoffset for arc fill (0=full, 283=empty)
 }
 
 type htmlFileGroup struct {
@@ -160,17 +257,33 @@ type htmlFileGroup struct {
 }
 
 type htmlFinding struct {
-	Severity      string
-	SeverityClass string
-	Line          int
-	HasLine       bool
-	Role          string
-	RoleClass     string
-	Summary       string
-	Detail        string
-	HasDetail     bool
-	VoteCount     int
-	TotalAgents   int
+	Risk              string
+	RiskClass         string
+	Line              int
+	HasLine           bool
+	Role              string
+	RoleClass         string
+	Summary           string
+	Detail            string
+	HasDetail         bool
+	Category          string
+	CategoryClass     string
+	CodeExample       string
+	HasCodeExample    bool
+	Scope             string
+	AgentDetails      []htmlAgentDetail
+	HasMultipleAgents bool
+	FindingIndex      int
+	VoteCount         int
+	TotalAgents       int
+}
+
+type htmlAgentDetail struct {
+	Role           string
+	RoleClass      string
+	Detail         string
+	CodeExample    string
+	HasCodeExample bool
 }
 
 // agentColors maps role slugs to CSS color classes for badges.
@@ -191,6 +304,23 @@ func agentColorClass(role string) string {
 	return "agent-default"
 }
 
+// categoryClasses maps category slugs to CSS classes for badges.
+var categoryClasses = map[string]string{
+	"bug":         "cat-bug",
+	"security":    "cat-security",
+	"design":      "cat-design",
+	"performance": "cat-perf",
+	"style":       "cat-style",
+	"testing":     "cat-test",
+}
+
+func categoryClass(cat string) string {
+	if c, ok := categoryClasses[cat]; ok {
+		return c
+	}
+	return "cat-design"
+}
+
 // HTML generates a styled HTML report using Go's html/template.
 func HTML(d *Data) (string, error) {
 	// Convert synthesis summary from markdown to sanitized HTML.
@@ -203,67 +333,40 @@ func HTML(d *Data) (string, error) {
 
 	// Build template data — prefer deduped findings when available.
 	var critCount, warnCount, infoCount int
+	var changedCount, existingCount, codebaseCount int
 	var findingCount int
 	var fileGroups []htmlFileGroup
+	findingIndex := 0
 
 	if len(d.Result.DedupedFindings) > 0 {
 		findingCount = len(d.Result.DedupedFindings)
 		for i := range d.Result.DedupedFindings {
-			switch d.Result.DedupedFindings[i].Severity {
+			switch d.Result.DedupedFindings[i].Risk {
 			case severityCritical:
 				critCount++
 			case severityWarning:
 				warnCount++
 			default:
 				infoCount++
+			}
+			switch d.Result.DedupedFindings[i].Scope {
+			case agents.ScopeChanged:
+				changedCount++
+			case agents.ScopeExisting:
+				existingCount++
+			default:
+				codebaseCount++
 			}
 		}
 		for _, g := range groupDedupedByFile(d.Result.DedupedFindings) {
-			var fc, fw, fi int
-			var findings []htmlFinding
-			for i := range g.findings {
-				f := &g.findings[i]
-				switch f.Severity {
-				case severityCritical:
-					fc++
-				case severityWarning:
-					fw++
-				default:
-					fi++
-				}
-				sevClass := "badge-info"
-				switch f.Severity {
-				case severityCritical:
-					sevClass = "badge-critical"
-				case severityWarning:
-					sevClass = "badge-warning"
-				}
-				findings = append(findings, htmlFinding{
-					Severity:      f.Severity,
-					SeverityClass: sevClass,
-					Line:          f.Line,
-					HasLine:       f.Line > 0,
-					Role:          f.Role,
-					RoleClass:     agentColorClass(f.Role),
-					Summary:       f.Summary,
-					Detail:        f.Detail,
-					HasDetail:     f.Detail != "",
-					VoteCount:     f.VoteCount,
-					TotalAgents:   f.TotalAgents,
-				})
-			}
-			fileGroups = append(fileGroups, htmlFileGroup{
-				File:          g.file,
-				CriticalCount: fc,
-				WarningCount:  fw,
-				InfoCount:     fi,
-				Findings:      findings,
-			})
+			fg := buildDedupedFileGroup(g, &findingIndex)
+			fileGroups = append(fileGroups, fg)
 		}
 	} else {
 		findingCount = len(d.Result.Findings)
-		for _, f := range d.Result.Findings {
-			switch f.Severity {
+		for i := range d.Result.Findings {
+			f := &d.Result.Findings[i]
+			switch f.Risk {
 			case severityCritical:
 				critCount++
 			case severityWarning:
@@ -271,62 +374,49 @@ func HTML(d *Data) (string, error) {
 			default:
 				infoCount++
 			}
+			switch f.Scope {
+			case agents.ScopeChanged:
+				changedCount++
+			case agents.ScopeExisting:
+				existingCount++
+			default:
+				codebaseCount++
+			}
 		}
 		for _, g := range groupByFile(d.Result.Findings) {
-			var fc, fw, fi int
-			var findings []htmlFinding
-			for _, f := range g.findings {
-				switch f.Severity {
-				case severityCritical:
-					fc++
-				case severityWarning:
-					fw++
-				default:
-					fi++
-				}
-				sevClass := "badge-info"
-				switch f.Severity {
-				case severityCritical:
-					sevClass = "badge-critical"
-				case severityWarning:
-					sevClass = "badge-warning"
-				}
-				findings = append(findings, htmlFinding{
-					Severity:      f.Severity,
-					SeverityClass: sevClass,
-					Line:          f.Line,
-					HasLine:       f.Line > 0,
-					Role:          f.Role,
-					RoleClass:     agentColorClass(f.Role),
-					Summary:       f.Summary,
-					Detail:        f.Detail,
-					HasDetail:     f.Detail != "",
-				})
-			}
-			fileGroups = append(fileGroups, htmlFileGroup{
-				File:          g.file,
-				CriticalCount: fc,
-				WarningCount:  fw,
-				InfoCount:     fi,
-				Findings:      findings,
-			})
+			fg := buildRawFileGroup(g, &findingIndex)
+			fileGroups = append(fileGroups, fg)
 		}
 	}
 
+	// Split file groups by scope.
+	changedFindings, existingFindings, codebaseFindings := splitByScope(fileGroups)
+
 	td := htmlTemplateData{
-		PRNumber:        d.PR.Number,
-		PRTitle:         d.PR.Title,
-		FileCount:       len(d.PR.Files),
-		AgentCount:      len(d.Roles),
-		FindingCount:    findingCount,
-		Duration:        d.Duration,
-		CriticalCount:   critCount,
-		WarningCount:    warnCount,
-		InfoCount:       infoCount,
-		SuggestionCount: len(d.Result.Suggestions),
-		SummaryHTML:     htmltemplate.HTML(summaryHTML), // #nosec G203 -- already sanitized by bluemonday
-		FileGroups:      fileGroups,
-		FailedAgents:    d.Result.FailedAgents,
+		PRNumber:         d.PR.Number,
+		PRTitle:          d.PR.Title,
+		FileCount:        len(d.PR.Files),
+		AgentCount:       len(d.Roles),
+		FindingCount:     findingCount,
+		Duration:         d.Duration,
+		CriticalCount:    critCount,
+		WarningCount:     warnCount,
+		InfoCount:        infoCount,
+		ChangedCount:     changedCount,
+		ExistingCount:    existingCount,
+		CodebaseCount:    codebaseCount,
+		SuggestionCount:  len(d.Result.Suggestions),
+		SummaryHTML:      htmltemplate.HTML(summaryHTML), // #nosec G203 -- already sanitized by bluemonday
+		FileGroups:       fileGroups,
+		ChangedFindings:  changedFindings,
+		ExistingFindings: existingFindings,
+		CodebaseFindings: codebaseFindings,
+		FailedAgents:     d.Result.FailedAgents,
+		HealthScore:      d.Result.HealthScore,
+		NeedleRotation:   int(float64(d.Result.HealthScore.Score) * 1.8), // 0-100 → 0-180 degrees
+		GaugeColor:       gaugeColor(d.Result.HealthScore.Score),
+		GradeColor:       gradeColor(d.Result.HealthScore.Score),
+		GaugeDashOffset:  283 - (d.Result.HealthScore.Score*283)/100, // 283 is approx circumference of semicircle
 	}
 
 	tmpl, err := htmltemplate.New("report").Parse(htmlReportTemplate)
@@ -340,6 +430,168 @@ func HTML(d *Data) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+func riskClass(risk string) string {
+	switch risk {
+	case severityCritical:
+		return "badge-critical"
+	case severityWarning:
+		return "badge-warning"
+	default:
+		return "badge-info"
+	}
+}
+
+func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
+	var fc, fw, fi int
+	var findings []htmlFinding
+	for i := range g.findings {
+		f := &g.findings[i]
+		switch f.Risk {
+		case severityCritical:
+			fc++
+		case severityWarning:
+			fw++
+		default:
+			fi++
+		}
+
+		var agentDetails []htmlAgentDetail
+		for _, ad := range f.AgentDetails {
+			agentDetails = append(agentDetails, htmlAgentDetail{
+				Role:           ad.Role,
+				RoleClass:      agentColorClass(ad.Role),
+				Detail:         ad.Detail,
+				CodeExample:    ad.CodeExample,
+				HasCodeExample: ad.CodeExample != "",
+			})
+		}
+
+		findings = append(findings, htmlFinding{
+			Risk:              f.Risk,
+			RiskClass:         riskClass(f.Risk),
+			Line:              f.Line,
+			HasLine:           f.Line > 0,
+			Role:              f.Role,
+			RoleClass:         agentColorClass(f.Role),
+			Summary:           f.Summary,
+			Detail:            f.Detail,
+			HasDetail:         f.Detail != "",
+			Category:          f.Category,
+			CategoryClass:     categoryClass(f.Category),
+			CodeExample:       f.CodeExample,
+			HasCodeExample:    f.CodeExample != "",
+			Scope:             f.Scope,
+			AgentDetails:      agentDetails,
+			HasMultipleAgents: len(agentDetails) > 1,
+			FindingIndex:      *idx,
+			VoteCount:         f.VoteCount,
+			TotalAgents:       f.TotalAgents,
+		})
+		*idx++
+	}
+	return htmlFileGroup{
+		File:          g.file,
+		CriticalCount: fc,
+		WarningCount:  fw,
+		InfoCount:     fi,
+		Findings:      findings,
+	}
+}
+
+func buildRawFileGroup(g fileGroup, idx *int) htmlFileGroup {
+	var fc, fw, fi int
+	var findings []htmlFinding
+	for j := range g.findings {
+		f := &g.findings[j]
+		switch f.Risk {
+		case severityCritical:
+			fc++
+		case severityWarning:
+			fw++
+		default:
+			fi++
+		}
+		findings = append(findings, htmlFinding{
+			Risk:           f.Risk,
+			RiskClass:      riskClass(f.Risk),
+			Line:           f.Line,
+			HasLine:        f.Line > 0,
+			Role:           f.Role,
+			RoleClass:      agentColorClass(f.Role),
+			Summary:        f.Summary,
+			Detail:         f.Detail,
+			HasDetail:      f.Detail != "",
+			Category:       f.Category,
+			CategoryClass:  categoryClass(f.Category),
+			CodeExample:    f.CodeExample,
+			HasCodeExample: f.CodeExample != "",
+			Scope:          f.Scope,
+			FindingIndex:   *idx,
+		})
+		*idx++
+	}
+	return htmlFileGroup{
+		File:          g.file,
+		CriticalCount: fc,
+		WarningCount:  fw,
+		InfoCount:     fi,
+		Findings:      findings,
+	}
+}
+
+// splitByScope distributes file groups into scope buckets. Each finding within
+// a file group may have a different scope, so we re-bucket at the finding level.
+func splitByScope(groups []htmlFileGroup) (changed, existing, codebase []htmlFileGroup) {
+	// Collect findings per (scope, file).
+	type key struct{ scope, file string }
+	buckets := make(map[key][]htmlFinding)
+	for gi := range groups {
+		for fi := range groups[gi].Findings {
+			f := &groups[gi].Findings[fi]
+			scope := f.Scope
+			if scope == "" {
+				scope = agents.ScopeChanged
+			}
+			k := key{scope, groups[gi].File}
+			buckets[k] = append(buckets[k], *f)
+		}
+	}
+
+	buildGroups := func(scope string) []htmlFileGroup {
+		var out []htmlFileGroup
+		for k, findings := range buckets {
+			if k.scope != scope {
+				continue
+			}
+			var fc, fw, fi int
+			for i := range findings {
+				switch findings[i].Risk {
+				case severityCritical:
+					fc++
+				case severityWarning:
+					fw++
+				default:
+					fi++
+				}
+			}
+			out = append(out, htmlFileGroup{
+				File:          k.file,
+				CriticalCount: fc,
+				WarningCount:  fw,
+				InfoCount:     fi,
+				Findings:      findings,
+			})
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+		return out
+	}
+
+	changed = buildGroups(agents.ScopeChanged)
+	existing = buildGroups(agents.ScopeExisting)
+	codebase = buildGroups(agents.ScopeCodebase)
+	return
 }
 
 const htmlReportTemplate = `<!DOCTYPE html>
@@ -356,6 +608,8 @@ const htmlReportTemplate = `<!DOCTYPE html>
   --yellow: #9a6700; --yellow-bg: #fff8c5;
   --blue: #0969da; --blue-bg: #ddf4ff;
   --green: #1a7f37; --green-bg: #dafbe1;
+  --purple: #8250df; --purple-bg: #fbefff;
+  --teal: #0d9488; --teal-bg: #e6fffa;
 }
 * { box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.6; color: var(--fg); background: var(--bg); }
@@ -367,26 +621,23 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 .header .pr-title { color: var(--muted); font-size: 1rem; margin: 0.25rem 0 0.75rem; }
 .meta { display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
 
-/* Stats bar */
-.stats { display: flex; gap: 0.75rem; margin: 1.5rem 0; flex-wrap: wrap; }
-.stat { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; }
-.stat-critical { background: var(--red-bg); color: var(--red); }
-.stat-warning { background: var(--yellow-bg); color: var(--yellow); }
-.stat-info { background: var(--blue-bg); color: var(--blue); }
-.stat-suggestions { background: var(--green-bg); color: var(--green); }
-.stat .num { font-size: 1.25rem; }
+/* Health gauge */
+.gauge-container { text-align: center; margin: 1.5rem 0; }
+.gauge-label { font-size: 0.9rem; color: var(--muted); margin-top: 0.25rem; }
+.gauge-verdict { font-weight: 600; font-size: 1rem; margin-top: 0.25rem; }
 
-/* Summary */
-.summary { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; margin: 1.5rem 0; }
-.summary h1, .summary h2, .summary h3 { font-size: 1.1rem; border: none; margin: 1rem 0 0.5rem; padding: 0; }
-.summary p { margin: 0.5rem 0; }
-.summary ul, .summary ol { padding-left: 1.5rem; }
-.summary table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.85rem; }
-.summary th, .summary td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
-.summary th { background: var(--bg); }
-.summary pre { background: var(--bg); border: 1px solid var(--border); padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; }
-.summary code { background: var(--bg); padding: 0.15em 0.35em; border-radius: 3px; font-size: 0.85em; }
-.summary hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+/* Dashboard */
+.dashboard { margin: 1.5rem 0; }
+.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+@media (max-width: 640px) { .dashboard-grid { grid-template-columns: 1fr; } }
+.dash-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
+.dash-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.75rem; }
+.dash-items { display: flex; flex-direction: column; gap: 0.6rem; }
+.dash-row { display: flex; justify-content: space-between; align-items: center; }
+.dash-badge { font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+.dash-num { font-size: 1.5rem; font-weight: 800; color: var(--fg); }
+.dash-verdict { font-size: 1.15rem; font-weight: 700; color: var(--fg); margin-bottom: 0.25rem; text-transform: capitalize; }
+.dash-sub { font-size: 0.85rem; color: var(--muted); }
 
 /* Failed agents banner */
 .failed-banner { background: var(--yellow-bg); color: var(--yellow); padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600; }
@@ -400,12 +651,37 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 .badge-warning { background: var(--yellow-bg); color: var(--yellow); }
 .badge-info { background: var(--blue-bg); color: var(--blue); }
 
-/* Findings */
-.finding { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
-.finding:last-child { border-bottom: none; }
-.finding-meta { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
-.finding-meta .severity { font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.6rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
-.finding-meta .line { font-size: 0.8rem; color: var(--muted); font-family: SFMono-Regular, Consolas, monospace; }
+/* Category badges */
+.cat-badge { font-size: 0.65rem; font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+.cat-bug { background: var(--red-bg); color: var(--red); }
+.cat-security { background: #fef2f2; color: #b91c1c; }
+.cat-design { background: var(--blue-bg); color: var(--blue); }
+.cat-perf { background: var(--green-bg); color: var(--green); }
+.cat-style { background: var(--purple-bg); color: var(--purple); }
+.cat-test { background: var(--teal-bg); color: var(--teal); }
+
+/* Finding cards using details/summary */
+details.finding-card { border-bottom: 1px solid var(--border); }
+details.finding-card:last-child { border-bottom: none; }
+details.finding-card > summary { padding: 0.75rem 1rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; list-style: none; }
+details.finding-card > summary::-webkit-details-marker { display: none; }
+details.finding-card > summary::before { content: "\25b6"; font-size: 0.6rem; color: var(--muted); transition: transform 0.15s; }
+details.finding-card[open] > summary::before { transform: rotate(90deg); }
+details.finding-card > summary:hover { background: var(--surface); }
+details.finding-card > summary .severity { font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.6rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+details.finding-card > summary .line { font-size: 0.8rem; color: var(--muted); font-family: SFMono-Regular, Consolas, monospace; }
+details.finding-card > summary .finding-text { flex: 1; font-weight: 600; }
+.finding-body { padding: 0.5rem 1rem 1rem 2rem; }
+.finding-body .overview { font-size: 0.9rem; color: var(--muted); line-height: 1.5; margin-bottom: 0.75rem; }
+
+/* Code example blocks */
+pre.code-example { background: var(--surface); border: 1px solid var(--border); padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; font-family: SFMono-Regular, Consolas, monospace; margin: 0.5rem 0; white-space: pre-wrap; word-wrap: break-word; }
+
+/* Agent detail nested details */
+details.agent-detail { margin: 0.5rem 0; border: 1px solid var(--border); border-radius: 6px; }
+details.agent-detail > summary { padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.85rem; font-weight: 600; background: var(--surface); border-radius: 6px; }
+details.agent-detail[open] > summary { border-radius: 6px 6px 0 0; border-bottom: 1px solid var(--border); }
+details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; color: var(--muted); }
 
 /* Agent badges */
 .agent-badge { font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 10px; border: 1.5px solid; }
@@ -421,8 +697,9 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 /* Vote count badge */
 .vote-count { font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.6rem; border-radius: 10px; background: var(--green-bg); color: var(--green); border: 1.5px solid var(--green); }
 
-.finding-summary { font-weight: 600; margin-bottom: 0.25rem; }
-.finding-detail { font-size: 0.9rem; color: var(--muted); line-height: 1.5; }
+/* Scope section headers */
+.scope-section h2 { display: flex; align-items: center; gap: 0.5rem; }
+.scope-section h2 .scope-count { font-size: 0.85rem; font-weight: normal; color: var(--muted); }
 
 /* Footer */
 .footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); text-align: center; }
@@ -444,25 +721,58 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
   </div>
 </div>
 
-{{- if .FailedAgents}}
-<div class="failed-banner">⚠️ {{len .FailedAgents}} agent(s) failed: {{range $i, $a := .FailedAgents}}{{if $i}}, {{end}}{{$a}}{{end}}</div>
+{{- if gt .HealthScore.Score 0}}
+<div class="gauge-container">
+  <svg viewBox="0 0 200 140" width="280" height="196" role="img" aria-label="Health score: {{.HealthScore.Score}}/100 ({{.HealthScore.Grade}})">
+    <!-- Background arc (gray) -->
+    <path d="M 20 110 A 80 80 0 0 1 180 110" fill="none" stroke="#e1e4e8" stroke-width="14" stroke-linecap="round"/>
+    <!-- Score arc (colored by score) -->
+    <path d="M 20 110 A 80 80 0 0 1 180 110" fill="none" stroke="{{.GaugeColor}}" stroke-width="14" stroke-linecap="round"
+          stroke-dasharray="251" stroke-dashoffset="{{.GaugeDashOffset}}"/>
+    <!-- Needle -->
+    <line x1="100" y1="110" x2="100" y2="40" stroke="var(--fg, #1f2328)" stroke-width="2.5" stroke-linecap="round"
+          transform="rotate({{.NeedleRotation}} 100 110)"/>
+    <circle cx="100" cy="110" r="5" fill="var(--fg, #1f2328)"/>
+    <!-- Grade letter (large, colored, above number) -->
+    <text x="100" y="80" text-anchor="middle" font-size="36" font-weight="800" fill="{{.GradeColor}}">{{.HealthScore.Grade}}</text>
+    <!-- Score number (below grade) -->
+    <text x="100" y="102" text-anchor="middle" font-size="18" font-weight="600" fill="var(--muted, #656d76)">{{.HealthScore.Score}} / 100</text>
+  </svg>
+  <div class="gauge-verdict">{{.HealthScore.Verdict}}</div>
+</div>
 {{- end}}
 
-<div class="stats">
-  <div class="stat stat-critical"><span class="num">{{.CriticalCount}}</span> critical</div>
-  <div class="stat stat-warning"><span class="num">{{.WarningCount}}</span> warning</div>
-  <div class="stat stat-info"><span class="num">{{.InfoCount}}</span> info</div>
-  <div class="stat stat-suggestions"><span class="num">{{.SuggestionCount}}</span> suggestions</div>
+{{- if .FailedAgents}}
+<div class="failed-banner">{{len .FailedAgents}} agent(s) failed: {{range $i, $a := .FailedAgents}}{{if $i}}, {{end}}{{$a}}{{end}}</div>
+{{- end}}
+
+<div class="dashboard">
+  <div class="dashboard-grid">
+    <div class="dash-card">
+      <div class="dash-label">Risk Breakdown</div>
+      <div class="dash-items">
+        {{- if gt .CriticalCount 0}}<div class="dash-row"><span class="dash-badge badge-critical">critical</span><span class="dash-num">{{.CriticalCount}}</span></div>{{end}}
+        {{- if gt .WarningCount 0}}<div class="dash-row"><span class="dash-badge badge-warning">warning</span><span class="dash-num">{{.WarningCount}}</span></div>{{end}}
+        {{- if gt .InfoCount 0}}<div class="dash-row"><span class="dash-badge badge-info">info</span><span class="dash-num">{{.InfoCount}}</span></div>{{end}}
+      </div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-label">Scope</div>
+      <div class="dash-items">
+        {{- if gt .ChangedCount 0}}<div class="dash-row"><span>This PR</span><span class="dash-num">{{.ChangedCount}}</span></div>{{end}}
+        {{- if gt .ExistingCount 0}}<div class="dash-row"><span>Pre-existing</span><span class="dash-num">{{.ExistingCount}}</span></div>{{end}}
+        {{- if gt .CodebaseCount 0}}<div class="dash-row"><span>Codebase</span><span class="dash-num">{{.CodebaseCount}}</span></div>{{end}}
+      </div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-label">Verdict</div>
+      <div class="dash-verdict">{{.HealthScore.Verdict}}</div>
+      <div class="dash-sub">{{.FindingCount}} findings from {{.AgentCount}} agents</div>
+    </div>
+  </div>
 </div>
 
-<h2>Summary</h2>
-<div class="summary">
-{{.SummaryHTML}}
-</div>
-
-{{- if .FileGroups}}
-<h2>Findings by File</h2>
-{{range .FileGroups}}
+{{- define "filegroup"}}
 <div class="file-group">
   <div class="file-header">
     <span>{{.File}}</span>
@@ -473,26 +783,63 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
     </div>
   </div>
   {{range .Findings}}
-  <div class="finding">
-    <div class="finding-meta">
-      <span class="severity {{.SeverityClass}}">{{.Severity}}</span>
-      {{- if .HasLine}}
-      <span class="line">line {{.Line}}</span>
-      {{- end}}
-      {{- if gt .VoteCount 0}}
+  <details class="finding-card">
+    <summary>
+      <span class="severity {{.RiskClass}}">{{.Risk}}</span>
+      <span class="cat-badge {{.CategoryClass}}">{{.Category}}</span>
+      {{- if gt .VoteCount 1}}
       <span class="vote-count">{{.VoteCount}}/{{.TotalAgents}}</span>
-      {{- else}}
-      <span class="agent-badge {{.RoleClass}}">{{.Role}}</span>
+      {{- end}}
+      <span class="finding-text">{{.Summary}}</span>
+      {{- if .HasLine}}
+      <span class="line">:{{.Line}}</span>
+      {{- end}}
+    </summary>
+    <div class="finding-body">
+      {{- if .HasDetail}}
+      <div class="overview">{{.Detail}}</div>
+      {{- end}}
+      {{- if .HasCodeExample}}
+      <pre class="code-example">{{.CodeExample}}</pre>
+      {{- end}}
+      {{- if .HasMultipleAgents}}
+      {{- range .AgentDetails}}
+      <details class="agent-detail">
+        <summary><span class="agent-badge {{.RoleClass}}">{{.Role}}</span> perspective</summary>
+        <div class="agent-body">
+          <p>{{.Detail}}</p>
+          {{- if .HasCodeExample}}
+          <pre class="code-example">{{.CodeExample}}</pre>
+          {{- end}}
+        </div>
+      </details>
+      {{- end}}
       {{- end}}
     </div>
-    <div class="finding-summary">{{.Summary}}</div>
-    {{- if .HasDetail}}
-    <div class="finding-detail">{{.Detail}}</div>
-    {{- end}}
-  </div>
+  </details>
   {{end}}
 </div>
 {{end}}
+
+{{- if .ChangedFindings}}
+<div class="scope-section">
+<h2>Issues in this PR <span class="scope-count">({{.ChangedCount}})</span></h2>
+{{range .ChangedFindings}}{{template "filegroup" .}}{{end}}
+</div>
+{{- end}}
+
+{{- if .ExistingFindings}}
+<div class="scope-section">
+<h2>Pre-existing Issues <span class="scope-count">({{.ExistingCount}})</span></h2>
+{{range .ExistingFindings}}{{template "filegroup" .}}{{end}}
+</div>
+{{- end}}
+
+{{- if .CodebaseFindings}}
+<div class="scope-section">
+<h2>Codebase Notes <span class="scope-count">({{.CodebaseCount}})</span></h2>
+{{range .CodebaseFindings}}{{template "filegroup" .}}{{end}}
+</div>
 {{- end}}
 
 <div class="footer">Generated by <a href="https://github.com/arinorr/prism">Prism</a></div>
@@ -529,11 +876,13 @@ func JSON(d *Data) (string, error) {
 	output := struct {
 		PR              prSummary               `json:"pr"`
 		Summary         string                  `json:"summary"`
+		HealthScore     agents.HealthScore      `json:"health_score"`
 		Findings        []agents.Finding        `json:"findings"`
 		DedupedFindings []agents.DedupedFinding `json:"deduped_findings"`
 		Suggestions     []suggestionJSON        `json:"suggestions"`
 		Roles           []string                `json:"roles"`
 		FailedAgents    []string                `json:"failed_agents"`
+		Usage           llm.Usage               `json:"usage"`
 		Duration        string                  `json:"duration,omitempty"`
 	}{
 		PR: prSummary{
@@ -542,11 +891,13 @@ func JSON(d *Data) (string, error) {
 			Files:  len(d.PR.Files),
 		},
 		Summary:         d.Result.Summary,
+		HealthScore:     d.Result.HealthScore,
 		Findings:        findings,
 		DedupedFindings: dedupedFindings,
 		Suggestions:     suggestions,
 		Roles:           roles,
 		FailedAgents:    failedAgents,
+		Usage:           d.Usage,
 		Duration:        d.Duration,
 	}
 
@@ -587,18 +938,18 @@ type fileGroup struct {
 
 func groupByFile(findings []agents.Finding) []fileGroup {
 	byFile := make(map[string][]agents.Finding)
-	for _, f := range findings {
-		file := f.File
+	for i := range findings {
+		file := findings[i].File
 		if file == "" {
 			file = generalFile
 		}
-		byFile[file] = append(byFile[file], f)
+		byFile[file] = append(byFile[file], findings[i])
 	}
 
 	groups := make([]fileGroup, 0, len(byFile))
 	for file, fs := range byFile {
 		sort.Slice(fs, func(i, j int) bool {
-			si, sj := severityOrder(fs[i].Severity), severityOrder(fs[j].Severity)
+			si, sj := severityOrder(fs[i].Risk), severityOrder(fs[j].Risk)
 			if si != sj {
 				return si < sj
 			}
@@ -635,7 +986,7 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 			if fs[i].VoteCount != fs[j].VoteCount {
 				return fs[i].VoteCount > fs[j].VoteCount
 			}
-			si, sj := severityOrder(fs[i].Severity), severityOrder(fs[j].Severity)
+			si, sj := severityOrder(fs[i].Risk), severityOrder(fs[j].Risk)
 			if si != sj {
 				return si < sj
 			}
@@ -662,5 +1013,29 @@ func severityBadge(s string) string {
 		return "🟡 warning"
 	default:
 		return "🔵 info"
+	}
+}
+
+// gaugeColor returns a hex color for the health gauge arc based on score.
+func gaugeColor(score int) string {
+	switch {
+	case score >= 80:
+		return "#1a7f37" // green
+	case score >= 60:
+		return "#d4a72c" // yellow
+	default:
+		return "#cf222e" // red
+	}
+}
+
+// gradeColor returns a hex color for the grade letter based on score.
+func gradeColor(score int) string {
+	switch {
+	case score >= 70:
+		return "#1a7f37" // green for A+, A, B+, B
+	case score >= 60:
+		return "#d4a72c" // yellow for C
+	default:
+		return "#cf222e" // red for D, F
 	}
 }

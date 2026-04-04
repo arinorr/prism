@@ -10,6 +10,9 @@ import (
 
 func TestDefault(t *testing.T) {
 	d := Default()
+	if d.Format != "html" {
+		t.Errorf("expected format 'html', got %q", d.Format)
+	}
 	if d.AgentTimeout != "5m" {
 		t.Errorf("expected timeout '5m', got %q", d.AgentTimeout)
 	}
