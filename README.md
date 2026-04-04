@@ -2,7 +2,7 @@
 
 # Prism
 
-**Multi-agent PR review — 7 specialized lenses, one actionable report.**
+*There are problems lurking in your codebase — you just haven't looked through the right lens yet.*
 
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
 [![Claude](https://img.shields.io/badge/Claude-Anthropic-cc785c?style=flat-square&logo=anthropic&logoColor=white)](https://www.anthropic.com)
