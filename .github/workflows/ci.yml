@@ -50,7 +50,10 @@ jobs:
           go-version: "1.25"
 
       - name: Generate coverage
-        run: go test -coverprofile=coverage.out ./... 2>&1 | tee coverage-run.txt
+        run: |
+          go test -coverprofile=coverage.raw ./... 2>&1 | tee coverage-run.txt
+          # Exclude test utilities from coverage (they inflate the denominator).
+          grep -v '/llmtest/' coverage.raw > coverage.out || cp coverage.raw coverage.out
 
       - name: Coverage report
         id: coverage
