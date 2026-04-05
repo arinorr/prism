@@ -3,6 +3,7 @@ package report
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -575,6 +576,25 @@ func TestGroupDedupedByFile_AlphabeticalFallback(t *testing.T) {
 	}
 }
 
+func TestGroupDedupedByFile_MultipleRisksPerFile(t *testing.T) {
+	// b.go has 1 critical + 1 warning, a.go has 1 critical only.
+	// b.go should sort first (same critical count, but more warnings).
+	findings := []agents.DedupedFinding{
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "b.go", Line: 1, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "b.go", Line: 2, Risk: "warning"}, VoteCount: 1},
+	}
+	groups := groupDedupedByFile(findings)
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// Same critical count, but b.go has 1 warning vs a.go's 0 → b.go first.
+	if groups[0].file != "b.go" || groups[1].file != "a.go" {
+		t.Errorf("expected [b.go, a.go] (b.go has more warnings), got [%s, %s]",
+			groups[0].file, groups[1].file)
+	}
+}
+
 func TestGroupDedupedByFile_BothSeveritiesEqualFallback(t *testing.T) {
 	// Both files have 1 critical and 1 warning — full tiebreak to alphabetical.
 	findings := []agents.DedupedFinding{
@@ -800,6 +820,19 @@ func TestHTML_GaugeNeedleRotation(t *testing.T) {
 	}
 }
 
+// extractFileHeaders extracts file names from HTML file-header spans in order.
+// This is more robust than raw strings.Index which could match filenames
+// appearing in comments, metadata, or other sections.
+func extractFileHeaders(html string) []string {
+	re := regexp.MustCompile(`<div class="file-header">\s*<span>([^<]+)</span>`)
+	matches := re.FindAllStringSubmatch(html, -1)
+	files := make([]string, len(matches))
+	for i, m := range matches {
+		files[i] = m[1]
+	}
+	return files
+}
+
 func TestHTML_FilesOrderedBySeverity(t *testing.T) {
 	// z.go has critical, m.go has warning, a.go has info.
 	// Severity order (z, m, a) differs from alphabetical (a, m, z).
@@ -820,18 +853,17 @@ func TestHTML_FilesOrderedBySeverity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// z.go (critical) should appear before m.go (warning) which should appear before a.go (info).
-	zPos := strings.Index(out, "z.go")
-	mPos := strings.Index(out, "m.go")
-	aPos := strings.Index(out, "a.go")
-	if zPos < 0 || mPos < 0 || aPos < 0 {
-		t.Fatal("all three files should appear in the HTML output")
+	files := extractFileHeaders(out)
+	if len(files) < 3 {
+		t.Fatalf("expected at least 3 file headers, got %d", len(files))
 	}
-	if zPos > mPos {
-		t.Error("z.go (critical) should appear before m.go (warning)")
-	}
-	if mPos > aPos {
-		t.Error("m.go (warning) should appear before a.go (info)")
+	// z.go (critical) should appear before m.go (warning) before a.go (info).
+	want := []string{"z.go", "m.go", "a.go"}
+	for i, w := range want {
+		if files[i] != w {
+			t.Errorf("file[%d] = %q, want %q (full order: %v)", i, files[i], w, files)
+			break
+		}
 	}
 }
 
@@ -853,14 +885,13 @@ func TestHTML_FilesOrderedBySeverity_AlphabeticalFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Same severity → alphabetical: a.go before z.go.
-	aPos := strings.Index(out, "a.go")
-	zPos := strings.Index(out, "z.go")
-	if aPos < 0 || zPos < 0 {
-		t.Fatal("both files should appear in the HTML output")
+	files := extractFileHeaders(out)
+	if len(files) < 2 {
+		t.Fatalf("expected at least 2 file headers, got %d", len(files))
 	}
-	if aPos > zPos {
-		t.Error("a.go should appear before z.go (alphabetical fallback for same severity)")
+	// Same severity → alphabetical: a.go before z.go.
+	if files[0] != "a.go" || files[1] != "z.go" {
+		t.Errorf("expected [a.go, z.go] (alphabetical fallback), got %v", files)
 	}
 }
 
@@ -882,5 +913,12 @@ func TestHTML_DashboardConsolidated(t *testing.T) {
 	}
 	if !strings.Contains(out, "dash-risks") {
 		t.Error("should have risk badges section")
+	}
+	// Verify the dashboard shows verdict text and finding count.
+	if !strings.Contains(out, "approve with suggestions") {
+		t.Error("dashboard should contain the verdict text")
+	}
+	if !strings.Contains(out, "findings from") {
+		t.Error("dashboard should contain finding count summary")
 	}
 }

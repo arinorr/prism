@@ -242,10 +242,10 @@ type htmlTemplateData struct {
 	CodebaseFindings []htmlFileGroup
 	FailedAgents     []string
 	HealthScore      agents.HealthScore
-	NeedleRotation   int    // SVG rotation angle for gauge needle (0=left, 180=right)
+	NeedleRotation   int    // SVG rotation angle for gauge needle (-90=left, 0=up, +90=right)
 	GaugeColor       string // hex color for the gauge arc based on score
 	GradeColor       string // hex color for the grade letter
-	GaugeDashOffset  int    // SVG stroke-dashoffset for arc fill (0=full, 283=empty)
+	GaugeDashOffset  int    // SVG stroke-dashoffset for arc fill (0=full, 251=empty)
 }
 
 type htmlFileGroup struct {
