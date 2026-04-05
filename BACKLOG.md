@@ -63,6 +63,60 @@
 - Let users weight roles (e.g. prioritize Sentinel for security-sensitive repos)
 - Confidence scoring based on agent agreement
 
+### Code quality improvements (Thorsten Ball style)
+
+Idiomatic Go improvements following Thorsten Ball's principles (simple, explicit,
+no magic, make the zero value useful). These are structural refactors that don't
+change behavior.
+
+**2d. Fill in io.Writer defaults at construction**
+- Add `NewOptions()` that sets `Out=os.Stdout`, `ErrOut=os.Stderr`
+- Remove nil checks in `out()` and `errOut()` methods on Orchestrator
+- Principle: make the zero value useful — writers should never be nil
+- Files: `internal/agents/orchestrator.go`, `cmd/review.go`
+
+**2e. DryRun returns data, caller formats**
+- `planDryRun()` returns a `DryRunResult` struct with role count, diff bytes,
+  sample prompt, model, timeout
+- `cmd/review.go` handles formatting/printing the dry run output
+- Principle: separate data from formatting — functions return data, callers render
+- Files: `internal/agents/orchestrator.go`, `cmd/review.go`
+
+**2f. Config sentinel values instead of pointers**
+- Replace `MaxRetries *int` and `DiffContextLines *int` with plain `int`
+- Use -1 as "not set" sentinel instead of nil pointer indirection
+- Remove `IntPtr()` helper function
+- Principle: simpler types, no pointer indirection for optional values
+- Files: `internal/config/config.go`, `cmd/review.go`
+
+**2g. Extract parser.go from orchestrator**
+- Move parsing logic into its own file `parser.go` (same `agents` package)
+- Includes: `rawFinding`, `rawFeedback`, `parseFeedback`, `tryParseStrategies`,
+  `parseDirectJSON`, `parseCodeBlock`, `parseJSONMarker`, `NormalizeFinding`,
+  `truncateUTF8`
+- Orchestrator just calls `parseFeedback()` — same API, better file organization
+- Principle: each file has one job
+- Files: `internal/agents/orchestrator.go` → `internal/agents/parser.go`
+
+**2h. Split report package into data + generators**
+- Separate data preparation from rendering across multiple files:
+  - `data.go` — Data struct, file grouping, scope splitting, severity counting
+  - `generator.go` — shared types (htmlFinding, htmlFileGroup, etc.)
+  - `markdown.go` — `Markdown()` function
+  - `html.go` — `HTML()` function + template string + CSS
+  - `json.go` — `JSON()` function
+- Each generator takes prepared data and renders one format
+- Adding new formats (SARIF, TUI) means adding one file
+- Principle: separate concerns, each file has one responsibility
+- Files: `internal/report/report.go` → split into 5 files
+
+**2i. Markdown report via text/template (depends on 2h)**
+- Replace ~100 lines of `fmt.Fprintf` calls with a `text/template`
+- Same pattern as the HTML report: data in, rendered output out
+- Template string is the "shape" of the markdown, readable at a glance
+- Principle: separate what to render from how to render it
+- Files: `internal/report/markdown.go`
+
 ## Ideas
 
 ### `prism init`
