@@ -215,7 +215,7 @@ func TestJaccardSimilarity_BothEmpty(t *testing.T) {
 func TestDeduplicate_HybridTier1_SameFileCategoryNearbyLines(t *testing.T) {
 	// Same file, same category, lines within wideLineThreshold (20).
 	// Summaries use different wording but prefix stemming creates enough
-	// overlap to exceed tier 1's 0.05 threshold.
+	// overlap to exceed tier 1's 0.065 threshold.
 	s1 := "Code duplication: countRawSeverity and countDedupedSeverity are identical implementations"
 	s2 := "Duplicated severity counting and sorting logic across three functions"
 

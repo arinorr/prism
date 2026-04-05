@@ -33,7 +33,7 @@ const (
 	// same file, same category, AND are within wideLineThreshold lines.
 	// Very lenient, but still requires minimal text overlap to avoid
 	// merging genuinely distinct findings at nearby lines.
-	jaccardThresholdNearby = 0.05
+	jaccardThresholdNearby = 0.065
 )
 
 // AgentDetail captures one agent's individual perspective on a finding.
