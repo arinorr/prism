@@ -625,54 +625,10 @@ type rawFeedback struct {
 func parseFeedback(role, response string) (*Feedback, error) {
 	response = strings.TrimSpace(response)
 
-	// Try to extract the JSON from the response using multiple strategies.
-	var raw rawFeedback
-	parsed := false
-
-	// Strategy 1: direct parse.
-	if err := json.Unmarshal([]byte(response), &raw); err == nil {
-		parsed = true
-	}
-
-	// Strategy 2: extract from markdown code blocks.
-	if !parsed {
-		if idx := strings.Index(response, "```"); idx != -1 {
-			lines := strings.Split(response, "\n")
-			var jsonLines []string
-			inBlock := false
-			for _, line := range lines {
-				if strings.HasPrefix(line, "```") {
-					if inBlock {
-						candidate := strings.Join(jsonLines, "\n")
-						if err := json.Unmarshal([]byte(candidate), &raw); err == nil {
-							parsed = true
-							break
-						}
-						jsonLines = nil
-					}
-					inBlock = !inBlock
-					continue
-				}
-				if inBlock {
-					jsonLines = append(jsonLines, line)
-				}
-			}
-		}
-	}
-
-	// Strategy 3: find {"findings" marker.
-	if !parsed {
-		if start := strings.Index(response, `{"findings"`); start != -1 {
-			if end := strings.LastIndex(response, "}"); end > start {
-				candidate := response[start : end+1]
-				if err := json.Unmarshal([]byte(candidate), &raw); err == nil {
-					parsed = true
-				}
-			}
-		}
-	}
-
-	if !parsed {
+	// Try to extract JSON from the response using a series of strategies.
+	// Each returns a parsed rawFeedback or nil if it can't extract one.
+	raw, ok := tryParseStrategies(response)
+	if !ok {
 		return nil, fmt.Errorf("could not extract JSON from response\nRaw: %s", truncateUTF8(response, 200))
 	}
 
@@ -687,6 +643,74 @@ func parseFeedback(role, response string) (*Feedback, error) {
 	}
 
 	return &Feedback{Role: role, Findings: findings}, nil
+}
+
+// jsonParser is a strategy for extracting rawFeedback from an LLM response.
+type jsonParser func(response string) (*rawFeedback, bool)
+
+// tryParseStrategies tries each parsing strategy in order, returning the
+// first successful result. Strategies are tried from most specific to most
+// lenient: direct JSON, markdown code blocks, JSON marker extraction.
+func tryParseStrategies(response string) (*rawFeedback, bool) {
+	for _, parse := range []jsonParser{parseDirectJSON, parseCodeBlock, parseJSONMarker} {
+		if raw, ok := parse(response); ok {
+			return raw, true
+		}
+	}
+	return nil, false
+}
+
+// parseDirectJSON tries to unmarshal the entire response as JSON.
+func parseDirectJSON(response string) (*rawFeedback, bool) {
+	var raw rawFeedback
+	if err := json.Unmarshal([]byte(response), &raw); err == nil {
+		return &raw, true
+	}
+	return nil, false
+}
+
+// parseCodeBlock extracts JSON from markdown fenced code blocks.
+func parseCodeBlock(response string) (*rawFeedback, bool) {
+	if !strings.Contains(response, "```") {
+		return nil, false
+	}
+	lines := strings.Split(response, "\n")
+	var jsonLines []string
+	inBlock := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "```") {
+			if inBlock {
+				var raw rawFeedback
+				if err := json.Unmarshal([]byte(strings.Join(jsonLines, "\n")), &raw); err == nil {
+					return &raw, true
+				}
+				jsonLines = nil
+			}
+			inBlock = !inBlock
+			continue
+		}
+		if inBlock {
+			jsonLines = append(jsonLines, line)
+		}
+	}
+	return nil, false
+}
+
+// parseJSONMarker finds a {"findings" substring and extracts the JSON object.
+func parseJSONMarker(response string) (*rawFeedback, bool) {
+	start := strings.Index(response, `{"findings"`)
+	if start == -1 {
+		return nil, false
+	}
+	end := strings.LastIndex(response, "}")
+	if end <= start {
+		return nil, false
+	}
+	var raw rawFeedback
+	if err := json.Unmarshal([]byte(response[start:end+1]), &raw); err == nil {
+		return &raw, true
+	}
+	return nil, false
 }
 
 // truncateUTF8 truncates s to at most maxBytes without splitting a UTF-8 character.
