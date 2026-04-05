@@ -121,7 +121,7 @@ type ReviewResult struct {
 type Options struct {
 	Verbose      bool
 	DryRun       bool
-	Debate       bool                 // enable severity debate round for high-disagreement findings
+	Debate       bool // enable severity debate round for high-disagreement findings
 	Model        string
 	AgentTimeout time.Duration
 	MaxRetries   int

@@ -1040,3 +1040,145 @@ func TestParseFeedback_BackwardCompatSeverity(t *testing.T) {
 		t.Errorf("expected risk 'critical' from severity fallback, got %q", fb.Findings[0].Risk)
 	}
 }
+
+func TestRunDebateRound_HighDisagreementTriggersLLM(t *testing.T) {
+	mock := &llmtest.Mock{
+		CompleteFunc: func(ctx context.Context, req llm.Request) (string, llm.Usage, error) {
+			// Debate arbitrator returns warning.
+			return `{"risk": "warning", "reasoning": "not critical but should fix"}`, llm.Usage{OutputTokens: 50}, nil
+		},
+	}
+	orch := &Orchestrator{
+		opts: &Options{Debate: true},
+		llm:  mock,
+	}
+
+	feedbacks := []Feedback{
+		{Role: "sentinel", Findings: []Finding{
+			{File: "a.go", Line: 10, Risk: "critical", Summary: "possible injection", Detail: "SQL injection risk"},
+		}},
+		{Role: "editor", Findings: []Finding{
+			{File: "a.go", Line: 10, Risk: "info", Summary: "possible injection issue", Detail: "looks fine to me"},
+		}},
+	}
+
+	result, usage := orch.runDebateRound(feedbacks)
+	// Should have called the LLM for debate (spread = critical vs info = 2).
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 debate LLM call, got %d", len(mock.Calls))
+	}
+	if usage.OutputTokens != 50 {
+		t.Errorf("expected usage to be tracked, got %d output tokens", usage.OutputTokens)
+	}
+	// Both findings should now have the resolved risk.
+	for _, fb := range result {
+		for _, f := range fb.Findings {
+			if f.Risk != "warning" {
+				t.Errorf("expected resolved risk 'warning', got %q for %s", f.Risk, fb.Role)
+			}
+		}
+	}
+}
+
+func TestRunDebateRound_LowDisagreementSkips(t *testing.T) {
+	mock := &llmtest.Mock{}
+	orch := &Orchestrator{
+		opts: &Options{Debate: true},
+		llm:  mock,
+	}
+
+	// Both agents say warning — no disagreement, no debate.
+	feedbacks := []Feedback{
+		{Role: "sentinel", Findings: []Finding{
+			{File: "a.go", Line: 10, Risk: "warning", Summary: "minor issue", Detail: "d"},
+		}},
+		{Role: "editor", Findings: []Finding{
+			{File: "a.go", Line: 10, Risk: "warning", Summary: "minor issue", Detail: "d"},
+		}},
+	}
+
+	_, usage := orch.runDebateRound(feedbacks)
+	if len(mock.Calls) != 0 {
+		t.Fatalf("expected no LLM calls for low disagreement, got %d", len(mock.Calls))
+	}
+	if usage.OutputTokens != 0 {
+		t.Errorf("expected zero usage, got %d", usage.OutputTokens)
+	}
+}
+
+func TestRunDebateRound_FailureKeepsOriginal(t *testing.T) {
+	mock := &llmtest.Mock{
+		Err: fmt.Errorf("LLM unavailable"),
+	}
+	orch := &Orchestrator{
+		opts: &Options{Debate: true},
+		llm:  mock,
+	}
+
+	feedbacks := []Feedback{
+		{Role: "sentinel", Findings: []Finding{
+			{File: "a.go", Line: 10, Risk: "critical", Summary: "security issue", Detail: "d"},
+		}},
+		{Role: "editor", Findings: []Finding{
+			{File: "a.go", Line: 10, Risk: "info", Summary: "security issue", Detail: "d"},
+		}},
+	}
+
+	result, _ := orch.runDebateRound(feedbacks)
+	// Original risks should be preserved when debate fails.
+	if result[0].Findings[0].Risk != "critical" {
+		t.Errorf("sentinel finding should keep 'critical', got %q", result[0].Findings[0].Risk)
+	}
+	if result[1].Findings[0].Risk != "info" {
+		t.Errorf("editor finding should keep 'info', got %q", result[1].Findings[0].Risk)
+	}
+}
+
+func TestBuildDebatePrompt(t *testing.T) {
+	df := &DedupedFinding{
+		Finding: Finding{File: "a.go", Line: 10, Category: "security", Summary: "SQL injection"},
+		AgentDetails: []AgentDetail{
+			{Role: "sentinel", Risk: "critical", Detail: "user input in query"},
+			{Role: "editor", Risk: "info", Detail: "parameterized query is fine"},
+		},
+	}
+	prompt := buildDebatePrompt(df)
+	if !strings.Contains(prompt, "a.go") {
+		t.Error("prompt should contain filename")
+	}
+	if !strings.Contains(prompt, "sentinel (says critical)") {
+		t.Error("prompt should contain agent opinions with risk")
+	}
+	if !strings.Contains(prompt, "editor (says info)") {
+		t.Error("prompt should contain all agents")
+	}
+}
+
+func TestApplyDebateResolution(t *testing.T) {
+	orch := &Orchestrator{opts: &Options{}}
+	feedbacks := []Feedback{
+		{Role: "sentinel", Findings: []Finding{
+			{File: "a.go", Line: 10, Risk: "critical", Summary: "injection risk"},
+			{File: "b.go", Line: 5, Risk: "warning", Summary: "unrelated"},
+		}},
+		{Role: "editor", Findings: []Finding{
+			{File: "a.go", Line: 11, Risk: "info", Summary: "injection risk maybe"},
+		}},
+	}
+
+	df := &DedupedFinding{
+		Finding: Finding{File: "a.go", Line: 10, Summary: "injection risk"},
+	}
+	res := &debateResolution{Risk: "warning"}
+
+	orch.applyDebateResolution(feedbacks, df, res)
+
+	// a.go:10 and a.go:11 (within threshold, similar summary) should be updated.
+	if feedbacks[0].Findings[0].Risk != "warning" {
+		t.Errorf("sentinel a.go:10 should be updated to 'warning', got %q", feedbacks[0].Findings[0].Risk)
+	}
+	// b.go should NOT be affected.
+	if feedbacks[0].Findings[1].Risk != "warning" {
+		t.Errorf("sentinel b.go:5 should keep 'warning', got %q", feedbacks[0].Findings[1].Risk)
+	}
+}
