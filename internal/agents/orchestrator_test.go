@@ -1040,3 +1040,59 @@ func TestParseFeedback_BackwardCompatSeverity(t *testing.T) {
 		t.Errorf("expected risk 'critical' from severity fallback, got %q", fb.Findings[0].Risk)
 	}
 }
+
+func TestParseCodeBlock_Empty(t *testing.T) {
+	raw, ok := parseCodeBlock("")
+	if ok || raw != nil {
+		t.Error("should fail on empty response")
+	}
+}
+
+func TestParseCodeBlock_UnclosedFence(t *testing.T) {
+	response := "```json\n{\"findings\":[]}\n"
+	raw, ok := parseCodeBlock(response)
+	if ok || raw != nil {
+		t.Error("should fail on unclosed code fence")
+	}
+}
+
+func TestParseCodeBlock_ValidBlock(t *testing.T) {
+	response := "Here's the review:\n```json\n{\"findings\":[]}\n```\nDone."
+	raw, ok := parseCodeBlock(response)
+	if !ok || raw == nil {
+		t.Fatal("should extract JSON from valid code block")
+	}
+}
+
+func TestParseJSONMarker_TrailingBraces(t *testing.T) {
+	response := `{"findings":[]} some text with {extra: "braces"}`
+	raw, ok := parseJSONMarker(response)
+	if !ok || raw == nil {
+		t.Fatal("should extract JSON despite trailing braces")
+	}
+}
+
+func TestParseJSONMarker_NoMarker(t *testing.T) {
+	raw, ok := parseJSONMarker("no json here")
+	if ok || raw != nil {
+		t.Error("should fail when no {\"findings\" marker exists")
+	}
+}
+
+func TestTryParseStrategies_PrefersDirectJSON(t *testing.T) {
+	// Direct JSON should be tried first and succeed.
+	response := `{"findings":[]}`
+	raw, ok := tryParseStrategies(response)
+	if !ok || raw == nil {
+		t.Fatal("should parse direct JSON")
+	}
+}
+
+func TestTryParseStrategies_FallsThrough(t *testing.T) {
+	// Invalid direct JSON but valid code block should fall through.
+	response := "Not JSON\n```\n{\"findings\":[]}\n```"
+	raw, ok := tryParseStrategies(response)
+	if !ok || raw == nil {
+		t.Fatal("should fall through to code block strategy")
+	}
+}

@@ -255,7 +255,8 @@ func runReview(args []string) error {
 	}
 	fmt.Println()
 
-	// Build diff compression options.
+	// Compress diff before passing to orchestrator — the orchestrator
+	// doesn't need to know about compression, just receives a clean diff.
 	diffOpts := diff.DefaultOptions()
 	if opts.noCompress || merged.NoCompress {
 		diffOpts = diff.NoCompression()
@@ -263,6 +264,15 @@ func runReview(args []string) error {
 		diffOpts.ContextLines = merged.DiffContextLinesVal()
 		diffOpts.ExtraPatterns = merged.StripPatterns
 	}
+	compressed, compSummary := diff.Compress(pr.Diff, diffOpts)
+	if opts.verbose && compSummary.OriginalBytes > 0 {
+		savings := 100 - (compSummary.CompressedBytes*100)/compSummary.OriginalBytes
+		fmt.Printf("   📦 Diff compressed: %dKB → %dKB (-%d%%, %d files stripped)\n",
+			compSummary.OriginalBytes/1024, compSummary.CompressedBytes/1024,
+			savings, len(compSummary.FilesRemoved))
+	}
+	compressedPR := *pr
+	compressedPR.Diff = compressed
 
 	// Dispatch agents.
 	llmBackend := claude.New()
@@ -273,14 +283,13 @@ func runReview(args []string) error {
 		AgentTimeout: merged.TimeoutDuration(),
 		MaxRetries:   merged.MaxRetriesVal(),
 		MaxBudgetUSD: merged.MaxBudgetUSD,
-		DiffCompress: diffOpts,
 	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
 	}
 
 	start := time.Now()
-	result, err := orchestrator.Review(pr)
+	result, err := orchestrator.Review(&compressedPR)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)
 	}

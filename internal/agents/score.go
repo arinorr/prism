@@ -29,18 +29,18 @@ func ComputeHealthScore(findings []DedupedFinding) HealthScore {
 		switch f.Scope {
 		case ScopeChanged:
 			switch f.Risk {
-			case SeverityCritical:
+			case RiskCritical:
 				deduction = 20
-			case SeverityWarning:
+			case RiskWarning:
 				deduction = 8
 			default:
 				deduction = 2
 			}
 		case ScopeExisting:
 			switch f.Risk {
-			case SeverityCritical:
+			case RiskCritical:
 				deduction = 5
-			case SeverityWarning:
+			case RiskWarning:
 				deduction = 2
 			default:
 				deduction = 0.5

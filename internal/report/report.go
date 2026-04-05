@@ -257,7 +257,7 @@ type htmlFileGroup struct {
 }
 
 type htmlFinding struct {
-	Risk              string
+	Risk              agents.Risk
 	RiskClass         string
 	Line              int
 	HasLine           bool
@@ -322,6 +322,10 @@ func categoryClass(cat string) string {
 }
 
 // HTML generates a styled HTML report using Go's html/template.
+// Security: html/template auto-escapes all template variables, so
+// untrusted LLM-generated content (Summary, Detail, CodeExample) is
+// rendered safely without manual sanitization. Do not switch to
+// text/template without adding explicit escaping.
 func HTML(d *Data) (string, error) {
 	// Convert synthesis summary from markdown to sanitized HTML.
 	var rawHTML bytes.Buffer
@@ -432,7 +436,7 @@ func HTML(d *Data) (string, error) {
 	return buf.String(), nil
 }
 
-func riskClass(risk string) string {
+func riskClass(risk agents.Risk) string {
 	switch risk {
 	case severityCritical:
 		return "badge-critical"
@@ -1059,10 +1063,10 @@ func sortDedupedFileGroups(groups []dedupedFileGroup) {
 	})
 }
 
-// severityOrder delegates to the canonical implementation in the agents package.
-var severityOrder = agents.SeverityOrder
+// severityOrder delegates to Risk.Order().
+func severityOrder(r agents.Risk) int { return r.Order() }
 
-func severityBadge(s string) string {
+func severityBadge(s agents.Risk) string {
 	switch s {
 	case severityCritical:
 		return "🔴 critical"

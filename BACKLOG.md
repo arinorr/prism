@@ -10,12 +10,21 @@
 - Token budget per mode: quick ~100K, standard ~300K, deep ~500K+
 - Time estimates: quick ~1-2min, standard ~3-5min, deep ~5-10min
 
-### Codebase Expert role
-- A new agent that reads the wider codebase (not just the diff) to understand the project structure, patterns, conventions, and architecture
-- Provides feedback based on: does this change fit how the rest of the codebase works? Are there existing utilities being reinvented? Does it follow the project's conventions?
-- Distinct from the Architect (who thinks about abstract design) — the Codebase Expert has *read the actual code* and knows the specifics
+### Verification Agent (replaces Codebase Expert + Fact Checker)
+- A post-review agent that reads the actual codebase to **validate findings** from the 7 specialist agents
+- Runs after initial review + dedup, before final scoring
+- For each finding, checks whether the claim holds against the actual code:
+  - "Finding says X is unsanitized" → check if the rendering layer already handles it
+  - "Finding says add validation" → check if validation already exists upstream
+  - "Finding says this could XSS" → trace the data flow to the actual rendering context
+- **Must output specific evidence** (file path, line number, actual code) so humans can spot-check the verification, not just the conclusion. If the agent can't produce evidence, the finding stands.
+- Collapses two previously separate roles (see docs/agent-blind-spots.md for why):
+  - Codebase Expert: reads the wider codebase for context
+  - Fact Checker: verifies claims against actual code
+  - These are the same operation — you can't verify claims without reading the code
 - Requires Standard or Deep mode (needs file read access beyond the diff)
 - Could pre-index the repo structure and key files to stay within token budget
+- Future: support data flow annotations (SECURITY.md or inline comments) for structural verification
 
 ### Token usage reporting
 - Show estimated token usage before running (`--estimate` flag)
@@ -58,10 +67,59 @@
 - Graceful degradation: if 1-2 agents fail, still produce a review
 - Timeout handling for hung agents
 
-### Agent weighting and deduplication
-- When multiple agents flag the same issue, merge and show vote count
-- Let users weight roles (e.g. prioritize Sentinel for security-sensitive repos)
-- Confidence scoring based on agent agreement
+### Code quality improvements (Thorsten Ball style)
+
+Idiomatic Go improvements following Thorsten Ball's principles (simple, explicit,
+no magic, make the zero value useful). These are structural refactors that don't
+change behavior.
+
+**2d. Fill in io.Writer defaults at construction**
+- Add `NewOptions()` that sets `Out=os.Stdout`, `ErrOut=os.Stderr`
+- Remove nil checks in `out()` and `errOut()` methods on Orchestrator
+- Principle: make the zero value useful — writers should never be nil
+- Files: `internal/agents/orchestrator.go`, `cmd/review.go`
+
+**2e. DryRun returns data, caller formats**
+- `planDryRun()` returns a `DryRunResult` struct with role count, diff bytes,
+  sample prompt, model, timeout
+- `cmd/review.go` handles formatting/printing the dry run output
+- Principle: separate data from formatting — functions return data, callers render
+- Files: `internal/agents/orchestrator.go`, `cmd/review.go`
+
+**2f. Config sentinel values instead of pointers**
+- Replace `MaxRetries *int` and `DiffContextLines *int` with plain `int`
+- Use -1 as "not set" sentinel instead of nil pointer indirection
+- Remove `IntPtr()` helper function
+- Principle: simpler types, no pointer indirection for optional values
+- Files: `internal/config/config.go`, `cmd/review.go`
+
+**2g. Extract parser.go from orchestrator**
+- Move parsing logic into its own file `parser.go` (same `agents` package)
+- Includes: `rawFinding`, `rawFeedback`, `parseFeedback`, `tryParseStrategies`,
+  `parseDirectJSON`, `parseCodeBlock`, `parseJSONMarker`, `NormalizeFinding`,
+  `truncateUTF8`
+- Orchestrator just calls `parseFeedback()` — same API, better file organization
+- Principle: each file has one job
+- Files: `internal/agents/orchestrator.go` → `internal/agents/parser.go`
+
+**2h. Split report package into data + generators**
+- Separate data preparation from rendering across multiple files:
+  - `data.go` — Data struct, file grouping, scope splitting, severity counting
+  - `generator.go` — shared types (htmlFinding, htmlFileGroup, etc.)
+  - `markdown.go` — `Markdown()` function
+  - `html.go` — `HTML()` function + template string + CSS
+  - `json.go` — `JSON()` function
+- Each generator takes prepared data and renders one format
+- Adding new formats (SARIF, TUI) means adding one file
+- Principle: separate concerns, each file has one responsibility
+- Files: `internal/report/report.go` → split into 5 files
+
+**2i. Markdown report via text/template (depends on 2h)**
+- Replace ~100 lines of `fmt.Fprintf` calls with a `text/template`
+- Same pattern as the HTML report: data in, rendered output out
+- Template string is the "shape" of the markdown, readable at a glance
+- Principle: separate what to render from how to render it
+- Files: `internal/report/markdown.go`
 
 ## Ideas
 
