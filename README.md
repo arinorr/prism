@@ -6,7 +6,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
 [![Claude](https://img.shields.io/badge/Claude-Anthropic-cc785c?style=flat-square&logo=anthropic&logoColor=white)](https://www.anthropic.com)
-[![CI](https://img.shields.io/github/actions/workflow/status/arinorr/prism/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/arinorr/prism/actions)
+[![CI](https://github.com/arinorr/prism/actions/workflows/ci.yml/badge.svg)](https://github.com/arinorr/prism/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
 </div>
