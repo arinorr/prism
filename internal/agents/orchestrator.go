@@ -15,7 +15,6 @@ import (
 
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/llm"
-	"github.com/arinorr/prism/internal/sanitize"
 )
 
 const previewMaxBytes = 500
@@ -71,13 +70,13 @@ var (
 // missing or invalid values. This handles both the new format and backward
 // compatibility with agents that still output "severity" instead of "risk".
 func NormalizeFinding(f *Finding, severity string) {
-	// Normalize the raw risk string once, then convert to Risk type.
-	// Backward compat: use severity field if risk is empty.
-	riskStr := string(f.Risk)
-	if riskStr == "" && severity != "" {
-		riskStr = severity
+	// Risk is normally normalized by UnmarshalJSON during JSON parsing.
+	// Handle two additional cases:
+	// 1. Backward compat: agents that use "severity" instead of "risk"
+	// 2. Direct struct construction (tests) that bypasses UnmarshalJSON
+	if f.Risk == "" && severity != "" {
+		f.Risk = Risk(strings.ToLower(strings.TrimSpace(severity)))
 	}
-	f.Risk = Risk(strings.ToLower(strings.TrimSpace(riskStr)))
 	if !f.Risk.Valid() {
 		f.Risk = RiskInfo
 	}
@@ -401,7 +400,7 @@ func (o *Orchestrator) runAgent(role *Role, pr *gh.PR) (*Feedback, llm.Usage, er
 	fb, err := parseFeedback(role.Slug, response)
 	if err != nil {
 		if o.opts.Verbose {
-			o.errLogf("   🔬 [%s] raw response: %s\n", role.Name, sanitize.ForHTML(truncateUTF8(response, previewMaxBytes)))
+			o.errLogf("   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(response, previewMaxBytes))
 		}
 		return nil, usage, fmt.Errorf("failed to parse feedback: %w", err)
 	}
@@ -633,7 +632,7 @@ func parseFeedback(role, response string) (*Feedback, error) {
 	// Each returns a parsed rawFeedback or nil if it can't extract one.
 	raw, ok := tryParseStrategies(response)
 	if !ok {
-		return nil, fmt.Errorf("could not extract JSON from response\nRaw: %s", sanitize.ForHTML(truncateUTF8(response, 200)))
+		return nil, fmt.Errorf("could not extract JSON from response\nRaw: %s", truncateUTF8(response, 200))
 	}
 
 	// Normalize and filter findings.
@@ -708,6 +707,8 @@ func parseJSONMarker(response string) (*rawFeedback, bool) {
 	if start == -1 {
 		return nil, false
 	}
+	const maxAttempts = 10
+	attempts := 0
 	for end := len(response) - 1; end > start; end-- {
 		if response[end] != '}' {
 			continue
@@ -715,6 +716,10 @@ func parseJSONMarker(response string) (*rawFeedback, bool) {
 		var raw rawFeedback
 		if err := json.Unmarshal([]byte(response[start:end+1]), &raw); err == nil {
 			return &raw, true
+		}
+		attempts++
+		if attempts >= maxAttempts {
+			break
 		}
 	}
 	return nil, false

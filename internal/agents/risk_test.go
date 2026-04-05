@@ -56,8 +56,6 @@ func TestRisk_Valid(t *testing.T) {
 }
 
 func TestRisk_JSONUnmarshal(t *testing.T) {
-	// Risk is type Risk string, so JSON unmarshaling should work
-	// directly from string values in LLM responses.
 	var f Finding
 	data := []byte(`{"risk": "critical", "summary": "test"}`)
 	if err := json.Unmarshal(data, &f); err != nil {
@@ -68,14 +66,26 @@ func TestRisk_JSONUnmarshal(t *testing.T) {
 	}
 }
 
-func TestRisk_JSONUnmarshal_InvalidValue(t *testing.T) {
-	// Invalid risk values unmarshal successfully but won't pass Valid().
+func TestRisk_JSONUnmarshal_Normalizes(t *testing.T) {
+	// UnmarshalJSON lowercases and trims, so "CRITICAL" becomes "critical".
+	var f Finding
+	data := []byte(`{"risk": " WARNING "}`)
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if f.Risk != RiskWarning {
+		t.Errorf("got %q, want %q", f.Risk, RiskWarning)
+	}
+}
+
+func TestRisk_JSONUnmarshal_InvalidDefaultsToInfo(t *testing.T) {
+	// Invalid risk values are normalized to RiskInfo at the parse boundary.
 	var f Finding
 	data := []byte(`{"risk": "BOGUS"}`)
 	if err := json.Unmarshal(data, &f); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	if f.Risk.Valid() {
-		t.Error("invalid risk value should not be valid")
+	if f.Risk != RiskInfo {
+		t.Errorf("invalid risk should default to info, got %q", f.Risk)
 	}
 }

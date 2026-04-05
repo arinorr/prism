@@ -322,6 +322,10 @@ func categoryClass(cat string) string {
 }
 
 // HTML generates a styled HTML report using Go's html/template.
+// Security: html/template auto-escapes all template variables, so
+// untrusted LLM-generated content (Summary, Detail, CodeExample) is
+// rendered safely without manual sanitization. Do not switch to
+// text/template without adding explicit escaping.
 func HTML(d *Data) (string, error) {
 	// Convert synthesis summary from markdown to sanitized HTML.
 	var rawHTML bytes.Buffer
