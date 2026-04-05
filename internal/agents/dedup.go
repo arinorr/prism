@@ -19,9 +19,14 @@ const (
 	// findings that don't share strong structural signals.
 	jaccardThreshold = 0.4
 
+	// sameCategoryLineLimit caps the line distance for tier 2 matching.
+	// Prevents merging genuinely distinct findings at opposite ends of
+	// large files that happen to share a category and modest word overlap.
+	sameCategoryLineLimit = 100
+
 	// jaccardThresholdSameCategory is the threshold when findings share
-	// the same file and category — structural agreement compensates for
-	// wording differences.
+	// the same file and category within sameCategoryLineLimit lines —
+	// structural agreement compensates for wording differences.
 	jaccardThresholdSameCategory = 0.15
 
 	// jaccardThresholdNearby is the threshold when findings share the
@@ -119,7 +124,9 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 // If voterSummaries is empty (zero-value struct), derives tokens from
 // the embedded Finding's Summary so the zero value works.
 func bestSimilarity(group *DedupedFinding, candidateSummary string) float64 {
-	best := jaccardSimilarity(group.Summary, candidateSummary)
+	// voterSummaries already contains group.Summary as its first element,
+	// so we only need to iterate voterSummaries.
+	var best float64
 	for _, s := range group.voterSummaries {
 		if sim := jaccardSimilarity(s, candidateSummary); sim > best {
 			best = sim
@@ -134,10 +141,10 @@ func bestSimilarity(group *DedupedFinding, candidateSummary string) float64 {
 // findings that use different wording.
 //
 // Tiers:
-//  1. Same file + same category + within wideLineThreshold → threshold 0.065
-//  2. Same file + same category + within 100 lines         → threshold 0.15
-//  3. Same file + within lineThreshold                     → threshold 0.40
-//  4. Otherwise                                            → no match
+//  1. Same file + same category + within 20 lines  → threshold 0.065
+//  2. Same file + same category + within 100 lines → threshold 0.15
+//  3. Same file + within 5 lines                   → threshold 0.40
+//  4. Otherwise                                    → no match
 //
 // Empty categories do not qualify for tiers 1/2 to avoid false merges
 // when agents omit the category field.
@@ -149,10 +156,9 @@ func matchesGroup(group *DedupedFinding, f *Finding) bool {
 	lineDist := abs(group.Line - f.Line)
 	sameCategory := group.Category != "" && group.Category == f.Category
 
-	// Compare against the best-matching text in the group: both the
-	// representative summary and each agent's detail text. This prevents
-	// greedy ordering from causing misses when the first finding uses
-	// very different wording from a later one.
+	// Compare against the best-matching summary in the group. This
+	// prevents greedy ordering from causing misses when the first
+	// finding uses very different wording from a later one.
 	similarity := bestSimilarity(group, f.Summary)
 
 	// Tier 1: strong structural match — same file, same category, nearby lines.
@@ -160,8 +166,8 @@ func matchesGroup(group *DedupedFinding, f *Finding) bool {
 		return similarity >= jaccardThresholdNearby
 	}
 
-	// Tier 2: same file and category but further apart.
-	if sameCategory {
+	// Tier 2: same file and category, within sameCategoryLineLimit.
+	if sameCategory && lineDist <= sameCategoryLineLimit {
 		return similarity >= jaccardThresholdSameCategory
 	}
 

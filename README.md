@@ -238,7 +238,7 @@ When multiple agents report the same issue, Prism merges them into a single find
 | Structural match | Text similarity needed |
 |-----------------|----------------------|
 | Same file + same category + within 20 lines | Very low (0.05) |
-| Same file + same category | Low (0.15) |
+| Same file + same category + within 100 lines | Low (0.15) |
 | Same file + within 5 lines | Standard (0.40) |
 
 Text similarity also uses **prefix stemming** so word variants like "duplicate" and "duplication" are recognized as matching. Deduplicated findings are sorted by vote count, then severity.
