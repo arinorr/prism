@@ -584,16 +584,7 @@ func splitByScope(groups []htmlFileGroup) (changed, existing, codebase []htmlFil
 				Findings:      findings,
 			})
 		}
-		// Sort by severity: files with critical findings first, then warning, then info-only.
-		sort.Slice(out, func(i, j int) bool {
-			if out[i].CriticalCount != out[j].CriticalCount {
-				return out[i].CriticalCount > out[j].CriticalCount
-			}
-			if out[i].WarningCount != out[j].WarningCount {
-				return out[i].WarningCount > out[j].WarningCount
-			}
-			return out[i].File < out[j].File
-		})
+		sort.Slice(out, func(i, j int) bool { return htmlFileGroupLess(out[i], out[j]) })
 		return out
 	}
 
@@ -996,30 +987,23 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 	return groups
 }
 
-// sortBySeverity sorts indices by precomputed severity counts, then applies
-// the ordering back to the original slice via a reorder function.
-// This avoids O(N² × F) recomputation in the sort comparator.
-type severityKey struct {
-	critical, warning int
-	file              string
+// htmlFileGroupLess is the shared comparator for severity-based file ordering.
+// All sort sites (splitByScope, groupByFile, groupDedupedByFile) use this
+// contract: critical count desc → warning count desc → filename asc.
+func htmlFileGroupLess(a, b htmlFileGroup) bool {
+	if a.CriticalCount != b.CriticalCount {
+		return a.CriticalCount > b.CriticalCount
+	}
+	if a.WarningCount != b.WarningCount {
+		return a.WarningCount > b.WarningCount
+	}
+	return a.File < b.File
 }
 
-func sortBySeverityKeys(keys []severityKey) []int {
-	indices := make([]int, len(keys))
-	for i := range indices {
-		indices[i] = i
-	}
-	sort.Slice(indices, func(i, j int) bool {
-		a, b := keys[indices[i]], keys[indices[j]]
-		if a.critical != b.critical {
-			return a.critical > b.critical
-		}
-		if a.warning != b.warning {
-			return a.warning > b.warning
-		}
-		return a.file < b.file
-	})
-	return indices
+// severityKey holds precomputed severity counts for sorting raw/deduped
+// file groups before they're converted to htmlFileGroups.
+type severityKey struct {
+	critical, warning int
 }
 
 func sortRawFileGroups(groups []fileGroup) {
@@ -1033,14 +1017,16 @@ func sortRawFileGroups(groups []fileGroup) {
 				keys[i].warning++
 			}
 		}
-		keys[i].file = groups[i].file
 	}
-	indices := sortBySeverityKeys(keys)
-	sorted := make([]fileGroup, len(groups))
-	for i, idx := range indices {
-		sorted[i] = groups[idx]
-	}
-	copy(groups, sorted)
+	sort.Slice(groups, func(i, j int) bool {
+		if keys[i].critical != keys[j].critical {
+			return keys[i].critical > keys[j].critical
+		}
+		if keys[i].warning != keys[j].warning {
+			return keys[i].warning > keys[j].warning
+		}
+		return groups[i].file < groups[j].file
+	})
 }
 
 func sortDedupedFileGroups(groups []dedupedFileGroup) {
@@ -1054,14 +1040,16 @@ func sortDedupedFileGroups(groups []dedupedFileGroup) {
 				keys[i].warning++
 			}
 		}
-		keys[i].file = groups[i].file
 	}
-	indices := sortBySeverityKeys(keys)
-	sorted := make([]dedupedFileGroup, len(groups))
-	for i, idx := range indices {
-		sorted[i] = groups[idx]
-	}
-	copy(groups, sorted)
+	sort.Slice(groups, func(i, j int) bool {
+		if keys[i].critical != keys[j].critical {
+			return keys[i].critical > keys[j].critical
+		}
+		if keys[i].warning != keys[j].warning {
+			return keys[i].warning > keys[j].warning
+		}
+		return groups[i].file < groups[j].file
+	})
 }
 
 // severityOrder delegates to the canonical implementation in the agents package.

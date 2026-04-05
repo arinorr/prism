@@ -539,20 +539,39 @@ func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
 	}
 }
 
-func TestGroupDedupedByFile_MultipleFiles(t *testing.T) {
+func TestGroupDedupedByFile_SortedBySeverity(t *testing.T) {
+	// z.go has critical, a.go has warning, m.go has info.
+	// Severity order differs from alphabetical order.
 	findings := []agents.DedupedFinding{
-		{Finding: agents.Finding{File: "c.go", Line: 1, Risk: "info"}, VoteCount: 1},
-		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 5},
-		{Finding: agents.Finding{File: "a.go", Line: 20, Risk: "warning"}, VoteCount: 2},
-		{Finding: agents.Finding{File: "b.go", Line: 5, Risk: "critical"}, VoteCount: 3},
+		{Finding: agents.Finding{File: "m.go", Line: 1, Risk: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "warning"}, VoteCount: 2},
+		{Finding: agents.Finding{File: "z.go", Line: 5, Risk: "critical"}, VoteCount: 3},
 	}
 	groups := groupDedupedByFile(findings)
 	if len(groups) != 3 {
 		t.Fatalf("expected 3 groups, got %d", len(groups))
 	}
-	// Sorted by severity: a.go (1 critical, 1 warning), b.go (1 critical), c.go (info only).
-	if groups[0].file != "a.go" || groups[1].file != "b.go" || groups[2].file != "c.go" {
-		t.Errorf("expected [a.go, b.go, c.go], got [%s, %s, %s]", groups[0].file, groups[1].file, groups[2].file)
+	// Sorted by severity (not alphabetical): z.go (critical), a.go (warning), m.go (info).
+	if groups[0].file != "z.go" || groups[1].file != "a.go" || groups[2].file != "m.go" {
+		t.Errorf("expected [z.go, a.go, m.go] (by severity), got [%s, %s, %s]",
+			groups[0].file, groups[1].file, groups[2].file)
+	}
+}
+
+func TestGroupDedupedByFile_AlphabeticalFallback(t *testing.T) {
+	// Both files have critical findings — should fall back to alphabetical.
+	findings := []agents.DedupedFinding{
+		{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 1},
+	}
+	groups := groupDedupedByFile(findings)
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// Same severity → alphabetical: a.go before z.go.
+	if groups[0].file != "a.go" || groups[1].file != "z.go" {
+		t.Errorf("expected [a.go, z.go] (alphabetical fallback), got [%s, %s]",
+			groups[0].file, groups[1].file)
 	}
 }
 
@@ -733,15 +752,18 @@ func TestJSON_HealthScore(t *testing.T) {
 }
 
 func TestHTML_GaugeNeedleRotation(t *testing.T) {
+	// Formula: rotation = int(score * 1.8) - 90
+	// Score 0 → -90° (left), 50 → 0° (up), 100 → +90° (right).
+	// int() truncates toward zero, so 46*1.8=82.8 → 82 → 82-90 = -8.
 	tests := []struct {
 		name         string
 		score        int
 		wantRotation int // expected rotation in degrees
 	}{
-		{"score 10 points left", 10, -72},
-		{"score 50 points up", 50, 0},
-		{"score 100 points right", 100, 90},
-		{"score 46 points left of center", 46, -8},
+		{"score 10 points left", 10, -72},          // int(18) - 90 = -72
+		{"score 50 points up", 50, 0},              // int(90) - 90 = 0
+		{"score 100 points right", 100, 90},        // int(180) - 90 = 90
+		{"score 46 points left of center", 46, -8}, // int(82.8) - 90 = -8
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -760,14 +782,16 @@ func TestHTML_GaugeNeedleRotation(t *testing.T) {
 }
 
 func TestHTML_FilesOrderedBySeverity(t *testing.T) {
+	// z.go has critical, m.go has warning, a.go has info.
+	// Severity order (z, m, a) differs from alphabetical (a, m, z).
 	d := &Data{
-		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}, {Path: "b.go"}, {Path: "c.go"}}},
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}, {Path: "m.go"}, {Path: "z.go"}}},
 		Result: &agents.ReviewResult{
 			Summary: "Test.",
 			DedupedFindings: []agents.DedupedFinding{
 				{Finding: agents.Finding{File: "a.go", Line: 1, Risk: "info", Category: "style", Scope: "changed", Summary: "minor"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"editor"}, AgentDetails: []agents.AgentDetail{{Role: "editor", Detail: "d"}}},
-				{Finding: agents.Finding{File: "b.go", Line: 1, Risk: "critical", Category: "bug", Scope: "changed", Summary: "crash"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"solver"}, AgentDetails: []agents.AgentDetail{{Role: "solver", Detail: "d"}}},
-				{Finding: agents.Finding{File: "c.go", Line: 1, Risk: "warning", Category: "design", Scope: "changed", Summary: "design issue"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"architect"}, AgentDetails: []agents.AgentDetail{{Role: "architect", Detail: "d"}}},
+				{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical", Category: "bug", Scope: "changed", Summary: "crash"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"solver"}, AgentDetails: []agents.AgentDetail{{Role: "solver", Detail: "d"}}},
+				{Finding: agents.Finding{File: "m.go", Line: 1, Risk: "warning", Category: "design", Scope: "changed", Summary: "design issue"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"architect"}, AgentDetails: []agents.AgentDetail{{Role: "architect", Detail: "d"}}},
 			},
 			HealthScore: agents.HealthScore{Score: 60, Grade: "C", Verdict: "request changes"},
 		},
@@ -777,18 +801,47 @@ func TestHTML_FilesOrderedBySeverity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// b.go (critical) should appear before c.go (warning) which should appear before a.go (info).
-	bPos := strings.Index(out, "b.go")
-	cPos := strings.Index(out, "c.go")
+	// z.go (critical) should appear before m.go (warning) which should appear before a.go (info).
+	zPos := strings.Index(out, "z.go")
+	mPos := strings.Index(out, "m.go")
 	aPos := strings.Index(out, "a.go")
-	if bPos < 0 || cPos < 0 || aPos < 0 {
+	if zPos < 0 || mPos < 0 || aPos < 0 {
 		t.Fatal("all three files should appear in the HTML output")
 	}
-	if bPos > cPos {
-		t.Error("b.go (critical) should appear before c.go (warning)")
+	if zPos > mPos {
+		t.Error("z.go (critical) should appear before m.go (warning)")
 	}
-	if cPos > aPos {
-		t.Error("c.go (warning) should appear before a.go (info)")
+	if mPos > aPos {
+		t.Error("m.go (warning) should appear before a.go (info)")
+	}
+}
+
+func TestHTML_FilesOrderedBySeverity_AlphabeticalFallback(t *testing.T) {
+	// Both files have critical findings — should fall back to alphabetical.
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}, {Path: "z.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "Test.",
+			DedupedFindings: []agents.DedupedFinding{
+				{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical", Category: "bug", Scope: "changed", Summary: "crash"}, VoteCount: 1, TotalAgents: 2, Voters: []string{"solver"}, AgentDetails: []agents.AgentDetail{{Role: "solver", Detail: "d"}}},
+				{Finding: agents.Finding{File: "a.go", Line: 1, Risk: "critical", Category: "bug", Scope: "changed", Summary: "panic"}, VoteCount: 1, TotalAgents: 2, Voters: []string{"sentinel"}, AgentDetails: []agents.AgentDetail{{Role: "sentinel", Detail: "d"}}},
+			},
+			HealthScore: agents.HealthScore{Score: 40, Grade: "D", Verdict: "request changes"},
+		},
+		Roles: []string{"Solver", "Sentinel"},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Same severity → alphabetical: a.go before z.go.
+	aPos := strings.Index(out, "a.go")
+	zPos := strings.Index(out, "z.go")
+	if aPos < 0 || zPos < 0 {
+		t.Fatal("both files should appear in the HTML output")
+	}
+	if aPos > zPos {
+		t.Error("a.go should appear before z.go (alphabetical fallback for same severity)")
 	}
 }
 
