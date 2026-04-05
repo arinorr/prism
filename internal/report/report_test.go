@@ -575,6 +575,25 @@ func TestGroupDedupedByFile_AlphabeticalFallback(t *testing.T) {
 	}
 }
 
+func TestGroupDedupedByFile_BothSeveritiesEqualFallback(t *testing.T) {
+	// Both files have 1 critical and 1 warning — full tiebreak to alphabetical.
+	findings := []agents.DedupedFinding{
+		{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "z.go", Line: 2, Risk: "warning"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 11, Risk: "warning"}, VoteCount: 1},
+	}
+	groups := groupDedupedByFile(findings)
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// Equal critical and warning counts → alphabetical: a.go before z.go.
+	if groups[0].file != "a.go" || groups[1].file != "z.go" {
+		t.Errorf("expected [a.go, z.go] (full tiebreak to alphabetical), got [%s, %s]",
+			groups[0].file, groups[1].file)
+	}
+}
+
 func TestHTML_FailedAgentsBanner(t *testing.T) {
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},

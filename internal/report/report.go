@@ -987,9 +987,10 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 	return groups
 }
 
-// htmlFileGroupLess is the shared comparator for severity-based file ordering.
-// All sort sites (splitByScope, groupByFile, groupDedupedByFile) use this
-// contract: critical count desc → warning count desc → filename asc.
+// htmlFileGroupLess defines the canonical sort contract for file ordering:
+// critical count desc → warning count desc → filename asc.
+// Used directly by splitByScope; sortRawFileGroups and sortDedupedFileGroups
+// implement the same contract independently via severityKey.
 func htmlFileGroupLess(a, b htmlFileGroup) bool {
 	if a.CriticalCount != b.CriticalCount {
 		return a.CriticalCount > b.CriticalCount
@@ -1007,6 +1008,9 @@ type severityKey struct {
 }
 
 func sortRawFileGroups(groups []fileGroup) {
+	if len(groups) <= 1 {
+		return
+	}
 	keys := make([]severityKey, len(groups))
 	for i := range groups {
 		for j := range groups[i].findings {
@@ -1030,6 +1034,9 @@ func sortRawFileGroups(groups []fileGroup) {
 }
 
 func sortDedupedFileGroups(groups []dedupedFileGroup) {
+	if len(groups) <= 1 {
+		return
+	}
 	keys := make([]severityKey, len(groups))
 	for i := range groups {
 		for j := range groups[i].findings {
