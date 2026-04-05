@@ -427,16 +427,20 @@ func TestBestSimilarity_SelectsHighestNotFirst(t *testing.T) {
 	}
 }
 
-func TestBestSimilarity_EmptyTokensReturnsZero(t *testing.T) {
-	// If voterTokens is empty, bestSimilarity returns 0.0 — no match possible.
-	// This makes initialization bugs visible rather than silently falling back.
+func TestBestSimilarity_ZeroValueWorks(t *testing.T) {
+	// A DedupedFinding constructed without voterTokens should still work —
+	// bestSimilarity derives tokens from the embedded Finding's Summary.
 	group := &DedupedFinding{
 		Finding: Finding{Summary: "bug in procedure"},
 	}
 	candidateTokens := tokenize("bug in method")
 	best := bestSimilarity(group, candidateTokens)
-	if best != 0.0 {
-		t.Errorf("expected 0.0 for empty voterTokens, got %.3f", best)
+	expected := jaccardFromTokens(tokenize("bug in procedure"), candidateTokens)
+	if best != expected {
+		t.Errorf("zero-value group should match via Summary, got %.3f want %.3f", best, expected)
+	}
+	if best == 0.0 {
+		t.Error("zero-value group should produce non-zero similarity for related summaries")
 	}
 }
 

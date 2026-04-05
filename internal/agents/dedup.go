@@ -121,7 +121,7 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 
 // bestSimilarity returns the highest Jaccard similarity between the
 // candidate's pre-tokenized summary and any cached token set in the group.
-// If voterTokens is empty (zero-value struct), derives tokens from
+// If voterTokens is empty (zero-value struct), it derives tokens from
 // the embedded Finding's Summary so the zero value works without
 // initialization ceremony.
 func bestSimilarity(group *DedupedFinding, candidateTokens map[string]bool) float64 {
