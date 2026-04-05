@@ -215,13 +215,14 @@ func readSkillFile(path, exeDir string) ([]byte, error) {
 }
 
 // Review runs all agents in parallel and synthesizes their feedback.
+// The caller must compress pr.Diff before calling Review (see diff.Compress).
+// The orchestrator does not perform compression itself.
 func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 	if o.opts.DryRun {
 		return o.dryRun(pr)
 	}
 
 	// Phase 1: Dispatch all agents in parallel.
-	// The caller is responsible for compressing the diff before passing it in.
 	feedbacks, failedAgents, agentUsage, err := o.dispatchAgents(pr)
 	if err != nil {
 		return nil, err
@@ -631,7 +632,7 @@ func parseFeedback(role, response string) (*Feedback, error) {
 	// Each returns a parsed rawFeedback or nil if it can't extract one.
 	raw, ok := tryParseStrategies(response)
 	if !ok {
-		return nil, fmt.Errorf("could not extract JSON from response\nRaw: %s", truncateUTF8(response, 200))
+		return nil, fmt.Errorf("could not extract JSON from response\nRaw: %s", sanitizeForLog(truncateUTF8(response, 200)))
 	}
 
 	// Normalize and filter findings.
@@ -699,20 +700,30 @@ func parseCodeBlock(response string) (*rawFeedback, bool) {
 }
 
 // parseJSONMarker finds a {"findings" substring and extracts the JSON object.
+// Tries progressively shorter substrings from the end to handle trailing
+// text with extra braces that would cause over-capture.
 func parseJSONMarker(response string) (*rawFeedback, bool) {
 	start := strings.Index(response, `{"findings"`)
 	if start == -1 {
 		return nil, false
 	}
-	end := strings.LastIndex(response, "}")
-	if end <= start {
-		return nil, false
-	}
-	var raw rawFeedback
-	if err := json.Unmarshal([]byte(response[start:end+1]), &raw); err == nil {
-		return &raw, true
+	for end := len(response) - 1; end > start; end-- {
+		if response[end] != '}' {
+			continue
+		}
+		var raw rawFeedback
+		if err := json.Unmarshal([]byte(response[start:end+1]), &raw); err == nil {
+			return &raw, true
+		}
 	}
 	return nil, false
+}
+
+// sanitizeForLog strips HTML tags from a string to prevent XSS if the
+// error message is rendered in an HTML report or GitHub comment.
+func sanitizeForLog(s string) string {
+	r := strings.NewReplacer("<", "&lt;", ">", "&gt;")
+	return r.Replace(s)
 }
 
 // truncateUTF8 truncates s to at most maxBytes without splitting a UTF-8 character.
