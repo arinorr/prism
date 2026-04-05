@@ -734,10 +734,10 @@ func TestJSON_HealthScore(t *testing.T) {
 
 func TestHTML_GaugeNeedleRotation(t *testing.T) {
 	tests := []struct {
-		name     string
-		score    int
-		wantMin  int // minimum rotation (inclusive)
-		wantMax  int // maximum rotation (inclusive)
+		name    string
+		score   int
+		wantMin int // minimum rotation (inclusive)
+		wantMax int // maximum rotation (inclusive)
 	}{
 		{"score 10 points left", 10, -72, -72},
 		{"score 50 points up", 50, 0, 0},
