@@ -262,6 +262,31 @@ func TestDeduplicate_HybridTier2_SameFileCategoryDistantLines(t *testing.T) {
 	}
 }
 
+func TestDeduplicate_HybridTier2_RejectsBelowThreshold(t *testing.T) {
+	// Same file, same category, distance 25 (past tier 1's 20-line limit).
+	// Similarity is between tier 1 (0.065) and tier 2 (0.15) thresholds.
+	// Should NOT merge — too low for tier 2, too far for tier 1.
+	s1 := "duplicate logic in counting function"
+	s2 := "redundant logic in formatting utility"
+
+	sim := jaccardSimilarity(s1, s2)
+	if sim >= jaccardThresholdSameCategory {
+		t.Skipf("test data similarity %.3f is above tier 2 threshold, need different test data", sim)
+	}
+	if sim < jaccardThresholdNearby {
+		t.Skipf("test data similarity %.3f is below tier 1 threshold, need different test data", sim)
+	}
+
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: "info", Category: "design", Summary: s1, Role: "a"},
+		{File: "a.go", Line: 35, Risk: "info", Category: "design", Summary: s2, Role: "b"},
+	}
+	result := Deduplicate(findings, 5)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 findings (similarity between tier 1 and tier 2 thresholds, distance > 20), got %d", len(result))
+	}
+}
+
 func TestDeduplicate_HybridTier3_SameFileCloseLinesDifferentCategory(t *testing.T) {
 	// Same file, close lines, but different categories.
 	// Falls back to standard Jaccard threshold of 0.4.
@@ -392,10 +417,14 @@ func TestBestSimilarity_SelectsHighestNotFirst(t *testing.T) {
 	}
 	candidate := "bug in method"
 	best := bestSimilarity(group, candidate)
-	// "bug in procedure" should be the best match.
+	// "bug in procedure" should be the best match, not "error in code" (first).
 	expected := jaccardSimilarity("bug in procedure", candidate)
+	firstMatch := jaccardSimilarity(summaries[0], candidate)
 	if best != expected {
 		t.Errorf("bestSimilarity should return %.3f (best match), got %.3f", expected, best)
+	}
+	if best <= firstMatch {
+		t.Errorf("best match (%.3f) should be better than first summary match (%.3f)", best, firstMatch)
 	}
 }
 
