@@ -216,11 +216,21 @@ func TestDeduplicate_HybridTier1_SameFileCategoryNearbyLines(t *testing.T) {
 	// Same file, same category, lines within wideLineThreshold (20).
 	// Summaries use different wording but prefix stemming creates enough
 	// overlap to exceed tier 1's 0.05 threshold.
+	s1 := "Code duplication: countRawSeverity and countDedupedSeverity are identical implementations"
+	s2 := "Duplicated severity counting and sorting logic across three functions"
+
+	// Verify the similarity is in the expected tier 1 range.
+	sim := jaccardSimilarity(s1, s2)
+	if sim < jaccardThresholdNearby {
+		t.Fatalf("expected similarity >= %.2f (tier 1 threshold), got %.3f", jaccardThresholdNearby, sim)
+	}
+	if sim >= jaccardThreshold {
+		t.Fatalf("expected similarity < %.2f (would match any tier), got %.3f", jaccardThreshold, sim)
+	}
+
 	findings := []Finding{
-		{File: "report.go", Line: 961, Risk: "warning", Category: "design",
-			Summary: "Code duplication: countRawSeverity and countDedupedSeverity are identical implementations", Role: "architect"},
-		{File: "report.go", Line: 967, Risk: "warning", Category: "design",
-			Summary: "Duplicated severity counting and sorting logic across three functions", Role: "editor"},
+		{File: "report.go", Line: 961, Risk: "warning", Category: "design", Summary: s1, Role: "architect"},
+		{File: "report.go", Line: 967, Risk: "warning", Category: "design", Summary: s2, Role: "editor"},
 	}
 	result := Deduplicate(findings, 7)
 	if len(result) != 1 {
@@ -234,11 +244,17 @@ func TestDeduplicate_HybridTier1_SameFileCategoryNearbyLines(t *testing.T) {
 func TestDeduplicate_HybridTier2_SameFileCategoryDistantLines(t *testing.T) {
 	// Same file, same category, lines beyond wideLineThreshold (20) but
 	// within sameCategoryLineLimit (100). Tier 2 threshold of 0.15 applies.
+	s1 := "Duplicated severity counting logic across functions"
+	s2 := "Duplicate counting and sorting logic across three locations"
+
+	sim := jaccardSimilarity(s1, s2)
+	if sim < jaccardThresholdSameCategory {
+		t.Fatalf("expected similarity >= %.2f (tier 2 threshold), got %.3f", jaccardThresholdSameCategory, sim)
+	}
+
 	findings := []Finding{
-		{File: "report.go", Line: 10, Risk: "info", Category: "design",
-			Summary: "Duplicated severity counting logic across functions", Role: "architect"},
-		{File: "report.go", Line: 80, Risk: "info", Category: "design",
-			Summary: "Duplicate counting and sorting logic across three locations", Role: "solver"},
+		{File: "report.go", Line: 10, Risk: "info", Category: "design", Summary: s1, Role: "architect"},
+		{File: "report.go", Line: 80, Risk: "info", Category: "design", Summary: s2, Role: "solver"},
 	}
 	result := Deduplicate(findings, 5)
 	if len(result) != 1 {
@@ -249,14 +265,19 @@ func TestDeduplicate_HybridTier2_SameFileCategoryDistantLines(t *testing.T) {
 func TestDeduplicate_HybridTier3_SameFileCloseLinesDifferentCategory(t *testing.T) {
 	// Same file, close lines, but different categories.
 	// Falls back to standard Jaccard threshold of 0.4.
+	s1 := "missing timeout on scan operation"
+	s2 := "no timeout on scan operation"
+
+	sim := jaccardSimilarity(s1, s2)
+	if sim < jaccardThreshold {
+		t.Fatalf("expected similarity >= %.2f (tier 3 threshold), got %.3f", jaccardThreshold, sim)
+	}
+
 	findings := []Finding{
-		{File: "a.go", Line: 10, Risk: "warning", Category: "bug",
-			Summary: "missing timeout on scan operation", Role: "solver"},
-		{File: "a.go", Line: 12, Risk: "critical", Category: "security",
-			Summary: "no timeout on scan operation", Role: "sentinel"},
+		{File: "a.go", Line: 10, Risk: "warning", Category: "bug", Summary: s1, Role: "solver"},
+		{File: "a.go", Line: 12, Risk: "critical", Category: "security", Summary: s2, Role: "sentinel"},
 	}
 	result := Deduplicate(findings, 5)
-	// Jaccard is ~0.6 (above 0.4), so they merge even with different categories.
 	if len(result) != 1 {
 		t.Fatalf("expected 1 deduped finding (tier 3: close lines, high text similarity), got %d", len(result))
 	}
@@ -365,10 +386,10 @@ func TestBestSimilarity_SelectsHighestNotFirst(t *testing.T) {
 	}
 	candidate := "bug in method"
 	best := bestSimilarity(group, candidate)
-	// "bug in procedure" should match better than "error in code".
-	worstMatch := jaccardSimilarity("error in code", candidate)
-	if best <= worstMatch {
-		t.Errorf("bestSimilarity should select highest match, got %.3f (worst was %.3f)", best, worstMatch)
+	// "bug in procedure" should be the best match.
+	expected := jaccardSimilarity("bug in procedure", candidate)
+	if best != expected {
+		t.Errorf("bestSimilarity should return %.3f (best match), got %.3f", expected, best)
 	}
 }
 
@@ -384,5 +405,60 @@ func TestDeduplicate_HybridTier2_RejectsDistantFindings(t *testing.T) {
 	result := Deduplicate(findings, 5)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 findings (tier 2 rejects distance > 100), got %d", len(result))
+	}
+}
+
+func TestDeduplicate_HybridTier2_BoundaryAtLimit(t *testing.T) {
+	// Lines exactly at sameCategoryLineLimit (100) should still merge via tier 2.
+	// Lines at 101 should NOT merge (falls to tier 3 which needs higher similarity).
+	findings100 := []Finding{
+		{File: "a.go", Line: 10, Risk: "info", Category: "design",
+			Summary: "duplicated counting logic across functions", Role: "a"},
+		{File: "a.go", Line: 110, Risk: "info", Category: "design",
+			Summary: "duplicate counting and sorting logic", Role: "b"},
+	}
+	result100 := Deduplicate(findings100, 5)
+	if len(result100) != 1 {
+		t.Errorf("expected 1 finding at distance=100 (tier 2 boundary), got %d", len(result100))
+	}
+
+	findings101 := []Finding{
+		{File: "a.go", Line: 10, Risk: "info", Category: "design",
+			Summary: "duplicated counting logic across functions", Role: "a"},
+		{File: "a.go", Line: 111, Risk: "info", Category: "design",
+			Summary: "duplicate counting and sorting logic", Role: "b"},
+	}
+	result101 := Deduplicate(findings101, 5)
+	if len(result101) != 2 {
+		t.Errorf("expected 2 findings at distance=101 (beyond tier 2), got %d", len(result101))
+	}
+}
+
+func TestDeduplicate_HybridOrderIndependence(t *testing.T) {
+	// The same findings in different order should produce the same group count.
+	// This validates that bestSimilarity's multi-summary matching prevents
+	// greedy-ordering effects.
+	base := []Finding{
+		{File: "report.go", Line: 961, Risk: "warning", Category: "design",
+			Summary: "Code duplication: countRawSeverity and countDedupedSeverity are identical implementations", Role: "architect"},
+		{File: "report.go", Line: 967, Risk: "warning", Category: "design",
+			Summary: "Duplicate severity-counting logic across two nearly identical functions", Role: "editor"},
+		{File: "report.go", Line: 960, Risk: "info", Category: "design",
+			Summary: "Duplicated severity counting and sorting logic across three functions", Role: "know-it-all"},
+		{File: "report.go", Line: 962, Risk: "info", Category: "design",
+			Summary: "Duplicate severity counting logic violates DRY principle", Role: "solver"},
+		{File: "report.go", Line: 973, Risk: "info", Category: "design",
+			Summary: "Duplicated severity-counting and sorting logic across three locations", Role: "optimizer"},
+	}
+	forwardCount := len(Deduplicate(base, 7))
+
+	reversed := make([]Finding, len(base))
+	for i, f := range base {
+		reversed[len(base)-1-i] = f
+	}
+	reversedCount := len(Deduplicate(reversed, 7))
+
+	if forwardCount != reversedCount {
+		t.Errorf("order sensitivity: forward=%d groups, reversed=%d groups", forwardCount, reversedCount)
 	}
 }

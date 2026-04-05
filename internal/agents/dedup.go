@@ -124,8 +124,8 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 // If voterSummaries is empty (zero-value struct), derives tokens from
 // the embedded Finding's Summary so the zero value works.
 func bestSimilarity(group *DedupedFinding, candidateSummary string) float64 {
-	// voterSummaries already contains group.Summary as its first element,
-	// so we only need to iterate voterSummaries.
+	// voterSummaries contains all summaries merged into the group,
+	// including the representative summary, so iterating it covers all matches.
 	var best float64
 	for _, s := range group.voterSummaries {
 		if sim := jaccardSimilarity(s, candidateSummary); sim > best {
@@ -156,9 +156,7 @@ func matchesGroup(group *DedupedFinding, f *Finding) bool {
 	lineDist := abs(group.Line - f.Line)
 	sameCategory := group.Category != "" && group.Category == f.Category
 
-	// Compare against the best-matching summary in the group. This
-	// prevents greedy ordering from causing misses when the first
-	// finding uses very different wording from a later one.
+	// Best match across all group summaries to handle wording variations.
 	similarity := bestSimilarity(group, f.Summary)
 
 	// Tier 1: strong structural match — same file, same category, nearby lines.
