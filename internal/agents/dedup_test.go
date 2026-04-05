@@ -380,9 +380,15 @@ func TestDeduplicate_HybridEmptyCategoryNoTier1(t *testing.T) {
 }
 
 func TestBestSimilarity_SelectsHighestNotFirst(t *testing.T) {
+	summaries := []string{"error in code", "defect in implementation", "bug in procedure"}
+	tokens := make([]map[string]bool, len(summaries))
+	for i, s := range summaries {
+		tokens[i] = tokenize(s)
+	}
 	group := &DedupedFinding{
 		Finding:        Finding{Summary: "error in code"},
-		voterSummaries: []string{"error in code", "defect in implementation", "bug in procedure"},
+		voterSummaries: summaries,
+		voterTokens:    tokens,
 	}
 	candidate := "bug in method"
 	best := bestSimilarity(group, candidate)
@@ -390,6 +396,20 @@ func TestBestSimilarity_SelectsHighestNotFirst(t *testing.T) {
 	expected := jaccardSimilarity("bug in procedure", candidate)
 	if best != expected {
 		t.Errorf("bestSimilarity should return %.3f (best match), got %.3f", expected, best)
+	}
+}
+
+func TestBestSimilarity_FallbackWhenTokensEmpty(t *testing.T) {
+	// If voterTokens is empty (defensive case), bestSimilarity should
+	// fall back to comparing against group.Summary.
+	group := &DedupedFinding{
+		Finding: Finding{Summary: "bug in procedure"},
+	}
+	candidate := "bug in method"
+	best := bestSimilarity(group, candidate)
+	expected := jaccardSimilarity("bug in procedure", candidate)
+	if best != expected {
+		t.Errorf("fallback should compare group.Summary, got %.3f want %.3f", best, expected)
 	}
 }
 
