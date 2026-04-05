@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -208,9 +209,12 @@ func TestHTML_DashboardRendered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Dashboard should show risk breakdown.
-	if !strings.Contains(out, "Risk Breakdown") {
-		t.Error("HTML should contain Risk Breakdown card")
+	// Dashboard should show verdict and risk badges.
+	if !strings.Contains(out, "dash-verdict") {
+		t.Error("HTML should contain verdict in dashboard")
+	}
+	if !strings.Contains(out, "dash-risks") {
+		t.Error("HTML should contain risk badges in dashboard")
 	}
 }
 
@@ -725,5 +729,88 @@ func TestJSON_HealthScore(t *testing.T) {
 	}
 	if !strings.Contains(output, `"grade": "B"`) {
 		t.Error("JSON should contain grade value")
+	}
+}
+
+func TestHTML_GaugeNeedleRotation(t *testing.T) {
+	tests := []struct {
+		name     string
+		score    int
+		wantMin  int // minimum rotation (inclusive)
+		wantMax  int // maximum rotation (inclusive)
+	}{
+		{"score 10 points left", 10, -72, -72},
+		{"score 50 points up", 50, 0, 0},
+		{"score 100 points right", 100, 90, 90},
+		{"score 46 points left of center", 46, -8, -7},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := testData()
+			d.Result.HealthScore.Score = tt.score
+			out, err := HTML(d)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			rotation := int(float64(tt.score)*1.8) - 90
+			expected := fmt.Sprintf("rotate(%d 100 110)", rotation)
+			if !strings.Contains(out, expected) {
+				t.Errorf("expected needle rotation %q in SVG, score=%d", expected, tt.score)
+			}
+		})
+	}
+}
+
+func TestHTML_FilesOrderedBySeverity(t *testing.T) {
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}, {Path: "b.go"}, {Path: "c.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "Test.",
+			DedupedFindings: []agents.DedupedFinding{
+				{Finding: agents.Finding{File: "a.go", Line: 1, Risk: "info", Category: "style", Scope: "changed", Summary: "minor"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"editor"}, AgentDetails: []agents.AgentDetail{{Role: "editor", Detail: "d"}}},
+				{Finding: agents.Finding{File: "b.go", Line: 1, Risk: "critical", Category: "bug", Scope: "changed", Summary: "crash"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"solver"}, AgentDetails: []agents.AgentDetail{{Role: "solver", Detail: "d"}}},
+				{Finding: agents.Finding{File: "c.go", Line: 1, Risk: "warning", Category: "design", Scope: "changed", Summary: "design issue"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"architect"}, AgentDetails: []agents.AgentDetail{{Role: "architect", Detail: "d"}}},
+			},
+			HealthScore: agents.HealthScore{Score: 60, Grade: "C", Verdict: "request changes"},
+		},
+		Roles: []string{"Solver", "Architect", "Editor"},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// b.go (critical) should appear before c.go (warning) which should appear before a.go (info).
+	bPos := strings.Index(out, "b.go")
+	cPos := strings.Index(out, "c.go")
+	aPos := strings.Index(out, "a.go")
+	if bPos < 0 || cPos < 0 || aPos < 0 {
+		t.Fatal("all three files should appear in the HTML output")
+	}
+	if bPos > cPos {
+		t.Error("b.go (critical) should appear before c.go (warning)")
+	}
+	if cPos > aPos {
+		t.Error("c.go (warning) should appear before a.go (info)")
+	}
+}
+
+func TestHTML_DashboardConsolidated(t *testing.T) {
+	out, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should NOT have the old 3-card grid or Scope card.
+	if strings.Contains(out, "dashboard-grid") {
+		t.Error("should not have old dashboard-grid layout")
+	}
+	if strings.Contains(out, ">Scope<") {
+		t.Error("should not have separate Scope card")
+	}
+	// Should have consolidated card with verdict and risk badges.
+	if !strings.Contains(out, "dash-card-wide") {
+		t.Error("should have wide consolidated dashboard card")
+	}
+	if !strings.Contains(out, "dash-risks") {
+		t.Error("should have risk badges section")
 	}
 }
