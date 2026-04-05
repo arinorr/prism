@@ -955,29 +955,9 @@ func groupByFile(findings []agents.Finding) []fileGroup {
 	}
 
 	// Sort by severity: files with critical findings first, then warning, then alphabetically.
-	sort.Slice(groups, func(i, j int) bool {
-		ic, jc := countRawSeverity(groups[i].findings, severityCritical), countRawSeverity(groups[j].findings, severityCritical)
-		if ic != jc {
-			return ic > jc
-		}
-		iw, jw := countRawSeverity(groups[i].findings, severityWarning), countRawSeverity(groups[j].findings, severityWarning)
-		if iw != jw {
-			return iw > jw
-		}
-		return groups[i].file < groups[j].file
-	})
+	sortRawFileGroups(groups)
 
 	return groups
-}
-
-func countRawSeverity(findings []agents.Finding, severity string) int {
-	n := 0
-	for i := range findings {
-		if findings[i].Risk == severity {
-			n++
-		}
-	}
-	return n
 }
 
 type dedupedFileGroup struct {
@@ -1011,29 +991,77 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 	}
 
 	// Sort by severity: files with critical findings first, then warning, then alphabetically.
-	sort.Slice(groups, func(i, j int) bool {
-		ic, jc := countDedupedSeverity(groups[i].findings, severityCritical), countDedupedSeverity(groups[j].findings, severityCritical)
-		if ic != jc {
-			return ic > jc
-		}
-		iw, jw := countDedupedSeverity(groups[i].findings, severityWarning), countDedupedSeverity(groups[j].findings, severityWarning)
-		if iw != jw {
-			return iw > jw
-		}
-		return groups[i].file < groups[j].file
-	})
+	sortDedupedFileGroups(groups)
 
 	return groups
 }
 
-func countDedupedSeverity(findings []agents.DedupedFinding, severity string) int {
-	n := 0
-	for i := range findings {
-		if findings[i].Risk == severity {
-			n++
-		}
+// sortBySeverity sorts indices by precomputed severity counts, then applies
+// the ordering back to the original slice via a reorder function.
+// This avoids O(N² × F) recomputation in the sort comparator.
+type severityKey struct {
+	critical, warning int
+	file              string
+}
+
+func sortBySeverityKeys(keys []severityKey) []int {
+	indices := make([]int, len(keys))
+	for i := range indices {
+		indices[i] = i
 	}
-	return n
+	sort.Slice(indices, func(i, j int) bool {
+		a, b := keys[indices[i]], keys[indices[j]]
+		if a.critical != b.critical {
+			return a.critical > b.critical
+		}
+		if a.warning != b.warning {
+			return a.warning > b.warning
+		}
+		return a.file < b.file
+	})
+	return indices
+}
+
+func sortRawFileGroups(groups []fileGroup) {
+	keys := make([]severityKey, len(groups))
+	for i, g := range groups {
+		for _, f := range g.findings {
+			switch f.Risk {
+			case severityCritical:
+				keys[i].critical++
+			case severityWarning:
+				keys[i].warning++
+			}
+		}
+		keys[i].file = g.file
+	}
+	indices := sortBySeverityKeys(keys)
+	sorted := make([]fileGroup, len(groups))
+	for i, idx := range indices {
+		sorted[i] = groups[idx]
+	}
+	copy(groups, sorted)
+}
+
+func sortDedupedFileGroups(groups []dedupedFileGroup) {
+	keys := make([]severityKey, len(groups))
+	for i, g := range groups {
+		for _, f := range g.findings {
+			switch f.Risk {
+			case severityCritical:
+				keys[i].critical++
+			case severityWarning:
+				keys[i].warning++
+			}
+		}
+		keys[i].file = g.file
+	}
+	indices := sortBySeverityKeys(keys)
+	sorted := make([]dedupedFileGroup, len(groups))
+	for i, idx := range indices {
+		sorted[i] = groups[idx]
+	}
+	copy(groups, sorted)
 }
 
 // severityOrder delegates to the canonical implementation in the agents package.

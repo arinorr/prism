@@ -550,7 +550,7 @@ func TestGroupDedupedByFile_MultipleFiles(t *testing.T) {
 	if len(groups) != 3 {
 		t.Fatalf("expected 3 groups, got %d", len(groups))
 	}
-	// Sorted alphabetically by file.
+	// Sorted by severity: a.go (1 critical, 1 warning), b.go (1 critical), c.go (info only).
 	if groups[0].file != "a.go" || groups[1].file != "b.go" || groups[2].file != "c.go" {
 		t.Errorf("expected [a.go, b.go, c.go], got [%s, %s, %s]", groups[0].file, groups[1].file, groups[2].file)
 	}
@@ -734,15 +734,14 @@ func TestJSON_HealthScore(t *testing.T) {
 
 func TestHTML_GaugeNeedleRotation(t *testing.T) {
 	tests := []struct {
-		name    string
-		score   int
-		wantMin int // minimum rotation (inclusive)
-		wantMax int // maximum rotation (inclusive)
+		name         string
+		score        int
+		wantRotation int // expected rotation in degrees
 	}{
-		{"score 10 points left", 10, -72, -72},
-		{"score 50 points up", 50, 0, 0},
-		{"score 100 points right", 100, 90, 90},
-		{"score 46 points left of center", 46, -8, -7},
+		{"score 10 points left", 10, -72},
+		{"score 50 points up", 50, 0},
+		{"score 100 points right", 100, 90},
+		{"score 46 points left of center", 46, -8},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -752,10 +751,9 @@ func TestHTML_GaugeNeedleRotation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			rotation := int(float64(tt.score)*1.8) - 90
-			expected := fmt.Sprintf("rotate(%d 100 110)", rotation)
+			expected := fmt.Sprintf("rotate(%d 100 110)", tt.wantRotation)
 			if !strings.Contains(out, expected) {
-				t.Errorf("expected needle rotation %q in SVG, score=%d", expected, tt.score)
+				t.Errorf("expected needle rotation %q in SVG for score=%d", expected, tt.score)
 			}
 		})
 	}
