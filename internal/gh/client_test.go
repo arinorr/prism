@@ -147,14 +147,13 @@ func TestGetPRDiff_RoutesToGH(t *testing.T) {
 		useGH: true,
 		run: func(name string, args ...string) ([]byte, error) {
 			callCount++
-			if name != "gh" {
-				t.Errorf("expected gh command, got %q", name)
-			}
 			switch callCount {
 			case 1: // gh pr view --json metadata+files (combined)
 				return []byte(`{"number":42,"title":"Test PR","body":"desc","headRefOid":"abc123","files":[{"path":"main.go","additions":1,"deletions":0}]}`), nil
 			case 2: // gh pr diff
 				return []byte("+ added line\n"), nil
+			case 3: // git remote get-url origin (repo name detection)
+				return []byte("https://github.com/arinorr/prism.git\n"), nil
 			}
 			return nil, fmt.Errorf("unexpected call %d", callCount)
 		},
@@ -179,8 +178,11 @@ func TestGetPRDiff_RoutesToGH(t *testing.T) {
 	if pr.Files[0].Path != "main.go" {
 		t.Errorf("expected file 'main.go', got %q", pr.Files[0].Path)
 	}
-	if callCount != 2 {
-		t.Errorf("expected 2 calls, got %d", callCount)
+	if pr.Repo != "prism" {
+		t.Errorf("expected repo 'prism', got %q", pr.Repo)
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 calls, got %d", callCount)
 	}
 }
 

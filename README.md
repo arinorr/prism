@@ -233,7 +233,15 @@ Findings scoped to **changed lines** are weighted more heavily than those about 
 
 ## Deduplication
 
-When multiple agents report the same issue, Prism merges them into a single finding with a **vote count** showing how many agents agreed. Two findings are considered duplicates when they target the same file, are within 5 lines of each other, and have similar summaries (Jaccard similarity >= 0.4). Deduplicated findings are sorted by vote count, then severity.
+When multiple agents report the same issue, Prism merges them into a single finding with a **vote count** showing how many agents agreed. Deduplication uses **hybrid scoring** — structural signals (same file, same category, line proximity) lower the text similarity threshold, so semantically identical findings merge even when agents use different wording.
+
+| Structural match | Text similarity needed |
+|-----------------|----------------------|
+| Same file + same category + within 20 lines | Very low (0.065) |
+| Same file + same category + within 100 lines | Low (0.15) |
+| Same file + within 5 lines | Standard (0.40) |
+
+Text similarity also uses **prefix stemming** so word variants like "duplicate" and "duplication" are recognized as matching. Deduplicated findings are sorted by vote count, then severity.
 
 <p align="right"><a href="#prism">back to top</a></p>
 

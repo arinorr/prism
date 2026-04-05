@@ -7,12 +7,33 @@ import (
 
 const (
 	// lineThreshold is the maximum line distance for two findings to be
-	// considered duplicates of the same issue.
+	// considered duplicates using the standard text similarity threshold.
 	lineThreshold = 5
 
-	// jaccardThreshold is the minimum Jaccard similarity between two
-	// finding summaries for them to be considered duplicates.
+	// wideLineThreshold is used when structural signals are strong (same
+	// file + same category). Findings within this range need less text
+	// similarity to be considered duplicates.
+	wideLineThreshold = 20
+
+	// jaccardThreshold is the baseline minimum Jaccard similarity for
+	// findings that don't share strong structural signals.
 	jaccardThreshold = 0.4
+
+	// sameCategoryLineLimit caps the line distance for tier 2 matching.
+	// Prevents merging genuinely distinct findings at opposite ends of
+	// large files that happen to share a category and modest word overlap.
+	sameCategoryLineLimit = 100
+
+	// jaccardThresholdSameCategory is the threshold when findings share
+	// the same file and category within sameCategoryLineLimit lines —
+	// structural agreement compensates for wording differences.
+	jaccardThresholdSameCategory = 0.15
+
+	// jaccardThresholdNearby is the threshold when findings share the
+	// same file, same category, AND are within wideLineThreshold lines.
+	// Very lenient, but still requires minimal text overlap to avoid
+	// merging genuinely distinct findings at nearby lines.
+	jaccardThresholdNearby = 0.065
 )
 
 // AgentDetail captures one agent's individual perspective on a finding.
@@ -25,15 +46,17 @@ type AgentDetail struct {
 // DedupedFinding wraps a Finding with vote metadata from deduplication.
 type DedupedFinding struct {
 	Finding
-	VoteCount    int           `json:"vote_count"`
-	TotalAgents  int           `json:"total_agents"`
-	Voters       []string      `json:"voters"`
-	AgentDetails []AgentDetail `json:"agent_details"`
+	VoteCount    int               `json:"vote_count"`
+	TotalAgents  int               `json:"total_agents"`
+	Voters       []string          `json:"voters"`
+	AgentDetails []AgentDetail     `json:"agent_details"`
+	voterTokens  []map[string]bool // cached tokenized summaries to avoid re-tokenization
 }
 
-// Deduplicate merges findings that refer to the same issue.
-// Two findings match if they have the same file, lines within lineThreshold,
-// and Jaccard similarity of summaries above jaccardThreshold.
+// Deduplicate merges findings that refer to the same issue using hybrid
+// scoring: structural signals (same file, same category, line proximity)
+// lower the text similarity threshold. This catches semantically identical
+// findings even when agents use different wording.
 // Results are sorted by vote count (desc), severity, file, then line.
 func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 	if len(findings) == 0 {
@@ -59,12 +82,14 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 				TotalAgents:  totalAgents,
 				Voters:       []string{f.Role},
 				AgentDetails: []AgentDetail{ad},
+				voterTokens:  []map[string]bool{tokenize(f.Summary)},
 			})
 			continue
 		}
 		groups[idx].VoteCount++
 		groups[idx].Voters = append(groups[idx].Voters, f.Role)
 		groups[idx].AgentDetails = append(groups[idx].AgentDetails, ad)
+		groups[idx].voterTokens = append(groups[idx].voterTokens, tokenize(f.Summary))
 		if len(f.Detail) > len(groups[idx].Detail) {
 			groups[idx].Detail = f.Detail
 		}
@@ -94,14 +119,85 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 	return groups
 }
 
+// bestSimilarity returns the highest Jaccard similarity between the
+// candidate's pre-tokenized summary and any cached token set in the group.
+// If voterTokens is empty (zero-value struct), it derives tokens from
+// the embedded Finding's Summary so the zero value works without
+// initialization ceremony.
+func bestSimilarity(group *DedupedFinding, candidateTokens map[string]bool) float64 {
+	tokens := group.voterTokens
+	if len(tokens) == 0 {
+		tokens = []map[string]bool{tokenize(group.Summary)}
+	}
+	var best float64
+	for _, gt := range tokens {
+		if sim := jaccardFromTokens(gt, candidateTokens); sim > best {
+			best = sim
+		}
+	}
+	return best
+}
+
+// jaccardFromTokens computes Jaccard similarity from pre-tokenized sets
+// without allocating a union map: |union| = |a| + |b| - |intersection|.
+func jaccardFromTokens(a, b map[string]bool) float64 {
+	if len(a) == 0 && len(b) == 0 {
+		return 1.0
+	}
+	var intersection int
+	for t := range a {
+		if b[t] {
+			intersection++
+		}
+	}
+	union := len(a) + len(b) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
+}
+
+// matchesGroup uses hybrid scoring: structural signals (same file, same
+// category, line proximity) lower the text similarity threshold needed to
+// consider two findings as duplicates. This catches semantically identical
+// findings that use different wording.
+//
+// Tiers:
+//  1. Same file + same category + within 20 lines  → threshold 0.065
+//  2. Same file + same category + within 100 lines → threshold 0.15
+//  3. Same file + within 5 lines                   → threshold 0.40
+//  4. Otherwise                                    → no match
+//
+// Empty categories do not qualify for tiers 1/2 to avoid false merges
+// when agents omit the category field.
 func matchesGroup(group *DedupedFinding, f *Finding) bool {
 	if group.File != f.File {
 		return false
 	}
-	if abs(group.Line-f.Line) > lineThreshold {
-		return false
+
+	lineDist := abs(group.Line - f.Line)
+	sameCategory := group.Category != "" && group.Category == f.Category
+
+	// Tokenize candidate once, then compare against cached group tokens.
+	candidateTokens := tokenize(f.Summary)
+	similarity := bestSimilarity(group, candidateTokens)
+
+	// Tier 1: strong structural match — same file, same category, nearby lines.
+	if sameCategory && lineDist <= wideLineThreshold {
+		return similarity >= jaccardThresholdNearby
 	}
-	return jaccardSimilarity(group.Summary, f.Summary) >= jaccardThreshold
+
+	// Tier 2: same file and category, within sameCategoryLineLimit.
+	if sameCategory && lineDist <= sameCategoryLineLimit {
+		return similarity >= jaccardThresholdSameCategory
+	}
+
+	// Tier 3: same file, close lines, but different categories.
+	if lineDist <= lineThreshold {
+		return similarity >= jaccardThreshold
+	}
+
+	return false
 }
 
 func abs(x int) int {
@@ -147,8 +243,16 @@ func tokenize(s string) map[string]bool {
 	for _, word := range strings.Fields(strings.ToLower(s)) {
 		// Strip common punctuation.
 		word = strings.Trim(word, ".,;:!?\"'`()[]{}—-")
-		if word != "" {
-			tokens[word] = true
+		if word == "" {
+			continue
+		}
+		tokens[word] = true
+		// Add a prefix stem (first 6 chars) so "duplicate" and
+		// "duplication" share a token. This is a lightweight alternative
+		// to full stemming that helps with the most common suffix
+		// variations without external dependencies.
+		if len(word) > 6 {
+			tokens[word[:6]] = true
 		}
 	}
 	return tokens
