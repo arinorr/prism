@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arinorr/prism/internal/diff"
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/llm"
 )
@@ -119,8 +118,7 @@ type Options struct {
 	Model        string
 	AgentTimeout time.Duration
 	MaxRetries   int
-	MaxBudgetUSD float64              // per-agent budget cap in USD (0 = no limit)
-	DiffCompress diff.CompressOptions // diff compression settings
+	MaxBudgetUSD float64 // per-agent budget cap in USD (0 = no limit)
 	// Out receives progress messages (agent status, timing). Defaults to os.Stdout.
 	Out io.Writer
 	// ErrOut receives error/warning messages. Defaults to os.Stderr.
@@ -220,19 +218,9 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 		return o.dryRun(pr)
 	}
 
-	// Compress diff to reduce token consumption.
-	compressed, compSummary := diff.Compress(pr.Diff, o.opts.DiffCompress)
-	if o.opts.Verbose && compSummary.OriginalBytes > 0 {
-		savings := 100 - (compSummary.CompressedBytes*100)/compSummary.OriginalBytes
-		o.logf("   📦 Diff compressed: %dKB → %dKB (-%d%%, %d files stripped)\n",
-			compSummary.OriginalBytes/1024, compSummary.CompressedBytes/1024,
-			savings, len(compSummary.FilesRemoved))
-	}
-	compressedPR := *pr
-	compressedPR.Diff = compressed
-
 	// Phase 1: Dispatch all agents in parallel.
-	feedbacks, failedAgents, agentUsage, err := o.dispatchAgents(&compressedPR)
+	// The caller is responsible for compressing the diff before passing it in.
+	feedbacks, failedAgents, agentUsage, err := o.dispatchAgents(pr)
 	if err != nil {
 		return nil, err
 	}
