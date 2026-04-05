@@ -10,12 +10,21 @@
 - Token budget per mode: quick ~100K, standard ~300K, deep ~500K+
 - Time estimates: quick ~1-2min, standard ~3-5min, deep ~5-10min
 
-### Codebase Expert role
-- A new agent that reads the wider codebase (not just the diff) to understand the project structure, patterns, conventions, and architecture
-- Provides feedback based on: does this change fit how the rest of the codebase works? Are there existing utilities being reinvented? Does it follow the project's conventions?
-- Distinct from the Architect (who thinks about abstract design) — the Codebase Expert has *read the actual code* and knows the specifics
+### Verification Agent (replaces Codebase Expert + Fact Checker)
+- A post-review agent that reads the actual codebase to **validate findings** from the 7 specialist agents
+- Runs after initial review + dedup, before final scoring
+- For each finding, checks whether the claim holds against the actual code:
+  - "Finding says X is unsanitized" → check if the rendering layer already handles it
+  - "Finding says add validation" → check if validation already exists upstream
+  - "Finding says this could XSS" → trace the data flow to the actual rendering context
+- **Must output specific evidence** (file path, line number, actual code) so humans can spot-check the verification, not just the conclusion. If the agent can't produce evidence, the finding stands.
+- Collapses two previously separate roles (see docs/agent-blind-spots.md for why):
+  - Codebase Expert: reads the wider codebase for context
+  - Fact Checker: verifies claims against actual code
+  - These are the same operation — you can't verify claims without reading the code
 - Requires Standard or Deep mode (needs file read access beyond the diff)
 - Could pre-index the repo structure and key files to stay within token budget
+- Future: support data flow annotations (SECURITY.md or inline comments) for structural verification
 
 ### Token usage reporting
 - Show estimated token usage before running (`--estimate` flag)
@@ -57,11 +66,6 @@
 - Retry failed agents once before giving up
 - Graceful degradation: if 1-2 agents fail, still produce a review
 - Timeout handling for hung agents
-
-### Agent weighting and deduplication
-- When multiple agents flag the same issue, merge and show vote count
-- Let users weight roles (e.g. prioritize Sentinel for security-sensitive repos)
-- Confidence scoring based on agent agreement
 
 ### Code quality improvements (Thorsten Ball style)
 
