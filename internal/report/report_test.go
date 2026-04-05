@@ -760,10 +760,10 @@ func TestHTML_GaugeNeedleRotation(t *testing.T) {
 		score        int
 		wantRotation int // expected rotation in degrees
 	}{
-		{"score 10 points left", 10, -72},          // int(18) - 90 = -72
-		{"score 50 points up", 50, 0},              // int(90) - 90 = 0
-		{"score 100 points right", 100, 90},        // int(180) - 90 = 90
-		{"score 46 points left of center", 46, -8}, // int(82.8) - 90 = -8
+		{"score 10 points left", 10, -72},
+		{"score 50 points up", 50, 0},
+		{"score 100 points right", 100, 90},
+		{"score 46 points left of center", 46, -8},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
