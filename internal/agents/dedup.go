@@ -18,6 +18,7 @@ const (
 // AgentDetail captures one agent's individual perspective on a finding.
 type AgentDetail struct {
 	Role        string `json:"role"`
+	Risk        string `json:"risk"` // this agent's individual severity opinion
 	Detail      string `json:"detail"`
 	CodeExample string `json:"code_example,omitempty"`
 }
@@ -25,10 +26,12 @@ type AgentDetail struct {
 // DedupedFinding wraps a Finding with vote metadata from deduplication.
 type DedupedFinding struct {
 	Finding
-	VoteCount    int           `json:"vote_count"`
-	TotalAgents  int           `json:"total_agents"`
-	Voters       []string      `json:"voters"`
-	AgentDetails []AgentDetail `json:"agent_details"`
+	VoteCount         int           `json:"vote_count"`
+	TotalAgents       int           `json:"total_agents"`
+	Voters            []string      `json:"voters"`
+	AgentDetails      []AgentDetail `json:"agent_details"`
+	Confidence        float64       `json:"confidence"`         // VoteCount/TotalAgents (0.0-1.0)
+	CompositeSeverity float64       `json:"composite_severity"` // weighted average (1.0-3.0)
 }
 
 // Deduplicate merges findings that refer to the same issue.
@@ -51,7 +54,7 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 				break
 			}
 		}
-		ad := AgentDetail{Role: f.Role, Detail: f.Detail, CodeExample: f.CodeExample}
+		ad := AgentDetail{Role: f.Role, Risk: f.Risk, Detail: f.Detail, CodeExample: f.CodeExample}
 		if idx < 0 {
 			groups = append(groups, DedupedFinding{
 				Finding:      *f,
@@ -71,9 +74,15 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 		if len(f.CodeExample) > len(groups[idx].CodeExample) {
 			groups[idx].CodeExample = f.CodeExample
 		}
-		if SeverityOrder(f.Risk) < SeverityOrder(groups[idx].Risk) {
-			groups[idx].Risk = f.Risk
-		}
+		// Severity is no longer "highest wins" — computed below as composite.
+	}
+
+	// Compute Confidence and CompositeSeverity for each group.
+	for i := range groups {
+		g := &groups[i]
+		g.Confidence = float64(g.VoteCount) / float64(g.TotalAgents)
+		g.CompositeSeverity = computeCompositeSeverity(g.AgentDetails, g.Category)
+		g.Risk = compositeSeverityToLabel(g.CompositeSeverity)
 	}
 
 	// Sort: vote count desc, severity asc, file asc, line asc.
@@ -111,6 +120,79 @@ func SeverityOrder(s string) int {
 	default:
 		return 2
 	}
+}
+
+// Composite severity constants.
+const (
+	criticalGravityMultiplier  = 2.0 // critical votes are harder to override
+	domainAuthorityMultiplier  = 1.5 // domain experts carry more weight
+	compositeCriticalThreshold = 2.5
+	compositeWarningThreshold  = 1.7
+)
+
+// SeverityNumeric converts a severity label to a numeric value.
+func SeverityNumeric(s string) float64 {
+	switch s {
+	case SeverityCritical:
+		return 3.0
+	case SeverityWarning:
+		return 2.0
+	default:
+		return 1.0
+	}
+}
+
+// computeCompositeSeverity calculates a weighted average severity from all
+// agent votes. Critical votes get extra weight (gravity), and domain-authority
+// votes carry more weight when the finding category matches their specialty.
+func computeCompositeSeverity(details []AgentDetail, findingCategory string) float64 {
+	if len(details) == 0 {
+		return 1.0
+	}
+	var weightedSum, totalWeight float64
+	for _, d := range details {
+		w := 1.0
+		if d.Risk == SeverityCritical {
+			w *= criticalGravityMultiplier
+		}
+		if IsDomainAuthority(d.Role, findingCategory) {
+			w *= domainAuthorityMultiplier
+		}
+		weightedSum += SeverityNumeric(d.Risk) * w
+		totalWeight += w
+	}
+	return weightedSum / totalWeight
+}
+
+// compositeSeverityToLabel maps a numeric composite back to a severity label.
+func compositeSeverityToLabel(cs float64) string {
+	switch {
+	case cs >= compositeCriticalThreshold:
+		return SeverityCritical
+	case cs >= compositeWarningThreshold:
+		return SeverityWarning
+	default:
+		return SeverityInfo
+	}
+}
+
+// DisagreementSpread returns the numeric spread between the highest and lowest
+// severity opinions on a deduped finding. A spread of 2 means critical vs info.
+func DisagreementSpread(details []AgentDetail) int {
+	if len(details) < 2 {
+		return 0
+	}
+	minSev, maxSev := 3, 1
+	for _, d := range details {
+		n := int(SeverityNumeric(d.Risk))
+		if n < minSev {
+			minSev = n
+		}
+		if n > maxSev {
+			maxSev = n
+		}
+	}
+	return maxSev - minSev
 }
 
 func matchesGroup(group *DedupedFinding, f *Finding) bool {

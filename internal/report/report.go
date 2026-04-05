@@ -77,7 +77,11 @@ func Markdown(d *Data) string {
 					if f.Line > 0 {
 						line = fmt.Sprintf("%d", f.Line)
 					}
-					votes := fmt.Sprintf("%d/%d", f.VoteCount, f.TotalAgents)
+					confidence := 0
+					if f.TotalAgents > 0 {
+						confidence = int(f.Confidence * 100)
+					}
+					votes := fmt.Sprintf("%d/%d (%d%%)", f.VoteCount, f.TotalAgents, confidence)
 					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
 						line, severityBadge(f.Risk), f.Category, votes, f.Summary)
 				}
@@ -276,11 +280,13 @@ type htmlFinding struct {
 	FindingIndex      int
 	VoteCount         int
 	TotalAgents       int
+	Confidence        int // percentage 0-100
 }
 
 type htmlAgentDetail struct {
 	Role           string
 	RoleClass      string
+	Risk           string
 	Detail         string
 	CodeExample    string
 	HasCodeExample bool
@@ -462,10 +468,16 @@ func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
 			agentDetails = append(agentDetails, htmlAgentDetail{
 				Role:           ad.Role,
 				RoleClass:      agentColorClass(ad.Role),
+				Risk:           ad.Risk,
 				Detail:         ad.Detail,
 				CodeExample:    ad.CodeExample,
 				HasCodeExample: ad.CodeExample != "",
 			})
+		}
+
+		confidence := 0
+		if f.TotalAgents > 0 {
+			confidence = int(f.Confidence * 100)
 		}
 
 		findings = append(findings, htmlFinding{
@@ -488,6 +500,7 @@ func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
 			FindingIndex:      *idx,
 			VoteCount:         f.VoteCount,
 			TotalAgents:       f.TotalAgents,
+			Confidence:        confidence,
 		})
 		*idx++
 	}
@@ -788,7 +801,7 @@ details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; 
       <span class="severity {{.RiskClass}}">{{.Risk}}</span>
       <span class="cat-badge {{.CategoryClass}}">{{.Category}}</span>
       {{- if gt .VoteCount 1}}
-      <span class="vote-count">{{.VoteCount}}/{{.TotalAgents}}</span>
+      <span class="vote-count">{{.VoteCount}}/{{.TotalAgents}} ({{.Confidence}}%)</span>
       {{- end}}
       <span class="finding-text">{{.Summary}}</span>
       {{- if .HasLine}}
@@ -805,7 +818,7 @@ details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; 
       {{- if .HasMultipleAgents}}
       {{- range .AgentDetails}}
       <details class="agent-detail">
-        <summary><span class="agent-badge {{.RoleClass}}">{{.Role}}</span> perspective</summary>
+        <summary><span class="agent-badge {{.RoleClass}}">{{.Role}}</span> <span class="agent-risk">says {{.Risk}}</span></summary>
         <div class="agent-body">
           <p>{{.Detail}}</p>
           {{- if .HasCodeExample}}

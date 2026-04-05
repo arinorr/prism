@@ -25,6 +25,7 @@ type Config struct {
 	StripPatterns    []string `yaml:"strip_patterns"`
 	DiffWarnBytes    int      `yaml:"diff_warn_bytes"`
 	DiffChunkBytes   int      `yaml:"diff_chunk_bytes"`
+	Debate           bool     `yaml:"debate"`
 }
 
 // IntPtr returns a pointer to the given int. Convenience for config construction.
@@ -113,6 +114,9 @@ func mergeInto(dst, src *Config) {
 	}
 	if src.DiffChunkBytes > 0 {
 		dst.DiffChunkBytes = src.DiffChunkBytes
+	}
+	if src.Debate {
+		dst.Debate = true
 	}
 }
 

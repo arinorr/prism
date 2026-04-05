@@ -31,12 +31,12 @@ func TestComputeHealthScore_OneCriticalChanged(t *testing.T) {
 		},
 	}
 	score := ComputeHealthScore(findings)
-	// Full weight critical = -20, so 80.
-	if score.Score != 80 {
-		t.Errorf("expected 80, got %d", score.Score)
+	// basePenalty=8 × severity=3.0 × confidence=1.0 = 24, score = 76.
+	if score.Score != 76 {
+		t.Errorf("expected 76, got %d", score.Score)
 	}
-	if score.Grade != "B+" {
-		t.Errorf("expected B+, got %q", score.Grade)
+	if score.Grade != "B" {
+		t.Errorf("expected B, got %q", score.Grade)
 	}
 	if score.Verdict != "approve with suggestions" {
 		t.Errorf("expected 'approve with suggestions', got %q", score.Verdict)
@@ -59,7 +59,7 @@ func TestComputeHealthScore_WeightedByVotes(t *testing.T) {
 }
 
 func TestComputeHealthScore_ExistingIssuesLessImpact(t *testing.T) {
-	// Existing critical = -5 (full weight).
+	// basePenalty=2 × severity=3.0 × confidence=1.0 = 6, score = 94.
 	findings := []DedupedFinding{
 		{
 			Finding:     Finding{Risk: SeverityCritical, Scope: ScopeExisting},
@@ -68,8 +68,8 @@ func TestComputeHealthScore_ExistingIssuesLessImpact(t *testing.T) {
 		},
 	}
 	score := ComputeHealthScore(findings)
-	if score.Score != 95 {
-		t.Errorf("expected 95 (existing critical), got %d", score.Score)
+	if score.Score != 94 {
+		t.Errorf("expected 94 (existing critical), got %d", score.Score)
 	}
 }
 
@@ -130,14 +130,14 @@ func TestComputeHealthScore_GradeBoundaries(t *testing.T) {
 
 func TestComputeHealthScore_MixedFindings(t *testing.T) {
 	findings := []DedupedFinding{
-		{Finding: Finding{Risk: SeverityCritical, Scope: ScopeChanged}, VoteCount: 5, TotalAgents: 7},  // -20 * 5/7 ≈ -14.3
-		{Finding: Finding{Risk: SeverityWarning, Scope: ScopeChanged}, VoteCount: 3, TotalAgents: 7},   // -8 * 3/7 ≈ -3.4
-		{Finding: Finding{Risk: SeverityInfo, Scope: ScopeChanged}, VoteCount: 1, TotalAgents: 7},      // -2 * 1/7 ≈ -0.3
-		{Finding: Finding{Risk: SeverityCritical, Scope: ScopeExisting}, VoteCount: 2, TotalAgents: 7}, // -5 * 2/7 ≈ -1.4
+		{Finding: Finding{Risk: SeverityCritical, Scope: ScopeChanged}, VoteCount: 5, TotalAgents: 7},  // 8 * 3.0 * 5/7 = 17.14
+		{Finding: Finding{Risk: SeverityWarning, Scope: ScopeChanged}, VoteCount: 3, TotalAgents: 7},   // 8 * 2.0 * 3/7 = 6.86
+		{Finding: Finding{Risk: SeverityInfo, Scope: ScopeChanged}, VoteCount: 1, TotalAgents: 7},      // 8 * 1.0 * 1/7 = 1.14
+		{Finding: Finding{Risk: SeverityCritical, Scope: ScopeExisting}, VoteCount: 2, TotalAgents: 7}, // 2 * 3.0 * 2/7 = 1.71
 	}
 	score := ComputeHealthScore(findings)
-	// 100 - 14.3 - 3.4 - 0.3 - 1.4 ≈ 80.6 → 81
-	if score.Score != 81 {
-		t.Errorf("expected ~81, got %d", score.Score)
+	// 100 - 17.14 - 6.86 - 1.14 - 1.71 ≈ 73.15 → 73
+	if score.Score != 73 {
+		t.Errorf("expected 73, got %d", score.Score)
 	}
 }

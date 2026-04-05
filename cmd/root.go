@@ -47,6 +47,7 @@ Options:
   --max-budget-usd Maximum dollar spend per agent call (e.g. 0.50)
   --config         Path to config file (default: .prism.yml)
   --no-compress    Disable diff compression (send raw diff to agents)
+  --debate         Enable severity debate round for high-disagreement findings
   --stdout         Print report to terminal instead of saving to file
   -y, --yes        Skip confirmation prompts (e.g. large diff warning)
   -v, --verbose    Show detailed output (prompts, timing, raw responses)

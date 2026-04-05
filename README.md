@@ -29,6 +29,7 @@ Single-pass AI review has blind spots. Prism dispatches 7 specialized Claude age
 - [Reviewer Roles](#reviewer-roles)
 - [Health Score and Grading](#health-score-and-grading)
 - [Deduplication](#deduplication)
+- [Severity Debate](#severity-debate)
 - [Diff Compression](#diff-compression)
 - [Reports](#reports)
 - [Large Diffs](#large-diffs)
@@ -154,6 +155,7 @@ Show help and available options.
 | `--max-budget-usd` | Maximum dollar spend per agent call (e.g. `0.50`) |
 | `--config` | Path to config file (default: `.prism.yml`) |
 | `--no-compress` | Disable diff compression (send raw diff to agents) |
+| `--debate` | Enable severity debate round for high-disagreement findings |
 | `--stdout` | Print report to terminal instead of saving to `results/` |
 | `-y`, `--yes` | Skip confirmation prompts (e.g. large diff warning) |
 | `-v`, `--verbose` | Show prompts, timing, token usage, and response details |
@@ -179,6 +181,7 @@ format: html
 agent_timeout: 5m
 max_retries: 1
 max_budget_usd: 0.50
+debate: true              # Enable severity debate for disputed findings
 
 # Diff compression
 no_compress: false
@@ -215,7 +218,15 @@ diff_chunk_bytes: 307200  # Suggest splitting at 300 KB (default)
 
 ## Health Score and Grading
 
-After deduplication, Prism computes a **health score** (0–100) based on the severity, scope, and consensus of findings:
+Prism uses two independent signals to evaluate findings:
+
+- **Confidence** (0–100%) — How sure are we this is a real issue? Derived from how many agents independently flagged it.
+- **Composite Severity** (1.0–3.0) — How bad is it? A weighted average of each agent's severity opinion, where critical votes have "gravity" (harder to downgrade) and domain-expert votes carry extra weight.
+
+> [!NOTE]
+> **Domain authority**: Each agent has specialties (e.g., Sentinel specializes in security, Architect in design). When a finding's category matches an agent's specialty, that agent's severity vote carries 1.5x weight. Critical votes always carry 2x weight regardless of domain.
+
+The health score formula is: `deduction = basePenalty × compositeSeverity × confidence`
 
 | Grade | Score | Verdict | Meaning |
 |:-----:|------:|---------|---------|
@@ -227,13 +238,21 @@ After deduplication, Prism computes a **health score** (0–100) based on the se
 | `D`  | 40–59  | Request changes | Significant issues |
 | `F`  | 0–39   | Needs discussion | Major problems |
 
-Findings scoped to **changed lines** are weighted more heavily than those about existing or codebase-level code. When multiple agents flag the same issue, their votes increase the finding's impact. See [`internal/agents/score.go`](internal/agents/score.go) for authoritative thresholds.
+Findings scoped to **changed lines** have the highest base penalty, followed by existing code, then codebase-level patterns. See [`internal/agents/score.go`](internal/agents/score.go) for authoritative thresholds.
 
 <p align="right"><a href="#prism">back to top</a></p>
 
 ## Deduplication
 
-When multiple agents report the same issue, Prism merges them into a single finding with a **vote count** showing how many agents agreed. Two findings are considered duplicates when they target the same file, are within 5 lines of each other, and have similar summaries (Jaccard similarity >= 0.4). Deduplicated findings are sorted by vote count, then severity.
+When multiple agents report the same issue, Prism merges them into a single finding with a **confidence score** and **composite severity**. Each agent's individual severity opinion is preserved and weighted into the composite rather than simply taking the highest. Findings are considered duplicates when they target the same file, are within 5 lines of each other, and have similar summaries (Jaccard similarity >= 0.4).
+
+<p align="right"><a href="#prism">back to top</a></p>
+
+## Severity Debate
+
+When agents strongly disagree on a finding's severity (e.g., one says critical while another says info), Prism can run an optional **debate round** to resolve the dispute. Enable it with `--debate` or `debate: true` in `.prism.yml`.
+
+The debate sends each agent's perspective to an LLM arbitrator that weighs the evidence and returns a resolved severity with reasoning. This only fires for high-disagreement findings (spread of critical vs info) to keep costs low.
 
 <p align="right"><a href="#prism">back to top</a></p>
 

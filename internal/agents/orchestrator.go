@@ -121,6 +121,7 @@ type ReviewResult struct {
 type Options struct {
 	Verbose      bool
 	DryRun       bool
+	Debate       bool                 // enable severity debate round for high-disagreement findings
 	Model        string
 	AgentTimeout time.Duration
 	MaxRetries   int
@@ -240,6 +241,13 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 	feedbacks, failedAgents, agentUsage, err := o.dispatchAgents(&compressedPR)
 	if err != nil {
 		return nil, err
+	}
+
+	// Phase 1.5: Debate high-disagreement findings (optional).
+	if o.opts.Debate {
+		var debateUsage llm.Usage
+		feedbacks, debateUsage = o.runDebateRound(feedbacks)
+		agentUsage = agentUsage.Add(debateUsage)
 	}
 
 	// Phase 2: Collect, deduplicate, and summarize findings (deterministic, no LLM call).
@@ -569,7 +577,8 @@ func buildDeterministicSummary(findings []DedupedFinding, score HealthScore, age
 		fmt.Fprintf(&b, "%d finding(s) flagged by 3+ agents:\n\n", len(highConsensus))
 		for i := range highConsensus {
 			f := &highConsensus[i]
-			fmt.Fprintf(&b, "- **%s** (%d/%d agents): %s\n", f.Risk, f.VoteCount, f.TotalAgents, f.Summary)
+			fmt.Fprintf(&b, "- **%s** (confidence: %.0f%%, %d/%d agents): %s\n",
+				f.Risk, f.Confidence*100, f.VoteCount, f.TotalAgents, f.Summary)
 		}
 		b.WriteString("\n")
 	}
@@ -704,6 +713,123 @@ func parseFeedback(role, response string) (*Feedback, error) {
 	}
 
 	return &Feedback{Role: role, Findings: findings}, nil
+}
+
+const debateDisagreementThreshold = 2 // critical vs info triggers debate
+
+const debateSystemPrompt = `You are a senior code review arbitrator. Multiple reviewers disagree on the severity of a finding. Analyze their perspectives and determine the correct severity level.
+
+Consider:
+- Critical means it will cause failures, data loss, or security breach in production
+- Warning means it should be fixed before merge but is not immediately dangerous
+- Info means it is a suggestion for improvement
+
+Output ONLY valid JSON: {"risk": "critical|warning|info", "reasoning": "brief explanation"}`
+
+// runDebateRound identifies high-disagreement findings and resolves them via LLM.
+func (o *Orchestrator) runDebateRound(feedbacks []Feedback) ([]Feedback, llm.Usage) {
+	// Run a temporary dedup to identify disputed findings.
+	var allFindings []Finding
+	for _, fb := range feedbacks {
+		for i := range fb.Findings {
+			fb.Findings[i].Role = fb.Role
+			allFindings = append(allFindings, fb.Findings[i])
+		}
+	}
+	tempDeduped := Deduplicate(allFindings, len(feedbacks))
+
+	var totalUsage llm.Usage
+	var debateCount int
+	for _, df := range tempDeduped {
+		if DisagreementSpread(df.AgentDetails) < debateDisagreementThreshold {
+			continue
+		}
+		debateCount++
+		o.logf("   ⚖️  Debating: %s (line %d) — %s\n", df.File, df.Line, df.Summary)
+
+		resolved, usage, err := o.resolveDispute(&df)
+		totalUsage = totalUsage.Add(usage)
+		if err != nil {
+			o.errLogf("   ⚠️  Debate failed for %s:%d: %v\n", df.File, df.Line, err)
+			continue
+		}
+
+		if o.opts.Verbose {
+			o.logf("   ⚖️  Resolved to %s: %s\n", resolved.Risk, resolved.Reasoning)
+		}
+
+		// Apply the resolved severity back to the original findings.
+		o.applyDebateResolution(feedbacks, &df, resolved)
+	}
+
+	if debateCount > 0 {
+		o.logf("   ⚖️  Debated %d finding(s)\n\n", debateCount)
+	}
+	return feedbacks, totalUsage
+}
+
+type debateResolution struct {
+	Risk      string `json:"risk"`
+	Reasoning string `json:"reasoning"`
+}
+
+func (o *Orchestrator) resolveDispute(df *DedupedFinding) (*debateResolution, llm.Usage, error) {
+	prompt := buildDebatePrompt(df)
+
+	ctx := context.Background()
+	if o.opts.AgentTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.opts.AgentTimeout)
+		defer cancel()
+	}
+
+	response, usage, err := o.llm.Complete(ctx, llm.Request{
+		SystemPrompt: debateSystemPrompt,
+		UserPrompt:   prompt,
+		JSONOutput:   true,
+		Model:        ModelTierStandard,
+		MaxBudgetUSD: o.opts.MaxBudgetUSD,
+	})
+	if err != nil {
+		return nil, usage, err
+	}
+
+	var res debateResolution
+	if err := json.Unmarshal([]byte(strings.TrimSpace(response)), &res); err != nil {
+		return nil, usage, fmt.Errorf("failed to parse debate response: %w", err)
+	}
+	res.Risk = strings.ToLower(strings.TrimSpace(res.Risk))
+	if !validRisks[res.Risk] {
+		return nil, usage, fmt.Errorf("invalid risk in debate resolution: %q", res.Risk)
+	}
+	return &res, usage, nil
+}
+
+func buildDebatePrompt(df *DedupedFinding) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Finding under dispute:\n")
+	fmt.Fprintf(&b, "File: %s, Line: %d\n", df.File, df.Line)
+	fmt.Fprintf(&b, "Category: %s\n", df.Category)
+	fmt.Fprintf(&b, "Summary: %s\n\n", df.Summary)
+	fmt.Fprintf(&b, "Agent opinions:\n")
+	for _, ad := range df.AgentDetails {
+		fmt.Fprintf(&b, "- %s (says %s): %s\n", ad.Role, ad.Risk, ad.Detail)
+	}
+	fmt.Fprintf(&b, "\nDetermine the correct severity level based on the evidence above.")
+	return b.String()
+}
+
+// applyDebateResolution overwrites the Risk of matching findings in feedbacks.
+func (o *Orchestrator) applyDebateResolution(feedbacks []Feedback, df *DedupedFinding, res *debateResolution) {
+	for fi := range feedbacks {
+		for fj := range feedbacks[fi].Findings {
+			f := &feedbacks[fi].Findings[fj]
+			if f.File == df.File && abs(f.Line-df.Line) <= lineThreshold &&
+				jaccardSimilarity(f.Summary, df.Summary) >= jaccardThreshold {
+				f.Risk = res.Risk
+			}
+		}
+	}
 }
 
 // truncateUTF8 truncates s to at most maxBytes without splitting a UTF-8 character.

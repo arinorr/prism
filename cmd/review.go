@@ -40,6 +40,7 @@ type reviewOptions struct {
 	comment     bool
 	verbose     bool
 	dryRun      bool
+	debate      bool
 	toStdout    bool
 	yes         bool
 	rolesFlag   string
@@ -83,6 +84,8 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.verbose = true
 		case "--dry-run":
 			opts.dryRun = true
+		case "--debate":
+			opts.debate = true
 		case "--yes", "-y":
 			opts.yes = true
 		case "--no-compress":
@@ -136,6 +139,7 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 		Format:       opts.formatFlag,
 		AgentTimeout: opts.timeoutFlag,
 		MaxBudgetUSD: opts.budgetFlag,
+		Debate:       opts.debate,
 	}
 	if opts.retriesFlag >= 0 {
 		cliCfg.MaxRetries = config.IntPtr(opts.retriesFlag)
@@ -269,6 +273,7 @@ func runReview(args []string) error {
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
 		Verbose:      opts.verbose,
 		DryRun:       opts.dryRun,
+		Debate:       merged.Debate,
 		Model:        merged.Model,
 		AgentTimeout: merged.TimeoutDuration(),
 		MaxRetries:   merged.MaxRetriesVal(),

@@ -12,44 +12,40 @@ type HealthScore struct {
 }
 
 // ComputeHealthScore computes a 0-100 health score from deduped findings.
-// Findings in the "changed" scope (this PR) are penalized most heavily.
-// Vote count amplifies the deduction (high-confidence findings hurt more).
+// Uses two independent signals:
+//   - Confidence (0.0-1.0): how sure we are the issue is real (gates the deduction)
+//   - CompositeSeverity (1.0-3.0): weighted consensus on how bad the issue is (scales the deduction)
+//
+// Findings in the "changed" scope are penalized most heavily.
 func ComputeHealthScore(findings []DedupedFinding) HealthScore {
 	score := 100.0
 
 	for i := range findings {
 		f := &findings[i]
-		// Weight by vote confidence: a 7/7 finding deducts fully, a 1/7 deducts ~14%.
-		weight := 1.0
-		if f.TotalAgents > 0 {
-			weight = float64(f.VoteCount) / float64(f.TotalAgents)
+
+		// Use Confidence if set, otherwise derive from vote ratio for backward compat.
+		confidence := f.Confidence
+		if confidence == 0 && f.TotalAgents > 0 {
+			confidence = float64(f.VoteCount) / float64(f.TotalAgents)
 		}
 
-		var deduction float64
+		// Use CompositeSeverity if set, otherwise derive from Risk label.
+		severity := f.CompositeSeverity
+		if severity == 0 {
+			severity = SeverityNumeric(f.Risk)
+		}
+
+		var basePenalty float64
 		switch f.Scope {
 		case ScopeChanged:
-			switch f.Risk {
-			case SeverityCritical:
-				deduction = 20
-			case SeverityWarning:
-				deduction = 8
-			default:
-				deduction = 2
-			}
+			basePenalty = 8.0
 		case ScopeExisting:
-			switch f.Risk {
-			case SeverityCritical:
-				deduction = 5
-			case SeverityWarning:
-				deduction = 2
-			default:
-				deduction = 0.5
-			}
+			basePenalty = 2.0
 		default: // codebase
-			deduction = 1
+			basePenalty = 0.5
 		}
 
-		score -= deduction * weight
+		score -= basePenalty * severity * confidence
 	}
 
 	if score < 0 {
