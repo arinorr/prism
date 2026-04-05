@@ -70,11 +70,13 @@ var (
 // missing or invalid values. This handles both the new format and backward
 // compatibility with agents that still output "severity" instead of "risk".
 func NormalizeFinding(f *Finding, severity string) {
-	// Backward compat: copy severity → risk if risk is empty.
-	if f.Risk == "" && severity != "" {
-		f.Risk = Risk(strings.ToLower(strings.TrimSpace(severity)))
+	// Normalize the raw risk string once, then convert to Risk type.
+	// Backward compat: use severity field if risk is empty.
+	riskStr := string(f.Risk)
+	if riskStr == "" && severity != "" {
+		riskStr = severity
 	}
-	f.Risk = Risk(strings.ToLower(strings.TrimSpace(string(f.Risk))))
+	f.Risk = Risk(strings.ToLower(strings.TrimSpace(riskStr)))
 	if !f.Risk.Valid() {
 		f.Risk = RiskInfo
 	}
@@ -418,7 +420,7 @@ func (o *Orchestrator) collectAndSummarize(feedbacks []Feedback) *ReviewResult {
 			fb.Findings[i].Role = fb.Role
 			f := fb.Findings[i]
 			allFindings = append(allFindings, f)
-			if f.File != "" && f.Line > 0 && f.Risk != SeverityInfo {
+			if f.File != "" && f.Line > 0 && f.Risk != RiskInfo {
 				suggestions = append(suggestions, gh.Suggestion{
 					File: f.File,
 					Line: f.Line,
@@ -454,9 +456,9 @@ func buildDeterministicSummary(findings []DedupedFinding, score HealthScore, age
 	var criticals, warnings, infos int
 	for i := range findings {
 		switch findings[i].Risk {
-		case SeverityCritical:
+		case RiskCritical:
 			criticals++
-		case SeverityWarning:
+		case RiskWarning:
 			warnings++
 		default:
 			infos++

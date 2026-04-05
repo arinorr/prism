@@ -271,7 +271,8 @@ func runReview(args []string) error {
 			compSummary.OriginalBytes/1024, compSummary.CompressedBytes/1024,
 			savings, len(compSummary.FilesRemoved))
 	}
-	pr.Diff = compressed
+	compressedPR := *pr
+	compressedPR.Diff = compressed
 
 	// Dispatch agents.
 	llmBackend := claude.New()
@@ -288,7 +289,7 @@ func runReview(args []string) error {
 	}
 
 	start := time.Now()
-	result, err := orchestrator.Review(pr)
+	result, err := orchestrator.Review(&compressedPR)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)
 	}

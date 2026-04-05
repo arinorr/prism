@@ -94,18 +94,6 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 	return groups
 }
 
-// Severity aliases for backward compatibility with code that uses the old names.
-const (
-	SeverityCritical = RiskCritical
-	SeverityWarning  = RiskWarning
-	SeverityInfo     = RiskInfo
-)
-
-// SeverityOrder returns a sort key for severity. Delegates to Risk.Order().
-func SeverityOrder(s string) int {
-	return Risk(s).Order()
-}
-
 func matchesGroup(group *DedupedFinding, f *Finding) bool {
 	if group.File != f.File {
 		return false

@@ -25,7 +25,7 @@ func TestComputeHealthScore_EmptyFindings(t *testing.T) {
 func TestComputeHealthScore_OneCriticalChanged(t *testing.T) {
 	findings := []DedupedFinding{
 		{
-			Finding:     Finding{Risk: SeverityCritical, Scope: ScopeChanged},
+			Finding:     Finding{Risk: RiskCritical, Scope: ScopeChanged},
 			VoteCount:   7,
 			TotalAgents: 7,
 		},
@@ -47,7 +47,7 @@ func TestComputeHealthScore_WeightedByVotes(t *testing.T) {
 	// 1/7 vote on a critical = -20 * (1/7) ≈ -2.86, score ≈ 97.
 	findings := []DedupedFinding{
 		{
-			Finding:     Finding{Risk: SeverityCritical, Scope: ScopeChanged},
+			Finding:     Finding{Risk: RiskCritical, Scope: ScopeChanged},
 			VoteCount:   1,
 			TotalAgents: 7,
 		},
@@ -62,7 +62,7 @@ func TestComputeHealthScore_ExistingIssuesLessImpact(t *testing.T) {
 	// Existing critical = -5 (full weight).
 	findings := []DedupedFinding{
 		{
-			Finding:     Finding{Risk: SeverityCritical, Scope: ScopeExisting},
+			Finding:     Finding{Risk: RiskCritical, Scope: ScopeExisting},
 			VoteCount:   7,
 			TotalAgents: 7,
 		},
@@ -76,7 +76,7 @@ func TestComputeHealthScore_ExistingIssuesLessImpact(t *testing.T) {
 func TestComputeHealthScore_CodebaseMinimalImpact(t *testing.T) {
 	findings := []DedupedFinding{
 		{
-			Finding:     Finding{Risk: SeverityWarning, Scope: ScopeCodebase},
+			Finding:     Finding{Risk: RiskWarning, Scope: ScopeCodebase},
 			VoteCount:   3,
 			TotalAgents: 7,
 		},
@@ -93,7 +93,7 @@ func TestComputeHealthScore_Floor(t *testing.T) {
 	findings := make([]DedupedFinding, 10)
 	for i := range findings {
 		findings[i] = DedupedFinding{
-			Finding:     Finding{Risk: SeverityCritical, Scope: ScopeChanged},
+			Finding:     Finding{Risk: RiskCritical, Scope: ScopeChanged},
 			VoteCount:   7,
 			TotalAgents: 7,
 		}
@@ -130,10 +130,10 @@ func TestComputeHealthScore_GradeBoundaries(t *testing.T) {
 
 func TestComputeHealthScore_MixedFindings(t *testing.T) {
 	findings := []DedupedFinding{
-		{Finding: Finding{Risk: SeverityCritical, Scope: ScopeChanged}, VoteCount: 5, TotalAgents: 7},  // -20 * 5/7 ≈ -14.3
-		{Finding: Finding{Risk: SeverityWarning, Scope: ScopeChanged}, VoteCount: 3, TotalAgents: 7},   // -8 * 3/7 ≈ -3.4
-		{Finding: Finding{Risk: SeverityInfo, Scope: ScopeChanged}, VoteCount: 1, TotalAgents: 7},      // -2 * 1/7 ≈ -0.3
-		{Finding: Finding{Risk: SeverityCritical, Scope: ScopeExisting}, VoteCount: 2, TotalAgents: 7}, // -5 * 2/7 ≈ -1.4
+		{Finding: Finding{Risk: RiskCritical, Scope: ScopeChanged}, VoteCount: 5, TotalAgents: 7},  // -20 * 5/7 ≈ -14.3
+		{Finding: Finding{Risk: RiskWarning, Scope: ScopeChanged}, VoteCount: 3, TotalAgents: 7},   // -8 * 3/7 ≈ -3.4
+		{Finding: Finding{Risk: RiskInfo, Scope: ScopeChanged}, VoteCount: 1, TotalAgents: 7},      // -2 * 1/7 ≈ -0.3
+		{Finding: Finding{Risk: RiskCritical, Scope: ScopeExisting}, VoteCount: 2, TotalAgents: 7}, // -5 * 2/7 ≈ -1.4
 	}
 	score := ComputeHealthScore(findings)
 	// 100 - 14.3 - 3.4 - 0.3 - 1.4 ≈ 80.6 → 81
