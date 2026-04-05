@@ -11,6 +11,7 @@ import (
 // PR holds the metadata and diff for a pull request.
 type PR struct {
 	Number  string
+	Repo    string // repository name (e.g., "prism")
 	Title   string
 	Body    string
 	Diff    string
@@ -123,6 +124,7 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 
 	return &PR{
 		Number:  fmt.Sprintf("%d", meta.Number),
+		Repo:    c.detectRepoName(),
 		Title:   meta.Title,
 		Body:    meta.Body,
 		Diff:    string(diff),
@@ -169,6 +171,7 @@ func (c *Client) getPRDiffGit(prRef string) (*PR, error) {
 
 	return &PR{
 		Number:  prRef,
+		Repo:    c.detectRepoName(),
 		Title:   fmt.Sprintf("(local) Changes vs %s", base),
 		Diff:    string(diff),
 		HeadSHA: headSHA,
@@ -205,6 +208,25 @@ func (c *Client) PostComments(pr *PR, suggestions []Suggestion) error {
 		return fmt.Errorf("failed to post %d/%d comments: %w", len(errs), len(suggestions), errs[0])
 	}
 	return nil
+}
+
+// detectRepoName returns the repository name from the git remote URL.
+// Falls back to "unknown" if the remote can't be parsed.
+func (c *Client) detectRepoName() string {
+	out, err := c.run("git", "remote", "get-url", "origin")
+	if err != nil {
+		return "unknown"
+	}
+	url := strings.TrimSpace(string(out))
+	// Handle SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git).
+	url = strings.TrimSuffix(url, ".git")
+	if idx := strings.LastIndex(url, "/"); idx != -1 {
+		return url[idx+1:]
+	}
+	if idx := strings.LastIndex(url, ":"); idx != -1 {
+		return url[idx+1:]
+	}
+	return "unknown"
 }
 
 func (c *Client) detectBaseBranch() string {

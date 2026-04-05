@@ -411,15 +411,14 @@ func TestBestSimilarity_SelectsHighestNotFirst(t *testing.T) {
 		tokens[i] = tokenize(s)
 	}
 	group := &DedupedFinding{
-		Finding:        Finding{Summary: "error in code"},
-		voterSummaries: summaries,
-		voterTokens:    tokens,
+		Finding:     Finding{Summary: "error in code"},
+		voterTokens: tokens,
 	}
-	candidate := "bug in method"
-	best := bestSimilarity(group, candidate)
+	candidateTokens := tokenize("bug in method")
+	best := bestSimilarity(group, candidateTokens)
 	// "bug in procedure" should be the best match, not "error in code" (first).
-	expected := jaccardSimilarity("bug in procedure", candidate)
-	firstMatch := jaccardSimilarity(summaries[0], candidate)
+	expected := jaccardFromTokens(tokens[2], candidateTokens)
+	firstMatch := jaccardFromTokens(tokens[0], candidateTokens)
 	if best != expected {
 		t.Errorf("bestSimilarity should return %.3f (best match), got %.3f", expected, best)
 	}
@@ -428,17 +427,16 @@ func TestBestSimilarity_SelectsHighestNotFirst(t *testing.T) {
 	}
 }
 
-func TestBestSimilarity_FallbackWhenTokensEmpty(t *testing.T) {
-	// If voterTokens is empty (defensive case), bestSimilarity should
-	// fall back to comparing against group.Summary.
+func TestBestSimilarity_EmptyTokensReturnsZero(t *testing.T) {
+	// If voterTokens is empty, bestSimilarity returns 0.0 — no match possible.
+	// This makes initialization bugs visible rather than silently falling back.
 	group := &DedupedFinding{
 		Finding: Finding{Summary: "bug in procedure"},
 	}
-	candidate := "bug in method"
-	best := bestSimilarity(group, candidate)
-	expected := jaccardSimilarity("bug in procedure", candidate)
-	if best != expected {
-		t.Errorf("fallback should compare group.Summary, got %.3f want %.3f", best, expected)
+	candidateTokens := tokenize("bug in method")
+	best := bestSimilarity(group, candidateTokens)
+	if best != 0.0 {
+		t.Errorf("expected 0.0 for empty voterTokens, got %.3f", best)
 	}
 }
 

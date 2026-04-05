@@ -381,7 +381,11 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 		return nil
 	}
 
-	outPath := filepath.Join(defaultResultsDir, fmt.Sprintf("prism-pr-%s.%s", sanitizeFilename(pr.Number), ext))
+	repo := sanitizeFilename(pr.Repo)
+	prNum := sanitizeFilename(pr.Number)
+	timestamp := time.Now().Format("20060102-150405")
+	dir := filepath.Join(defaultResultsDir, fmt.Sprintf("%s-pr-%s", repo, prNum))
+	outPath := filepath.Join(dir, fmt.Sprintf("%s-pr-%s-%s.%s", repo, prNum, timestamp, ext))
 	return writeToFile(output, outPath)
 }
 

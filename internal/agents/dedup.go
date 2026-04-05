@@ -46,12 +46,11 @@ type AgentDetail struct {
 // DedupedFinding wraps a Finding with vote metadata from deduplication.
 type DedupedFinding struct {
 	Finding
-	VoteCount      int               `json:"vote_count"`
-	TotalAgents    int               `json:"total_agents"`
-	Voters         []string          `json:"voters"`
-	AgentDetails   []AgentDetail     `json:"agent_details"`
-	voterSummaries []string          // all merged summaries (unexported)
-	voterTokens    []map[string]bool // cached tokenized summaries to avoid re-tokenization
+	VoteCount    int               `json:"vote_count"`
+	TotalAgents  int               `json:"total_agents"`
+	Voters       []string          `json:"voters"`
+	AgentDetails []AgentDetail     `json:"agent_details"`
+	voterTokens  []map[string]bool // cached tokenized summaries to avoid re-tokenization
 }
 
 // Deduplicate merges findings that refer to the same issue using hybrid
@@ -78,20 +77,18 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 		ad := AgentDetail{Role: f.Role, Detail: f.Detail, CodeExample: f.CodeExample}
 		if idx < 0 {
 			groups = append(groups, DedupedFinding{
-				Finding:        *f,
-				VoteCount:      1,
-				TotalAgents:    totalAgents,
-				Voters:         []string{f.Role},
-				AgentDetails:   []AgentDetail{ad},
-				voterSummaries: []string{f.Summary},
-				voterTokens:    []map[string]bool{tokenize(f.Summary)},
+				Finding:      *f,
+				VoteCount:    1,
+				TotalAgents:  totalAgents,
+				Voters:       []string{f.Role},
+				AgentDetails: []AgentDetail{ad},
+				voterTokens:  []map[string]bool{tokenize(f.Summary)},
 			})
 			continue
 		}
 		groups[idx].VoteCount++
 		groups[idx].Voters = append(groups[idx].Voters, f.Role)
 		groups[idx].AgentDetails = append(groups[idx].AgentDetails, ad)
-		groups[idx].voterSummaries = append(groups[idx].voterSummaries, f.Summary)
 		groups[idx].voterTokens = append(groups[idx].voterTokens, tokenize(f.Summary))
 		if len(f.Detail) > len(groups[idx].Detail) {
 			groups[idx].Detail = f.Detail
@@ -123,53 +120,41 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 }
 
 // bestSimilarity returns the highest Jaccard similarity between the
-// candidate summary and any summary already merged into the group.
-// If voterSummaries is empty (zero-value struct), derives tokens from
-// the embedded Finding's Summary so the zero value works.
-func bestSimilarity(group *DedupedFinding, candidateSummary string) float64 {
-	// Defensive: if voterTokens is empty (shouldn't happen in normal flow),
-	// fall back to comparing against the group's representative summary.
-	if len(group.voterTokens) == 0 {
-		return jaccardSimilarity(group.Summary, candidateSummary)
+// candidate's pre-tokenized summary and any cached token set in the group.
+// If voterTokens is empty (zero-value struct), derives tokens from
+// the embedded Finding's Summary so the zero value works without
+// initialization ceremony.
+func bestSimilarity(group *DedupedFinding, candidateTokens map[string]bool) float64 {
+	tokens := group.voterTokens
+	if len(tokens) == 0 {
+		tokens = []map[string]bool{tokenize(group.Summary)}
 	}
-
-	// Tokenize the candidate once, then compare against cached group tokens.
-	candidateTokens := tokenize(candidateSummary)
 	var best float64
-	for _, groupTokens := range group.voterTokens {
-		if sim := jaccardFromTokens(groupTokens, candidateTokens); sim > best {
+	for _, gt := range tokens {
+		if sim := jaccardFromTokens(gt, candidateTokens); sim > best {
 			best = sim
 		}
 	}
 	return best
 }
 
-// jaccardFromTokens computes Jaccard similarity from pre-tokenized sets.
+// jaccardFromTokens computes Jaccard similarity from pre-tokenized sets
+// without allocating a union map: |union| = |a| + |b| - |intersection|.
 func jaccardFromTokens(a, b map[string]bool) float64 {
 	if len(a) == 0 && len(b) == 0 {
 		return 1.0
 	}
-
-	union := make(map[string]bool, len(a)+len(b))
-	for t := range a {
-		union[t] = true
-	}
-	for t := range b {
-		union[t] = true
-	}
-
-	if len(union) == 0 {
-		return 0
-	}
-
 	var intersection int
 	for t := range a {
 		if b[t] {
 			intersection++
 		}
 	}
-
-	return float64(intersection) / float64(len(union))
+	union := len(a) + len(b) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
 }
 
 // matchesGroup uses hybrid scoring: structural signals (same file, same
@@ -193,8 +178,9 @@ func matchesGroup(group *DedupedFinding, f *Finding) bool {
 	lineDist := abs(group.Line - f.Line)
 	sameCategory := group.Category != "" && group.Category == f.Category
 
-	// Best match across all group summaries to handle wording variations.
-	similarity := bestSimilarity(group, f.Summary)
+	// Tokenize candidate once, then compare against cached group tokens.
+	candidateTokens := tokenize(f.Summary)
+	similarity := bestSimilarity(group, candidateTokens)
 
 	// Tier 1: strong structural match — same file, same category, nearby lines.
 	if sameCategory && lineDist <= wideLineThreshold {
