@@ -15,6 +15,7 @@ import (
 
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/llm"
+	"github.com/arinorr/prism/internal/sanitize"
 )
 
 const previewMaxBytes = 500
@@ -400,7 +401,7 @@ func (o *Orchestrator) runAgent(role *Role, pr *gh.PR) (*Feedback, llm.Usage, er
 	fb, err := parseFeedback(role.Slug, response)
 	if err != nil {
 		if o.opts.Verbose {
-			o.errLogf("   🔬 [%s] raw response: %s\n", role.Name, truncateUTF8(response, previewMaxBytes))
+			o.errLogf("   🔬 [%s] raw response: %s\n", role.Name, sanitize.ForHTML(truncateUTF8(response, previewMaxBytes)))
 		}
 		return nil, usage, fmt.Errorf("failed to parse feedback: %w", err)
 	}
@@ -632,7 +633,7 @@ func parseFeedback(role, response string) (*Feedback, error) {
 	// Each returns a parsed rawFeedback or nil if it can't extract one.
 	raw, ok := tryParseStrategies(response)
 	if !ok {
-		return nil, fmt.Errorf("could not extract JSON from response\nRaw: %s", sanitizeForLog(truncateUTF8(response, 200)))
+		return nil, fmt.Errorf("could not extract JSON from response\nRaw: %s", sanitize.ForHTML(truncateUTF8(response, 200)))
 	}
 
 	// Normalize and filter findings.
@@ -717,13 +718,6 @@ func parseJSONMarker(response string) (*rawFeedback, bool) {
 		}
 	}
 	return nil, false
-}
-
-// sanitizeForLog strips HTML tags from a string to prevent XSS if the
-// error message is rendered in an HTML report or GitHub comment.
-func sanitizeForLog(s string) string {
-	r := strings.NewReplacer("<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
 }
 
 // truncateUTF8 truncates s to at most maxBytes without splitting a UTF-8 character.
