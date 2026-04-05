@@ -1024,16 +1024,16 @@ func sortBySeverityKeys(keys []severityKey) []int {
 
 func sortRawFileGroups(groups []fileGroup) {
 	keys := make([]severityKey, len(groups))
-	for i, g := range groups {
-		for _, f := range g.findings {
-			switch f.Risk {
+	for i := range groups {
+		for j := range groups[i].findings {
+			switch groups[i].findings[j].Risk {
 			case severityCritical:
 				keys[i].critical++
 			case severityWarning:
 				keys[i].warning++
 			}
 		}
-		keys[i].file = g.file
+		keys[i].file = groups[i].file
 	}
 	indices := sortBySeverityKeys(keys)
 	sorted := make([]fileGroup, len(groups))
@@ -1045,16 +1045,16 @@ func sortRawFileGroups(groups []fileGroup) {
 
 func sortDedupedFileGroups(groups []dedupedFileGroup) {
 	keys := make([]severityKey, len(groups))
-	for i, g := range groups {
-		for _, f := range g.findings {
-			switch f.Risk {
+	for i := range groups {
+		for j := range groups[i].findings {
+			switch groups[i].findings[j].Risk {
 			case severityCritical:
 				keys[i].critical++
 			case severityWarning:
 				keys[i].warning++
 			}
 		}
-		keys[i].file = g.file
+		keys[i].file = groups[i].file
 	}
 	indices := sortBySeverityKeys(keys)
 	sorted := make([]dedupedFileGroup, len(groups))
