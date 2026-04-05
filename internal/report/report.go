@@ -242,10 +242,10 @@ type htmlTemplateData struct {
 	CodebaseFindings []htmlFileGroup
 	FailedAgents     []string
 	HealthScore      agents.HealthScore
-	NeedleRotation   int    // SVG rotation angle for gauge needle (0=left, 180=right)
+	NeedleRotation   int    // SVG rotation angle for gauge needle (-90=left, 0=up, +90=right)
 	GaugeColor       string // hex color for the gauge arc based on score
 	GradeColor       string // hex color for the grade letter
-	GaugeDashOffset  int    // SVG stroke-dashoffset for arc fill (0=full, 283=empty)
+	GaugeDashOffset  int    // SVG stroke-dashoffset for arc fill (0=full, 251=empty)
 }
 
 type htmlFileGroup struct {
@@ -413,10 +413,10 @@ func HTML(d *Data) (string, error) {
 		CodebaseFindings: codebaseFindings,
 		FailedAgents:     d.Result.FailedAgents,
 		HealthScore:      d.Result.HealthScore,
-		NeedleRotation:   int(float64(d.Result.HealthScore.Score) * 1.8), // 0-100 → 0-180 degrees
+		NeedleRotation:   int(float64(d.Result.HealthScore.Score)*1.8) - 90, // 0→-90 (left), 50→0 (up), 100→+90 (right)
 		GaugeColor:       gaugeColor(d.Result.HealthScore.Score),
 		GradeColor:       gradeColor(d.Result.HealthScore.Score),
-		GaugeDashOffset:  283 - (d.Result.HealthScore.Score*283)/100, // 283 is approx circumference of semicircle
+		GaugeDashOffset:  251 - (d.Result.HealthScore.Score*251)/100, // 251 ≈ π×80, the semicircle arc length
 	}
 
 	tmpl, err := htmltemplate.New("report").Parse(htmlReportTemplate)
@@ -584,7 +584,7 @@ func splitByScope(groups []htmlFileGroup) (changed, existing, codebase []htmlFil
 				Findings:      findings,
 			})
 		}
-		sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+		sort.Slice(out, func(i, j int) bool { return htmlFileGroupLess(out[i], out[j]) })
 		return out
 	}
 
@@ -628,14 +628,11 @@ h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bott
 
 /* Dashboard */
 .dashboard { margin: 1.5rem 0; }
-.dashboard-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
-@media (max-width: 640px) { .dashboard-grid { grid-template-columns: 1fr; } }
 .dash-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
-.dash-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.75rem; }
-.dash-items { display: flex; flex-direction: column; gap: 0.6rem; }
-.dash-row { display: flex; justify-content: space-between; align-items: center; }
-.dash-badge { font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
-.dash-num { font-size: 1.5rem; font-weight: 800; color: var(--fg); }
+.dash-card-wide { width: 100%; }
+.dash-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
+.dash-risks { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.dash-badge { font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.7rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
 .dash-verdict { font-size: 1.15rem; font-weight: 700; color: var(--fg); margin-bottom: 0.25rem; text-transform: capitalize; }
 .dash-sub { font-size: 0.85rem; color: var(--muted); }
 
@@ -747,27 +744,17 @@ details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; 
 {{- end}}
 
 <div class="dashboard">
-  <div class="dashboard-grid">
-    <div class="dash-card">
-      <div class="dash-label">Risk Breakdown</div>
-      <div class="dash-items">
-        {{- if gt .CriticalCount 0}}<div class="dash-row"><span class="dash-badge badge-critical">critical</span><span class="dash-num">{{.CriticalCount}}</span></div>{{end}}
-        {{- if gt .WarningCount 0}}<div class="dash-row"><span class="dash-badge badge-warning">warning</span><span class="dash-num">{{.WarningCount}}</span></div>{{end}}
-        {{- if gt .InfoCount 0}}<div class="dash-row"><span class="dash-badge badge-info">info</span><span class="dash-num">{{.InfoCount}}</span></div>{{end}}
+  <div class="dash-card dash-card-wide">
+    <div class="dash-header">
+      <div>
+        <div class="dash-verdict">{{.HealthScore.Verdict}}</div>
+        <div class="dash-sub">{{.FindingCount}} findings from {{.AgentCount}} agents</div>
       </div>
-    </div>
-    <div class="dash-card">
-      <div class="dash-label">Scope</div>
-      <div class="dash-items">
-        {{- if gt .ChangedCount 0}}<div class="dash-row"><span>This PR</span><span class="dash-num">{{.ChangedCount}}</span></div>{{end}}
-        {{- if gt .ExistingCount 0}}<div class="dash-row"><span>Pre-existing</span><span class="dash-num">{{.ExistingCount}}</span></div>{{end}}
-        {{- if gt .CodebaseCount 0}}<div class="dash-row"><span>Codebase</span><span class="dash-num">{{.CodebaseCount}}</span></div>{{end}}
+      <div class="dash-risks">
+        {{- if gt .CriticalCount 0}}<span class="dash-badge badge-critical">{{.CriticalCount}} critical</span>{{end}}
+        {{- if gt .WarningCount 0}}<span class="dash-badge badge-warning">{{.WarningCount}} warning</span>{{end}}
+        {{- if gt .InfoCount 0}}<span class="dash-badge badge-info">{{.InfoCount}} info</span>{{end}}
       </div>
-    </div>
-    <div class="dash-card">
-      <div class="dash-label">Verdict</div>
-      <div class="dash-verdict">{{.HealthScore.Verdict}}</div>
-      <div class="dash-sub">{{.FindingCount}} findings from {{.AgentCount}} agents</div>
     </div>
   </div>
 </div>
@@ -958,9 +945,8 @@ func groupByFile(findings []agents.Finding) []fileGroup {
 		groups = append(groups, fileGroup{file: file, findings: fs})
 	}
 
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].file < groups[j].file
-	})
+	// Sort by severity: files with critical findings first, then warning, then alphabetically.
+	sortRawFileGroups(groups)
 
 	return groups
 }
@@ -995,11 +981,82 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 		groups = append(groups, dedupedFileGroup{file: file, findings: fs})
 	}
 
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].file < groups[j].file
-	})
+	// Sort by severity: files with critical findings first, then warning, then alphabetically.
+	sortDedupedFileGroups(groups)
 
 	return groups
+}
+
+// htmlFileGroupLess defines the canonical sort contract for file ordering:
+// critical count desc → warning count desc → filename asc.
+// Used directly by splitByScope; sortRawFileGroups and sortDedupedFileGroups
+// implement the same contract independently via severityKey.
+func htmlFileGroupLess(a, b htmlFileGroup) bool {
+	if a.CriticalCount != b.CriticalCount {
+		return a.CriticalCount > b.CriticalCount
+	}
+	if a.WarningCount != b.WarningCount {
+		return a.WarningCount > b.WarningCount
+	}
+	return a.File < b.File
+}
+
+// severityKey holds precomputed severity counts for sorting raw/deduped
+// file groups before they're converted to htmlFileGroups.
+type severityKey struct {
+	critical, warning int
+}
+
+func sortRawFileGroups(groups []fileGroup) {
+	if len(groups) <= 1 {
+		return
+	}
+	keys := make([]severityKey, len(groups))
+	for i := range groups {
+		for j := range groups[i].findings {
+			switch groups[i].findings[j].Risk {
+			case severityCritical:
+				keys[i].critical++
+			case severityWarning:
+				keys[i].warning++
+			}
+		}
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		if keys[i].critical != keys[j].critical {
+			return keys[i].critical > keys[j].critical
+		}
+		if keys[i].warning != keys[j].warning {
+			return keys[i].warning > keys[j].warning
+		}
+		return groups[i].file < groups[j].file
+	})
+}
+
+func sortDedupedFileGroups(groups []dedupedFileGroup) {
+	if len(groups) <= 1 {
+		return
+	}
+	keys := make([]severityKey, len(groups))
+	for i := range groups {
+		for j := range groups[i].findings {
+			switch groups[i].findings[j].Risk {
+			case severityCritical:
+				keys[i].critical++
+			case severityWarning:
+				keys[i].warning++
+			}
+		}
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		if keys[i].critical != keys[j].critical {
+			return keys[i].critical > keys[j].critical
+		}
+		if keys[i].warning != keys[j].warning {
+			return keys[i].warning > keys[j].warning
+		}
+		return groups[i].file < groups[j].file
+	})
 }
 
 // severityOrder delegates to the canonical implementation in the agents package.

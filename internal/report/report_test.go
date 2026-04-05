@@ -2,6 +2,8 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -208,9 +210,12 @@ func TestHTML_DashboardRendered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Dashboard should show risk breakdown.
-	if !strings.Contains(out, "Risk Breakdown") {
-		t.Error("HTML should contain Risk Breakdown card")
+	// Dashboard should show verdict and risk badges.
+	if !strings.Contains(out, "dash-verdict") {
+		t.Error("HTML should contain verdict in dashboard")
+	}
+	if !strings.Contains(out, "dash-risks") {
+		t.Error("HTML should contain risk badges in dashboard")
 	}
 }
 
@@ -535,20 +540,77 @@ func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
 	}
 }
 
-func TestGroupDedupedByFile_MultipleFiles(t *testing.T) {
+func TestGroupDedupedByFile_SortedBySeverity(t *testing.T) {
+	// z.go has critical, a.go has warning, m.go has info.
+	// Severity order differs from alphabetical order.
 	findings := []agents.DedupedFinding{
-		{Finding: agents.Finding{File: "c.go", Line: 1, Risk: "info"}, VoteCount: 1},
-		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 5},
-		{Finding: agents.Finding{File: "a.go", Line: 20, Risk: "warning"}, VoteCount: 2},
-		{Finding: agents.Finding{File: "b.go", Line: 5, Risk: "critical"}, VoteCount: 3},
+		{Finding: agents.Finding{File: "m.go", Line: 1, Risk: "info"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "warning"}, VoteCount: 2},
+		{Finding: agents.Finding{File: "z.go", Line: 5, Risk: "critical"}, VoteCount: 3},
 	}
 	groups := groupDedupedByFile(findings)
 	if len(groups) != 3 {
 		t.Fatalf("expected 3 groups, got %d", len(groups))
 	}
-	// Sorted alphabetically by file.
-	if groups[0].file != "a.go" || groups[1].file != "b.go" || groups[2].file != "c.go" {
-		t.Errorf("expected [a.go, b.go, c.go], got [%s, %s, %s]", groups[0].file, groups[1].file, groups[2].file)
+	// Sorted by severity (not alphabetical): z.go (critical), a.go (warning), m.go (info).
+	if groups[0].file != "z.go" || groups[1].file != "a.go" || groups[2].file != "m.go" {
+		t.Errorf("expected [z.go, a.go, m.go] (by severity), got [%s, %s, %s]",
+			groups[0].file, groups[1].file, groups[2].file)
+	}
+}
+
+func TestGroupDedupedByFile_AlphabeticalFallback(t *testing.T) {
+	// Both files have critical findings — should fall back to alphabetical.
+	findings := []agents.DedupedFinding{
+		{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 1},
+	}
+	groups := groupDedupedByFile(findings)
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// Same severity → alphabetical: a.go before z.go.
+	if groups[0].file != "a.go" || groups[1].file != "z.go" {
+		t.Errorf("expected [a.go, z.go] (alphabetical fallback), got [%s, %s]",
+			groups[0].file, groups[1].file)
+	}
+}
+
+func TestGroupDedupedByFile_MultipleRisksPerFile(t *testing.T) {
+	// b.go has 1 critical + 1 warning, a.go has 1 critical only.
+	// b.go should sort first (same critical count, but more warnings).
+	findings := []agents.DedupedFinding{
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "b.go", Line: 1, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "b.go", Line: 2, Risk: "warning"}, VoteCount: 1},
+	}
+	groups := groupDedupedByFile(findings)
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// Same critical count, but b.go has 1 warning vs a.go's 0 → b.go first.
+	if groups[0].file != "b.go" || groups[1].file != "a.go" {
+		t.Errorf("expected [b.go, a.go] (b.go has more warnings), got [%s, %s]",
+			groups[0].file, groups[1].file)
+	}
+}
+
+func TestGroupDedupedByFile_BothSeveritiesEqualFallback(t *testing.T) {
+	// Both files have 1 critical and 1 warning — full tiebreak to alphabetical.
+	findings := []agents.DedupedFinding{
+		{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "z.go", Line: 2, Risk: "warning"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 1},
+		{Finding: agents.Finding{File: "a.go", Line: 11, Risk: "warning"}, VoteCount: 1},
+	}
+	groups := groupDedupedByFile(findings)
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// Equal critical and warning counts → alphabetical: a.go before z.go.
+	if groups[0].file != "a.go" || groups[1].file != "z.go" {
+		t.Errorf("expected [a.go, z.go] (full tiebreak to alphabetical), got [%s, %s]",
+			groups[0].file, groups[1].file)
 	}
 }
 
@@ -725,5 +787,138 @@ func TestJSON_HealthScore(t *testing.T) {
 	}
 	if !strings.Contains(output, `"grade": "B"`) {
 		t.Error("JSON should contain grade value")
+	}
+}
+
+func TestHTML_GaugeNeedleRotation(t *testing.T) {
+	// Formula: rotation = int(score * 1.8) - 90
+	// Score 0 → -90° (left), 50 → 0° (up), 100 → +90° (right).
+	// int() truncates toward zero, so 46*1.8=82.8 → 82 → 82-90 = -8.
+	tests := []struct {
+		name         string
+		score        int
+		wantRotation int // expected rotation in degrees
+	}{
+		{"score 10 points left", 10, -72},
+		{"score 50 points up", 50, 0},
+		{"score 100 points right", 100, 90},
+		{"score 46 points left of center", 46, -8},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := testData()
+			d.Result.HealthScore.Score = tt.score
+			out, err := HTML(d)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			expected := fmt.Sprintf("rotate(%d 100 110)", tt.wantRotation)
+			if !strings.Contains(out, expected) {
+				t.Errorf("expected needle rotation %q in SVG for score=%d", expected, tt.score)
+			}
+		})
+	}
+}
+
+// extractFileHeaders extracts file names from HTML file-header spans in order.
+// This is more robust than raw strings.Index which could match filenames
+// appearing in comments, metadata, or other sections.
+func extractFileHeaders(html string) []string {
+	re := regexp.MustCompile(`<div class="file-header">\s*<span>([^<]+)</span>`)
+	matches := re.FindAllStringSubmatch(html, -1)
+	files := make([]string, len(matches))
+	for i, m := range matches {
+		files[i] = m[1]
+	}
+	return files
+}
+
+func TestHTML_FilesOrderedBySeverity(t *testing.T) {
+	// z.go has critical, m.go has warning, a.go has info.
+	// Severity order (z, m, a) differs from alphabetical (a, m, z).
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}, {Path: "m.go"}, {Path: "z.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "Test.",
+			DedupedFindings: []agents.DedupedFinding{
+				{Finding: agents.Finding{File: "a.go", Line: 1, Risk: "info", Category: "style", Scope: "changed", Summary: "minor"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"editor"}, AgentDetails: []agents.AgentDetail{{Role: "editor", Detail: "d"}}},
+				{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical", Category: "bug", Scope: "changed", Summary: "crash"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"solver"}, AgentDetails: []agents.AgentDetail{{Role: "solver", Detail: "d"}}},
+				{Finding: agents.Finding{File: "m.go", Line: 1, Risk: "warning", Category: "design", Scope: "changed", Summary: "design issue"}, VoteCount: 1, TotalAgents: 3, Voters: []string{"architect"}, AgentDetails: []agents.AgentDetail{{Role: "architect", Detail: "d"}}},
+			},
+			HealthScore: agents.HealthScore{Score: 60, Grade: "C", Verdict: "request changes"},
+		},
+		Roles: []string{"Solver", "Architect", "Editor"},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	files := extractFileHeaders(out)
+	if len(files) < 3 {
+		t.Fatalf("expected at least 3 file headers, got %d", len(files))
+	}
+	// z.go (critical) should appear before m.go (warning) before a.go (info).
+	want := []string{"z.go", "m.go", "a.go"}
+	for i, w := range want {
+		if files[i] != w {
+			t.Errorf("file[%d] = %q, want %q (full order: %v)", i, files[i], w, files)
+			break
+		}
+	}
+}
+
+func TestHTML_FilesOrderedBySeverity_AlphabeticalFallback(t *testing.T) {
+	// Both files have critical findings — should fall back to alphabetical.
+	d := &Data{
+		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}, {Path: "z.go"}}},
+		Result: &agents.ReviewResult{
+			Summary: "Test.",
+			DedupedFindings: []agents.DedupedFinding{
+				{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical", Category: "bug", Scope: "changed", Summary: "crash"}, VoteCount: 1, TotalAgents: 2, Voters: []string{"solver"}, AgentDetails: []agents.AgentDetail{{Role: "solver", Detail: "d"}}},
+				{Finding: agents.Finding{File: "a.go", Line: 1, Risk: "critical", Category: "bug", Scope: "changed", Summary: "panic"}, VoteCount: 1, TotalAgents: 2, Voters: []string{"sentinel"}, AgentDetails: []agents.AgentDetail{{Role: "sentinel", Detail: "d"}}},
+			},
+			HealthScore: agents.HealthScore{Score: 40, Grade: "D", Verdict: "request changes"},
+		},
+		Roles: []string{"Solver", "Sentinel"},
+	}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	files := extractFileHeaders(out)
+	if len(files) < 2 {
+		t.Fatalf("expected at least 2 file headers, got %d", len(files))
+	}
+	// Same severity → alphabetical: a.go before z.go.
+	if files[0] != "a.go" || files[1] != "z.go" {
+		t.Errorf("expected [a.go, z.go] (alphabetical fallback), got %v", files)
+	}
+}
+
+func TestHTML_DashboardConsolidated(t *testing.T) {
+	out, err := HTML(testData())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should NOT have the old 3-card grid or Scope card.
+	if strings.Contains(out, "dashboard-grid") {
+		t.Error("should not have old dashboard-grid layout")
+	}
+	if strings.Contains(out, ">Scope<") {
+		t.Error("should not have separate Scope card")
+	}
+	// Should have consolidated card with verdict and risk badges.
+	if !strings.Contains(out, "dash-card-wide") {
+		t.Error("should have wide consolidated dashboard card")
+	}
+	if !strings.Contains(out, "dash-risks") {
+		t.Error("should have risk badges section")
+	}
+	// Verify the dashboard shows verdict text and finding count.
+	if !strings.Contains(out, "approve with suggestions") {
+		t.Error("dashboard should contain the verdict text")
+	}
+	if !strings.Contains(out, "findings from") {
+		t.Error("dashboard should contain finding count summary")
 	}
 }
