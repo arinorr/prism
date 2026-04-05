@@ -30,7 +30,7 @@ type Feedback struct {
 type Finding struct {
 	File        string  `json:"file"`
 	Line        int     `json:"line,omitempty"`
-	Risk        string  `json:"risk"`       // critical, warning, info
+	Risk        Risk    `json:"risk"`       // critical, warning, info
 	Category    string  `json:"category"`   // bug, security, design, performance, style, testing
 	Scope       string  `json:"scope"`      // changed, existing, codebase
 	Confidence  float64 `json:"confidence"` // 0.0-1.0
@@ -40,12 +40,8 @@ type Finding struct {
 	Role        string  `json:"role,omitempty"`
 }
 
-// Valid risk, category, and scope values.
+// Valid category and scope values.
 const (
-	RiskCritical = SeverityCritical
-	RiskWarning  = SeverityWarning
-	RiskInfo     = SeverityInfo
-
 	CategoryBug         = "bug"
 	CategorySecurity    = "security"
 	CategoryDesign      = "design"
@@ -64,7 +60,6 @@ const (
 )
 
 var (
-	validRisks      = map[string]bool{RiskCritical: true, RiskWarning: true, RiskInfo: true}
 	validCategories = map[string]bool{
 		CategoryBug: true, CategorySecurity: true, CategoryDesign: true,
 		CategoryPerformance: true, CategoryStyle: true, CategoryTesting: true,
@@ -78,10 +73,10 @@ var (
 func NormalizeFinding(f *Finding, severity string) {
 	// Backward compat: copy severity → risk if risk is empty.
 	if f.Risk == "" && severity != "" {
-		f.Risk = strings.ToLower(strings.TrimSpace(severity))
+		f.Risk = Risk(strings.ToLower(strings.TrimSpace(severity)))
 	}
-	f.Risk = strings.ToLower(strings.TrimSpace(f.Risk))
-	if !validRisks[f.Risk] {
+	f.Risk = Risk(strings.ToLower(strings.TrimSpace(string(f.Risk))))
+	if !f.Risk.Valid() {
 		f.Risk = RiskInfo
 	}
 
