@@ -3,6 +3,14 @@ package agents
 
 import "fmt"
 
+// Verdict constants returned by ComputeHealthScore.
+const (
+	VerdictApprove        = "approve"
+	VerdictSuggestions    = "approve with suggestions"
+	VerdictRequestChanges = "request changes"
+	VerdictDiscuss        = "needs discussion"
+)
+
 // HealthScore summarizes the overall quality of a PR based on findings.
 type HealthScore struct {
 	Score       int    `json:"score"`       // 0-100
@@ -87,13 +95,13 @@ func scoreToGrade(score int) string {
 func scoreToVerdict(score int) string {
 	switch {
 	case score >= 90:
-		return "approve"
+		return VerdictApprove
 	case score >= 70:
-		return "approve with suggestions"
+		return VerdictSuggestions
 	case score >= 40:
-		return "request changes"
+		return VerdictRequestChanges
 	default:
-		return "needs discussion"
+		return VerdictDiscuss
 	}
 }
 

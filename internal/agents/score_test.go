@@ -105,8 +105,8 @@ func TestComputeHealthScore_Floor(t *testing.T) {
 	if score.Grade != "F" {
 		t.Errorf("expected F, got %q", score.Grade)
 	}
-	if score.Verdict != "needs discussion" {
-		t.Errorf("expected 'needs discussion', got %q", score.Verdict)
+	if score.Verdict != VerdictDiscuss {
+		t.Errorf("expected %q, got %q", VerdictDiscuss, score.Verdict)
 	}
 }
 
