@@ -656,7 +656,7 @@ func TestDispatchAgents_AllSucceed(t *testing.T) {
 		llm:    mockLLMFindings(finding),
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	feedbacks, failedAgents, _, err := orch.dispatchAgents(pr)
+	feedbacks, failedAgents, _, _, err := orch.dispatchAgents(pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -676,7 +676,7 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 		llm:    &llmtest.Mock{Err: fmt.Errorf("fail")},
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, failedAgents, _, err := orch.dispatchAgents(pr)
+	_, failedAgents, _, _, err := orch.dispatchAgents(pr)
 	if err == nil {
 		t.Fatal("expected error when all agents fail")
 	}
@@ -706,7 +706,7 @@ func TestDispatchAgents_PartialFailure(t *testing.T) {
 		llm:    mock,
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	feedbacks, _, _, err := orch.dispatchAgents(pr)
+	feedbacks, _, _, _, err := orch.dispatchAgents(pr)
 	if err != nil {
 		t.Fatalf("partial failure should not error: %v", err)
 	}

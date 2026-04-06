@@ -40,6 +40,7 @@ type reviewOptions struct {
 	comment     bool
 	verbose     bool
 	dryRun      bool
+	estimate    bool
 	toStdout    bool
 	yes         bool
 	rolesFlag   string
@@ -83,6 +84,8 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.verbose = true
 		case "--dry-run":
 			opts.dryRun = true
+		case "--estimate":
+			opts.estimate = true
 		case "--yes", "-y":
 			opts.yes = true
 		case "--no-compress":
@@ -274,6 +277,12 @@ func runReview(args []string) error {
 	compressedPR := *pr
 	compressedPR.Diff = compressed
 
+	// Estimate mode: show projected token usage and exit.
+	if opts.estimate {
+		printEstimate(len(compressed), len(roles))
+		return nil
+	}
+
 	// Dispatch agents.
 	llmBackend := claude.New()
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
@@ -300,8 +309,17 @@ func runReview(args []string) error {
 	u := result.Usage
 	totalInput := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
 	totalTokens := totalInput + u.OutputTokens
-	fmt.Printf("   📊 Tokens: %dk input, %dk output (%dk total) | Cost: $%.2f | Time: %s\n\n",
+	fmt.Printf("   📊 Tokens: %dk input, %dk output (%dk total) | Cost: $%.2f | Time: %s\n",
 		totalInput/1000, u.OutputTokens/1000, totalTokens/1000, u.CostUSD, elapsed.Round(time.Second))
+
+	if opts.verbose && len(result.AgentUsages) > 0 {
+		fmt.Println()
+		for _, au := range result.AgentUsages {
+			agentTotal := au.Usage.TotalTokens()
+			fmt.Printf("      %-16s %6dk tokens  $%.2f\n", au.Role, agentTotal/1000, au.Usage.CostUSD)
+		}
+	}
+	fmt.Println()
 
 	// Resolve format: CLI flag > config file > none.
 	formatFlag := opts.formatFlag
@@ -387,6 +405,30 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 	dir := filepath.Join(defaultResultsDir, fmt.Sprintf("%s-pr-%s", repo, prNum))
 	outPath := filepath.Join(dir, fmt.Sprintf("%s-pr-%s-%s.%s", repo, prNum, timestamp, ext))
 	return writeToFile(output, outPath)
+}
+
+// printEstimate shows projected token usage based on diff size and exits.
+// Rough heuristic: ~4 bytes per token for code, each agent gets the full
+// diff as input plus ~2K tokens of skill/prompt overhead, and produces
+// ~1K tokens of output.
+func printEstimate(diffBytes, agentCount int) {
+	tokensPerAgent := diffBytes/4 + 2000 // input estimate per agent
+	outputPerAgent := 1000               // output estimate per agent
+	totalInput := tokensPerAgent * agentCount
+	totalOutput := outputPerAgent * agentCount
+	total := totalInput + totalOutput
+
+	// Rough cost estimate based on Claude Sonnet pricing (~$3/M input, ~$15/M output).
+	costEstimate := float64(totalInput)/1_000_000*3.0 + float64(totalOutput)/1_000_000*15.0
+
+	fmt.Println("📏 Token estimate (approximate):")
+	fmt.Printf("   Diff size:    %d bytes (~%dk tokens per agent)\n", diffBytes, tokensPerAgent/1000)
+	fmt.Printf("   Agents:       %d\n", agentCount)
+	fmt.Printf("   Est. input:   ~%dk tokens\n", totalInput/1000)
+	fmt.Printf("   Est. output:  ~%dk tokens\n", totalOutput/1000)
+	fmt.Printf("   Est. total:   ~%dk tokens\n", total/1000)
+	fmt.Printf("   Est. cost:    ~$%.2f\n", costEstimate)
+	fmt.Println("\n   Note: actual usage depends on model, caching, and response length.")
 }
 
 var filenameAllowlist = regexp.MustCompile(`[^a-zA-Z0-9_-]`)

@@ -50,5 +50,6 @@ Options:
   --stdout         Print report to terminal instead of saving to file
   -y, --yes        Skip confirmation prompts (e.g. large diff warning)
   -v, --verbose    Show detailed output (prompts, timing, raw responses)
-  --dry-run        Show what would happen without calling Claude`)
+  --dry-run        Show what would happen without calling Claude
+  --estimate       Show estimated token usage and cost, then exit`)
 }
