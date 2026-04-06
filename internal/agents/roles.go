@@ -10,8 +10,9 @@ type Role struct {
 	Name        string
 	Slug        string
 	Description string
-	SkillFile   string // path to the Claude skill file
-	Model       string // preferred model for this role (empty = use global default)
+	SkillFile   string   // path to the Claude skill file
+	Model       string   // preferred model for this role (empty = use global default)
+	Specialties []string // finding categories this role is a domain authority on
 }
 
 // Model tier constants for per-role defaults.
@@ -29,6 +30,7 @@ var (
 		Description: "Best practices, code smells, and language idioms",
 		SkillFile:   "skills/know-it-all.md",
 		Model:       ModelTierStandard,
+		Specialties: []string{CategoryStyle, CategoryDesign},
 	}
 	RoleArchitect = Role{
 		Name:        "Architect",
@@ -36,6 +38,7 @@ var (
 		Description: "Code patterns, system fit, scalability, and abstractions",
 		SkillFile:   "skills/architect.md",
 		Model:       ModelTierDeep,
+		Specialties: []string{CategoryDesign},
 	}
 	RoleSolver = Role{
 		Name:        "Solver",
@@ -43,6 +46,7 @@ var (
 		Description: "Problem coverage and solution completeness",
 		SkillFile:   "skills/solver.md",
 		Model:       ModelTierStandard,
+		Specialties: []string{CategoryBug},
 	}
 	RoleEditor = Role{
 		Name:        "Editor",
@@ -50,6 +54,7 @@ var (
 		Description: "Readability, brevity, simplicity, and duplication",
 		SkillFile:   "skills/editor.md",
 		Model:       ModelTierFast,
+		Specialties: []string{CategoryStyle},
 	}
 	RoleOptimizer = Role{
 		Name:        "Optimizer",
@@ -57,6 +62,7 @@ var (
 		Description: "Performance, complexity, and optimization",
 		SkillFile:   "skills/optimizer.md",
 		Model:       ModelTierStandard,
+		Specialties: []string{CategoryPerformance},
 	}
 	RoleSentinel = Role{
 		Name:        "Sentinel",
@@ -64,6 +70,7 @@ var (
 		Description: "Security vulnerabilities, dangerous code, and attack vectors",
 		SkillFile:   "skills/sentinel.md",
 		Model:       ModelTierDeep,
+		Specialties: []string{CategorySecurity},
 	}
 	RoleTestEngineer = Role{
 		Name:        "Test Engineer",
@@ -71,6 +78,7 @@ var (
 		Description: "Test coverage, edge cases, and testing improvements",
 		SkillFile:   "skills/test-engineer.md",
 		Model:       ModelTierFast,
+		Specialties: []string{CategoryTesting},
 	}
 
 	AllRoles = []Role{
@@ -93,6 +101,22 @@ var (
 		"test-engineer": RoleTestEngineer,
 	}
 )
+
+// IsDomainAuthority returns true if the role is a domain expert for the given
+// finding category. Domain authority votes carry extra weight in composite
+// severity calculations.
+func IsDomainAuthority(roleSlug, findingCategory string) bool {
+	role, ok := roleMap[roleSlug]
+	if !ok {
+		return false
+	}
+	for _, s := range role.Specialties {
+		if s == findingCategory {
+			return true
+		}
+	}
+	return false
+}
 
 // ParseRoles parses a comma-separated list of role slugs.
 func ParseRoles(input string) ([]Role, error) {

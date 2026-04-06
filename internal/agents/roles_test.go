@@ -119,3 +119,44 @@ func TestAllRoles_HaveSkillFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestAllRoles_HaveSpecialties(t *testing.T) {
+	t.Parallel()
+	for _, r := range AllRoles {
+		if len(r.Specialties) == 0 {
+			t.Errorf("role %q has no specialties", r.Slug)
+		}
+	}
+}
+
+func TestIsDomainAuthority(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		role     string
+		category string
+		want     bool
+	}{
+		{"sentinel", CategorySecurity, true},
+		{"sentinel", CategoryStyle, false},
+		{"architect", CategoryDesign, true},
+		{"architect", CategoryBug, false},
+		{"know-it-all", CategoryStyle, true},
+		{"know-it-all", CategoryDesign, true},
+		{"know-it-all", CategorySecurity, false},
+		{"solver", CategoryBug, true},
+		{"editor", CategoryStyle, true},
+		{"optimizer", CategoryPerformance, true},
+		{"test-engineer", CategoryTesting, true},
+		{"nonexistent", CategoryBug, false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.role+"/"+tt.category, func(t *testing.T) {
+			t.Parallel()
+			got := IsDomainAuthority(tt.role, tt.category)
+			if got != tt.want {
+				t.Errorf("IsDomainAuthority(%q, %q) = %v, want %v", tt.role, tt.category, got, tt.want)
+			}
+		})
+	}
+}
