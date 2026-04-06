@@ -64,6 +64,32 @@ func (u Usage) Add(other Usage) Usage {
 	}
 }
 
+// Pricing holds per-million-token rates for a model.
+type Pricing struct {
+	InputPerM  float64 // cost per 1M input tokens
+	OutputPerM float64 // cost per 1M output tokens
+}
+
+// EstimateCost returns the estimated cost for the given token counts.
+func (p Pricing) EstimateCost(inputTokens, outputTokens int) float64 {
+	return float64(inputTokens)/1_000_000*p.InputPerM +
+		float64(outputTokens)/1_000_000*p.OutputPerM
+}
+
+// ModelPricing returns the pricing for a model alias (e.g. "opus", "sonnet", "haiku").
+// Unknown models default to Sonnet pricing. When adding new providers (e.g. OpenAI),
+// extend this function or move to per-adapter pricing methods on the LLM interface.
+func ModelPricing(model string) Pricing {
+	switch model {
+	case "opus":
+		return Pricing{InputPerM: 15.0, OutputPerM: 75.0}
+	case "haiku":
+		return Pricing{InputPerM: 0.25, OutputPerM: 1.25}
+	default: // sonnet and unknown models
+		return Pricing{InputPerM: 3.0, OutputPerM: 15.0}
+	}
+}
+
 // TotalInputTokens returns all input tokens (direct + cache creation + cache read).
 func (u Usage) TotalInputTokens() int {
 	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens

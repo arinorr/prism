@@ -13,6 +13,7 @@ import (
 	"github.com/arinorr/prism/internal/config"
 	"github.com/arinorr/prism/internal/diff"
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm"
 	"github.com/arinorr/prism/internal/llm/claude"
 	"github.com/arinorr/prism/internal/report"
 )
@@ -411,9 +412,6 @@ const (
 	promptOverheadTokens = 2000
 	// expectedOutputTokens is the average output per agent (findings JSON).
 	expectedOutputTokens = 1000
-	// Sonnet pricing per million tokens (used for rough cost estimate).
-	sonnetInputPricePerM  = 3.0
-	sonnetOutputPricePerM = 15.0
 )
 
 // printEstimate shows projected token usage based on diff size and roles.
@@ -433,21 +431,11 @@ func printEstimate(diffBytes int, roles []agents.Role) {
 		modelCounts[model]++
 	}
 
-	// Estimate cost per model tier.
+	// Estimate cost per model tier using pricing from the LLM layer.
 	var costEstimate float64
 	for model, count := range modelCounts {
-		input := float64(tokensPerAgent * count)
-		output := float64(expectedOutputTokens * count)
-		var inRate, outRate float64
-		switch model {
-		case "opus":
-			inRate, outRate = 15.0, 75.0
-		case "haiku":
-			inRate, outRate = 0.25, 1.25
-		default: // sonnet
-			inRate, outRate = sonnetInputPricePerM, sonnetOutputPricePerM
-		}
-		costEstimate += input/1_000_000*inRate + output/1_000_000*outRate
+		pricing := llm.ModelPricing(model)
+		costEstimate += pricing.EstimateCost(tokensPerAgent*count, expectedOutputTokens*count)
 	}
 
 	fmt.Println("📏 Token estimate (approximate):")
