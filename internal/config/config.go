@@ -4,47 +4,41 @@ package config
 import (
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	// MaxRetriesNotSet indicates the max_retries field was not set in config.
-	MaxRetriesNotSet = -1
-	// DiffContextLinesNotSet indicates diff_context_lines was not set.
-	// We use math.MinInt because -1 already means "keep all context lines".
-	DiffContextLinesNotSet = math.MinInt
-)
-
 // Config holds prism settings from .prism.yml and CLI flags.
-// MaxRetries and DiffContextLines use sentinel constants (MaxRetriesNotSet,
-// DiffContextLinesNotSet) to distinguish "not set" from an explicit zero value.
+// Pointer fields (MaxRetries, DiffContextLines) use nil to distinguish
+// "not set" from an explicit zero value, which is meaningful
+// (e.g. 0 retries = disabled, -1 context lines = keep all).
 type Config struct {
 	Roles            []string `yaml:"roles"`
 	Model            string   `yaml:"model"`
 	Format           string   `yaml:"format"`
 	AgentTimeout     string   `yaml:"agent_timeout"`
-	MaxRetries       int      `yaml:"max_retries"`
+	MaxRetries       *int     `yaml:"max_retries"`
 	MaxBudgetUSD     float64  `yaml:"max_budget_usd"`
-	DiffContextLines int      `yaml:"diff_context_lines"` // -1 = keep all, DiffContextLinesNotSet = use default (1)
+	DiffContextLines *int     `yaml:"diff_context_lines"` // nil = use default (1), -1 = keep all
 	NoCompress       bool     `yaml:"no_compress"`
 	StripPatterns    []string `yaml:"strip_patterns"`
 	DiffWarnBytes    int      `yaml:"diff_warn_bytes"`
 	DiffChunkBytes   int      `yaml:"diff_chunk_bytes"`
 }
 
+// IntPtr returns a pointer to the given int. Convenience for config construction.
+func IntPtr(n int) *int { return &n }
+
 // Default returns a Config with sensible defaults.
 func Default() Config {
 	return Config{
-		Format:           "html",
-		AgentTimeout:     "5m",
-		MaxRetries:       1,
-		DiffContextLines: 1,
-		DiffWarnBytes:    153600, // 150 KB
-		DiffChunkBytes:   307200, // 300 KB
+		Format:         "html",
+		AgentTimeout:   "5m",
+		MaxRetries:     IntPtr(1),
+		DiffWarnBytes:  153600, // 150 KB
+		DiffChunkBytes: 307200, // 300 KB
 	}
 }
 
@@ -54,15 +48,12 @@ func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path) // #nosec G304 -- path is from CLI flag with default ".prism.yml"
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Config{MaxRetries: MaxRetriesNotSet, DiffContextLines: DiffContextLinesNotSet}, nil
+			return Config{}, nil
 		}
 		return Config{}, err
 	}
 
-	cfg := Config{
-		MaxRetries:       MaxRetriesNotSet,
-		DiffContextLines: DiffContextLinesNotSet,
-	}
+	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
 	}
@@ -103,13 +94,13 @@ func mergeInto(dst, src *Config) {
 	if src.AgentTimeout != "" {
 		dst.AgentTimeout = src.AgentTimeout
 	}
-	if src.MaxRetries != MaxRetriesNotSet {
+	if src.MaxRetries != nil {
 		dst.MaxRetries = src.MaxRetries
 	}
 	if src.MaxBudgetUSD > 0 {
 		dst.MaxBudgetUSD = src.MaxBudgetUSD
 	}
-	if src.DiffContextLines != DiffContextLinesNotSet {
+	if src.DiffContextLines != nil {
 		dst.DiffContextLines = src.DiffContextLines
 	}
 	if src.NoCompress {
@@ -126,20 +117,20 @@ func mergeInto(dst, src *Config) {
 	}
 }
 
-// MaxRetriesVal returns the MaxRetries value, defaulting to 0 if not set.
+// MaxRetriesVal returns the MaxRetries value, defaulting to 0 if nil.
 func (c *Config) MaxRetriesVal() int {
-	if c.MaxRetries == MaxRetriesNotSet {
+	if c.MaxRetries == nil {
 		return 0
 	}
-	return c.MaxRetries
+	return *c.MaxRetries
 }
 
-// DiffContextLinesVal returns the configured context lines, defaulting to 1 if not set.
+// DiffContextLinesVal returns the configured context lines, defaulting to 1.
 func (c *Config) DiffContextLinesVal() int {
-	if c.DiffContextLines == DiffContextLinesNotSet {
+	if c.DiffContextLines == nil {
 		return 1
 	}
-	return c.DiffContextLines
+	return *c.DiffContextLines
 }
 
 // TimeoutDuration parses the AgentTimeout string as a Go duration.

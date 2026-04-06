@@ -86,12 +86,12 @@ func TestLoad_PartialYAML(t *testing.T) {
 	if cfg.Model != "opus" {
 		t.Errorf("expected model 'opus', got %q", cfg.Model)
 	}
-	// Unset fields should be sentinel/zero.
+	// Unset fields should be nil/zero.
 	if len(cfg.Roles) != 0 {
 		t.Errorf("expected empty roles, got %v", cfg.Roles)
 	}
-	if cfg.MaxRetries != MaxRetriesNotSet {
-		t.Errorf("expected MaxRetriesNotSet, got %v", cfg.MaxRetries)
+	if cfg.MaxRetries != nil {
+		t.Errorf("expected nil MaxRetries, got %v", cfg.MaxRetries)
 	}
 }
 
@@ -130,31 +130,26 @@ func TestLoad_ExplicitZeroRetries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.MaxRetries == MaxRetriesNotSet {
-		t.Fatal("expected MaxRetries to be set for explicit 0")
+	if cfg.MaxRetries == nil {
+		t.Fatal("expected non-nil MaxRetries for explicit 0")
 	}
-	if cfg.MaxRetries != 0 {
-		t.Errorf("expected 0 retries, got %d", cfg.MaxRetries)
+	if *cfg.MaxRetries != 0 {
+		t.Errorf("expected 0 retries, got %d", *cfg.MaxRetries)
 	}
 }
 
 func TestMerge_CLIOverridesFileOverridesDefaults(t *testing.T) {
 	def := Config{
-		AgentTimeout:     "5m",
-		MaxRetries:       1,
-		DiffContextLines: 1,
-		DiffWarnBytes:    150000,
+		AgentTimeout:  "5m",
+		MaxRetries:    IntPtr(1),
+		DiffWarnBytes: 150000,
 	}
 	file := Config{
-		Model:            "sonnet",
-		AgentTimeout:     "3m",
-		MaxRetries:       MaxRetriesNotSet,
-		DiffContextLines: DiffContextLinesNotSet,
+		Model:        "sonnet",
+		AgentTimeout: "3m",
 	}
 	cli := Config{
-		AgentTimeout:     "1m",
-		MaxRetries:       MaxRetriesNotSet,
-		DiffContextLines: DiffContextLinesNotSet,
+		AgentTimeout: "1m",
 	}
 
 	merged := Merge(&def, &file, &cli)
@@ -173,34 +168,34 @@ func TestMerge_CLIOverridesFileOverridesDefaults(t *testing.T) {
 	}
 }
 
-func TestMerge_SentinelValuesDoNotOverride(t *testing.T) {
-	def := Config{MaxRetries: 2, DiffContextLines: 1, Model: "opus"}
-	file := Config{MaxRetries: MaxRetriesNotSet, DiffContextLines: DiffContextLinesNotSet}
-	cli := Config{MaxRetries: MaxRetriesNotSet, DiffContextLines: DiffContextLinesNotSet}
+func TestMerge_ZeroValuesDoNotOverride(t *testing.T) {
+	def := Config{MaxRetries: IntPtr(2), Model: "opus"}
+	file := Config{} // all zero/nil
+	cli := Config{}  // all zero/nil
 
 	merged := Merge(&def, &file, &cli)
 	if merged.MaxRetriesVal() != 2 {
-		t.Errorf("sentinel file/cli should not override default, got retries %d", merged.MaxRetriesVal())
+		t.Errorf("nil file/cli should not override default, got retries %d", merged.MaxRetriesVal())
 	}
 	if merged.Model != "opus" {
-		t.Errorf("sentinel file/cli should not override default, got model %q", merged.Model)
+		t.Errorf("zero file/cli should not override default, got model %q", merged.Model)
 	}
 }
 
 func TestMerge_ExplicitZeroOverridesDefault(t *testing.T) {
-	def := Config{MaxRetries: 3, DiffContextLines: 1}
-	cli := Config{MaxRetries: 0, DiffContextLines: DiffContextLinesNotSet} // explicitly disable retries
+	def := Config{MaxRetries: IntPtr(3)}
+	cli := Config{MaxRetries: IntPtr(0)} // explicitly disable retries
 
-	merged := Merge(&def, &Config{MaxRetries: MaxRetriesNotSet, DiffContextLines: DiffContextLinesNotSet}, &cli)
+	merged := Merge(&def, &Config{}, &cli)
 	if merged.MaxRetriesVal() != 0 {
 		t.Errorf("explicit 0 should override default, got retries %d", merged.MaxRetriesVal())
 	}
 }
 
 func TestMerge_RolesOverride(t *testing.T) {
-	def := Config{MaxRetries: MaxRetriesNotSet, DiffContextLines: DiffContextLinesNotSet}
-	file := Config{Roles: []string{"sentinel"}, MaxRetries: MaxRetriesNotSet, DiffContextLines: DiffContextLinesNotSet}
-	cli := Config{Roles: []string{"architect", "editor"}, MaxRetries: MaxRetriesNotSet, DiffContextLines: DiffContextLinesNotSet}
+	def := Config{}
+	file := Config{Roles: []string{"sentinel"}}
+	cli := Config{Roles: []string{"architect", "editor"}}
 
 	merged := Merge(&def, &file, &cli)
 	if len(merged.Roles) != 2 || merged.Roles[0] != "architect" {
@@ -209,18 +204,17 @@ func TestMerge_RolesOverride(t *testing.T) {
 }
 
 func TestMerge_AllFieldsFromFile(t *testing.T) {
-	def := Config{MaxRetries: MaxRetriesNotSet, DiffContextLines: DiffContextLinesNotSet}
+	def := Config{}
 	file := Config{
-		Roles:            []string{"sentinel"},
-		Model:            "opus",
-		Format:           "html",
-		AgentTimeout:     "3m",
-		MaxRetries:       2,
-		DiffContextLines: DiffContextLinesNotSet,
-		DiffWarnBytes:    100000,
-		DiffChunkBytes:   200000,
+		Roles:          []string{"sentinel"},
+		Model:          "opus",
+		Format:         "html",
+		AgentTimeout:   "3m",
+		MaxRetries:     IntPtr(2),
+		DiffWarnBytes:  100000,
+		DiffChunkBytes: 200000,
 	}
-	cli := Config{MaxRetries: MaxRetriesNotSet, DiffContextLines: DiffContextLinesNotSet}
+	cli := Config{}
 
 	merged := Merge(&def, &file, &cli)
 	if merged.Model != "opus" {
@@ -246,15 +240,15 @@ func TestMerge_AllFieldsFromFile(t *testing.T) {
 	}
 }
 
-func TestMaxRetriesVal_NotSet(t *testing.T) {
-	cfg := Config{MaxRetries: MaxRetriesNotSet}
+func TestMaxRetriesVal_Nil(t *testing.T) {
+	cfg := Config{}
 	if cfg.MaxRetriesVal() != 0 {
-		t.Errorf("expected 0 for not-set, got %d", cfg.MaxRetriesVal())
+		t.Errorf("expected 0 for nil, got %d", cfg.MaxRetriesVal())
 	}
 }
 
 func TestMaxRetriesVal_Set(t *testing.T) {
-	cfg := Config{MaxRetries: 5}
+	cfg := Config{MaxRetries: IntPtr(5)}
 	if cfg.MaxRetriesVal() != 5 {
 		t.Errorf("expected 5, got %d", cfg.MaxRetriesVal())
 	}

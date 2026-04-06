@@ -16,6 +16,10 @@ import (
 )
 
 // testOpts returns Options with writers silenced for tests.
+// Callers needing additional fields should start from this and override:
+//
+//	opts := testOpts()
+//	opts.Verbose = true
 func testOpts() *Options {
 	return &Options{Out: io.Discard, ErrOut: io.Discard}
 }

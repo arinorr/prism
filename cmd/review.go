@@ -127,15 +127,13 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 		return config.Config{}, fmt.Errorf("failed to load config: %w", cfgErr)
 	}
 	cliCfg := config.Config{
-		Model:            opts.modelFlag,
-		Format:           opts.formatFlag,
-		AgentTimeout:     opts.timeoutFlag,
-		MaxBudgetUSD:     opts.budgetFlag,
-		MaxRetries:       config.MaxRetriesNotSet,
-		DiffContextLines: config.DiffContextLinesNotSet,
+		Model:        opts.modelFlag,
+		Format:       opts.formatFlag,
+		AgentTimeout: opts.timeoutFlag,
+		MaxBudgetUSD: opts.budgetFlag,
 	}
 	if opts.retriesFlag >= 0 {
-		cliCfg.MaxRetries = opts.retriesFlag
+		cliCfg.MaxRetries = config.IntPtr(opts.retriesFlag)
 	}
 	if opts.rolesFlag != "" {
 		cliCfg.Roles = strings.Split(opts.rolesFlag, ",")
@@ -435,6 +433,9 @@ func printDryRun(dr *agents.DryRunResult, verbose bool) {
 		fmt.Printf("Max retries: %d\n", dr.MaxRetries)
 	}
 
+	if len(dr.Roles) == 0 {
+		return
+	}
 	fmt.Printf("\nSample prompt (for %s):\n", dr.Roles[0].Name)
 	fmt.Println("───────────────────────────────────────")
 	if len(dr.SamplePrompt) > previewMaxBytes {
