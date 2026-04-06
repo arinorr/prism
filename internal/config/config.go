@@ -11,8 +11,9 @@ import (
 )
 
 // Config holds prism settings from .prism.yml and CLI flags.
-// Pointer fields (MaxRetries) use nil to distinguish "not set" from
-// an explicit zero value, which is meaningful (e.g. 0 retries = disabled).
+// Pointer fields (MaxRetries, DiffContextLines) use nil to distinguish
+// "not set" from an explicit zero value, which is meaningful
+// (e.g. 0 retries = disabled, -1 context lines = keep all).
 type Config struct {
 	Roles            []string `yaml:"roles"`
 	Model            string   `yaml:"model"`

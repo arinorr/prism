@@ -26,14 +26,16 @@ type Data struct {
 
 const generalFile = "(general)"
 
-type scopeSection struct {
-	title  string
-	groups []dedupedFileGroup
+// ScopeSection groups deduped findings under a scope heading.
+type ScopeSection struct {
+	Title  string
+	Groups []DedupedFileGroup
 }
 
-type rawScopeSection struct {
-	title  string
-	groups []fileGroup
+// RawScopeSection groups raw findings under a scope heading.
+type RawScopeSection struct {
+	Title  string
+	Groups []FileGroup
 }
 
 // scopeTitles maps scope values to their markdown section titles.
@@ -43,17 +45,19 @@ var scopeTitles = map[string]string{
 	agents.ScopeCodebase: "Codebase Notes",
 }
 
-type fileGroup struct {
-	file     string
-	findings []agents.Finding
+// FileGroup groups raw findings by file.
+type FileGroup struct {
+	File     string
+	Findings []agents.Finding
 }
 
-type dedupedFileGroup struct {
-	file     string
-	findings []agents.DedupedFinding
+// DedupedFileGroup groups deduped findings by file.
+type DedupedFileGroup struct {
+	File     string
+	Findings []agents.DedupedFinding
 }
 
-func groupByFile(findings []agents.Finding) []fileGroup {
+func groupByFile(findings []agents.Finding) []FileGroup {
 	byFile := make(map[string][]agents.Finding)
 	for i := range findings {
 		file := findings[i].File
@@ -63,7 +67,7 @@ func groupByFile(findings []agents.Finding) []fileGroup {
 		byFile[file] = append(byFile[file], findings[i])
 	}
 
-	groups := make([]fileGroup, 0, len(byFile))
+	groups := make([]FileGroup, 0, len(byFile))
 	for file, fs := range byFile {
 		sort.Slice(fs, func(i, j int) bool {
 			si, sj := severityOrder(fs[i].Risk), severityOrder(fs[j].Risk)
@@ -72,7 +76,7 @@ func groupByFile(findings []agents.Finding) []fileGroup {
 			}
 			return fs[i].Line < fs[j].Line
 		})
-		groups = append(groups, fileGroup{file: file, findings: fs})
+		groups = append(groups, FileGroup{File: file, Findings: fs})
 	}
 
 	// Sort by severity: files with critical findings first, then warning, then alphabetically.
@@ -81,7 +85,7 @@ func groupByFile(findings []agents.Finding) []fileGroup {
 	return groups
 }
 
-func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
+func groupDedupedByFile(findings []agents.DedupedFinding) []DedupedFileGroup {
 	byFile := make(map[string][]agents.DedupedFinding)
 	for i := range findings {
 		file := findings[i].File
@@ -91,7 +95,7 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 		byFile[file] = append(byFile[file], findings[i])
 	}
 
-	groups := make([]dedupedFileGroup, 0, len(byFile))
+	groups := make([]DedupedFileGroup, 0, len(byFile))
 	for file, fs := range byFile {
 		sort.Slice(fs, func(i, j int) bool {
 			if fs[i].VoteCount != fs[j].VoteCount {
@@ -103,7 +107,7 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 			}
 			return fs[i].Line < fs[j].Line
 		})
-		groups = append(groups, dedupedFileGroup{file: file, findings: fs})
+		groups = append(groups, DedupedFileGroup{File: file, Findings: fs})
 	}
 
 	// Sort by severity: files with critical findings first, then warning, then alphabetically.
@@ -112,7 +116,7 @@ func groupDedupedByFile(findings []agents.DedupedFinding) []dedupedFileGroup {
 	return groups
 }
 
-func groupDedupedByScope(findings []agents.DedupedFinding) []scopeSection {
+func groupDedupedByScope(findings []agents.DedupedFinding) []ScopeSection {
 	scoped := map[string][]agents.DedupedFinding{}
 	for i := range findings {
 		scope := findings[i].Scope
@@ -122,19 +126,19 @@ func groupDedupedByScope(findings []agents.DedupedFinding) []scopeSection {
 		scoped[scope] = append(scoped[scope], findings[i])
 	}
 
-	var sections []scopeSection
+	var sections []ScopeSection
 	for _, s := range []string{agents.ScopeChanged, agents.ScopeExisting, agents.ScopeCodebase} {
 		if fs, ok := scoped[s]; ok && len(fs) > 0 {
-			sections = append(sections, scopeSection{
-				title:  scopeTitles[s],
-				groups: groupDedupedByFile(fs),
+			sections = append(sections, ScopeSection{
+				Title:  scopeTitles[s],
+				Groups: groupDedupedByFile(fs),
 			})
 		}
 	}
 	return sections
 }
 
-func groupRawByScope(findings []agents.Finding) []rawScopeSection {
+func groupRawByScope(findings []agents.Finding) []RawScopeSection {
 	scoped := map[string][]agents.Finding{}
 	for i := range findings {
 		scope := findings[i].Scope
@@ -144,12 +148,12 @@ func groupRawByScope(findings []agents.Finding) []rawScopeSection {
 		scoped[scope] = append(scoped[scope], findings[i])
 	}
 
-	var sections []rawScopeSection
+	var sections []RawScopeSection
 	for _, s := range []string{agents.ScopeChanged, agents.ScopeExisting, agents.ScopeCodebase} {
 		if fs, ok := scoped[s]; ok && len(fs) > 0 {
-			sections = append(sections, rawScopeSection{
-				title:  scopeTitles[s],
-				groups: groupByFile(fs),
+			sections = append(sections, RawScopeSection{
+				Title:  scopeTitles[s],
+				Groups: groupByFile(fs),
 			})
 		}
 	}
@@ -229,14 +233,14 @@ type severityKey struct {
 	critical, warning int
 }
 
-func sortRawFileGroups(groups []fileGroup) {
+func sortRawFileGroups(groups []FileGroup) {
 	if len(groups) <= 1 {
 		return
 	}
 	keys := make([]severityKey, len(groups))
 	for i := range groups {
-		for j := range groups[i].findings {
-			switch groups[i].findings[j].Risk {
+		for j := range groups[i].Findings {
+			switch groups[i].Findings[j].Risk {
 			case severityCritical:
 				keys[i].critical++
 			case severityWarning:
@@ -251,18 +255,18 @@ func sortRawFileGroups(groups []fileGroup) {
 		if keys[i].warning != keys[j].warning {
 			return keys[i].warning > keys[j].warning
 		}
-		return groups[i].file < groups[j].file
+		return groups[i].File < groups[j].File
 	})
 }
 
-func sortDedupedFileGroups(groups []dedupedFileGroup) {
+func sortDedupedFileGroups(groups []DedupedFileGroup) {
 	if len(groups) <= 1 {
 		return
 	}
 	keys := make([]severityKey, len(groups))
 	for i := range groups {
-		for j := range groups[i].findings {
-			switch groups[i].findings[j].Risk {
+		for j := range groups[i].Findings {
+			switch groups[i].Findings[j].Risk {
 			case severityCritical:
 				keys[i].critical++
 			case severityWarning:
@@ -277,7 +281,7 @@ func sortDedupedFileGroups(groups []dedupedFileGroup) {
 		if keys[i].warning != keys[j].warning {
 			return keys[i].warning > keys[j].warning
 		}
-		return groups[i].file < groups[j].file
+		return groups[i].File < groups[j].File
 	})
 }
 

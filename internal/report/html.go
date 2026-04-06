@@ -238,11 +238,11 @@ func riskClass(risk agents.Risk) string {
 	}
 }
 
-func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
+func buildDedupedFileGroup(g DedupedFileGroup, idx *int) htmlFileGroup {
 	var fc, fw, fi int
 	var findings []htmlFinding
-	for i := range g.findings {
-		f := &g.findings[i]
+	for i := range g.Findings {
+		f := &g.Findings[i]
 		switch f.Risk {
 		case severityCritical:
 			fc++
@@ -287,7 +287,7 @@ func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
 		*idx++
 	}
 	return htmlFileGroup{
-		File:          g.file,
+		File:          g.File,
 		CriticalCount: fc,
 		WarningCount:  fw,
 		InfoCount:     fi,
@@ -295,11 +295,11 @@ func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
 	}
 }
 
-func buildRawFileGroup(g fileGroup, idx *int) htmlFileGroup {
+func buildRawFileGroup(g FileGroup, idx *int) htmlFileGroup {
 	var fc, fw, fi int
 	var findings []htmlFinding
-	for j := range g.findings {
-		f := &g.findings[j]
+	for j := range g.Findings {
+		f := &g.Findings[j]
 		switch f.Risk {
 		case severityCritical:
 			fc++
@@ -328,7 +328,7 @@ func buildRawFileGroup(g fileGroup, idx *int) htmlFileGroup {
 		*idx++
 	}
 	return htmlFileGroup{
-		File:          g.file,
+		File:          g.File,
 		CriticalCount: fc,
 		WarningCount:  fw,
 		InfoCount:     fi,

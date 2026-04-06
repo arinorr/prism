@@ -131,11 +131,11 @@ func TestGroupByFile_SortsBySeverity(t *testing.T) {
 	if len(groups) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(groups))
 	}
-	if groups[0].findings[0].Risk != "critical" {
-		t.Errorf("expected critical first, got %q", groups[0].findings[0].Risk)
+	if groups[0].Findings[0].Risk != "critical" {
+		t.Errorf("expected critical first, got %q", groups[0].Findings[0].Risk)
 	}
-	if groups[0].findings[1].Risk != "warning" {
-		t.Errorf("expected warning second, got %q", groups[0].findings[1].Risk)
+	if groups[0].Findings[1].Risk != "warning" {
+		t.Errorf("expected warning second, got %q", groups[0].Findings[1].Risk)
 	}
 }
 
@@ -338,8 +338,8 @@ func TestGroupByFile_EmptyFile(t *testing.T) {
 	if len(groups) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(groups))
 	}
-	if groups[0].file != "(general)" {
-		t.Errorf("expected file name '(general)', got %q", groups[0].file)
+	if groups[0].File != "(general)" {
+		t.Errorf("expected file name '(general)', got %q", groups[0].File)
 	}
 }
 
@@ -353,8 +353,8 @@ func TestGroupByFile_MultipleFiles(t *testing.T) {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
 	}
 	// Groups should be sorted alphabetically by file.
-	if groups[0].file != "a.go" {
-		t.Errorf("expected first group 'a.go', got %q", groups[0].file)
+	if groups[0].File != "a.go" {
+		t.Errorf("expected first group 'a.go', got %q", groups[0].File)
 	}
 }
 
@@ -515,15 +515,15 @@ func TestGroupDedupedByFile(t *testing.T) {
 	if len(groups) != 2 {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
 	}
-	if groups[0].file != "a.go" {
-		t.Errorf("expected first group 'a.go', got %q", groups[0].file)
+	if groups[0].File != "a.go" {
+		t.Errorf("expected first group 'a.go', got %q", groups[0].File)
 	}
-	if len(groups[0].findings) != 2 {
-		t.Errorf("expected 2 findings in a.go group, got %d", len(groups[0].findings))
+	if len(groups[0].Findings) != 2 {
+		t.Errorf("expected 2 findings in a.go group, got %d", len(groups[0].Findings))
 	}
 	// Within a.go, sorted by vote count desc.
-	if groups[0].findings[0].VoteCount != 3 {
-		t.Errorf("expected first finding to have 3 votes, got %d", groups[0].findings[0].VoteCount)
+	if groups[0].Findings[0].VoteCount != 3 {
+		t.Errorf("expected first finding to have 3 votes, got %d", groups[0].Findings[0].VoteCount)
 	}
 }
 
@@ -535,8 +535,8 @@ func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
 	if len(groups) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(groups))
 	}
-	if groups[0].file != "(general)" {
-		t.Errorf("expected '(general)' for empty file, got %q", groups[0].file)
+	if groups[0].File != "(general)" {
+		t.Errorf("expected '(general)' for empty file, got %q", groups[0].File)
 	}
 }
 
@@ -553,9 +553,9 @@ func TestGroupDedupedByFile_SortedBySeverity(t *testing.T) {
 		t.Fatalf("expected 3 groups, got %d", len(groups))
 	}
 	// Sorted by severity (not alphabetical): z.go (critical), a.go (warning), m.go (info).
-	if groups[0].file != "z.go" || groups[1].file != "a.go" || groups[2].file != "m.go" {
+	if groups[0].File != "z.go" || groups[1].File != "a.go" || groups[2].File != "m.go" {
 		t.Errorf("expected [z.go, a.go, m.go] (by severity), got [%s, %s, %s]",
-			groups[0].file, groups[1].file, groups[2].file)
+			groups[0].File, groups[1].File, groups[2].File)
 	}
 }
 
@@ -570,9 +570,9 @@ func TestGroupDedupedByFile_AlphabeticalFallback(t *testing.T) {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
 	}
 	// Same severity → alphabetical: a.go before z.go.
-	if groups[0].file != "a.go" || groups[1].file != "z.go" {
+	if groups[0].File != "a.go" || groups[1].File != "z.go" {
 		t.Errorf("expected [a.go, z.go] (alphabetical fallback), got [%s, %s]",
-			groups[0].file, groups[1].file)
+			groups[0].File, groups[1].File)
 	}
 }
 
@@ -589,9 +589,9 @@ func TestGroupDedupedByFile_MultipleRisksPerFile(t *testing.T) {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
 	}
 	// Same critical count, but b.go has 1 warning vs a.go's 0 → b.go first.
-	if groups[0].file != "b.go" || groups[1].file != "a.go" {
+	if groups[0].File != "b.go" || groups[1].File != "a.go" {
 		t.Errorf("expected [b.go, a.go] (b.go has more warnings), got [%s, %s]",
-			groups[0].file, groups[1].file)
+			groups[0].File, groups[1].File)
 	}
 }
 
@@ -608,9 +608,9 @@ func TestGroupDedupedByFile_BothSeveritiesEqualFallback(t *testing.T) {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
 	}
 	// Equal critical and warning counts → alphabetical: a.go before z.go.
-	if groups[0].file != "a.go" || groups[1].file != "z.go" {
+	if groups[0].File != "a.go" || groups[1].File != "z.go" {
 		t.Errorf("expected [a.go, z.go] (full tiebreak to alphabetical), got [%s, %s]",
-			groups[0].file, groups[1].file)
+			groups[0].File, groups[1].File)
 	}
 }
 
