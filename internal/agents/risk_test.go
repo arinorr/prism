@@ -6,6 +6,7 @@ import (
 )
 
 func TestRisk_Order(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		risk Risk
 		want int
@@ -25,6 +26,7 @@ func TestRisk_Order(t *testing.T) {
 }
 
 func TestRisk_Order_Sorting(t *testing.T) {
+	t.Parallel()
 	// Critical should sort before warning, warning before info.
 	if RiskCritical.Order() >= RiskWarning.Order() {
 		t.Error("critical should have lower order than warning")
@@ -35,6 +37,7 @@ func TestRisk_Order_Sorting(t *testing.T) {
 }
 
 func TestRisk_Valid(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		risk Risk
 		want bool
@@ -56,36 +59,29 @@ func TestRisk_Valid(t *testing.T) {
 }
 
 func TestRisk_JSONUnmarshal(t *testing.T) {
-	var f Finding
-	data := []byte(`{"risk": "critical", "summary": "test"}`)
-	if err := json.Unmarshal(data, &f); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
+	t.Parallel()
+	tests := []struct {
+		name string
+		json string
+		want Risk
+	}{
+		{"lowercase critical", `{"risk": "critical"}`, RiskCritical},
+		{"normalizes whitespace", `{"risk": " WARNING "}`, RiskWarning},
+		{"normalizes case", `{"risk": "INFO"}`, RiskInfo},
+		{"invalid defaults to info", `{"risk": "BOGUS"}`, RiskInfo},
+		{"empty defaults to info", `{"risk": ""}`, RiskInfo},
 	}
-	if f.Risk != RiskCritical {
-		t.Errorf("got %q, want %q", f.Risk, RiskCritical)
-	}
-}
-
-func TestRisk_JSONUnmarshal_Normalizes(t *testing.T) {
-	// UnmarshalJSON lowercases and trims, so "CRITICAL" becomes "critical".
-	var f Finding
-	data := []byte(`{"risk": " WARNING "}`)
-	if err := json.Unmarshal(data, &f); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
-	}
-	if f.Risk != RiskWarning {
-		t.Errorf("got %q, want %q", f.Risk, RiskWarning)
-	}
-}
-
-func TestRisk_JSONUnmarshal_InvalidDefaultsToInfo(t *testing.T) {
-	// Invalid risk values are normalized to RiskInfo at the parse boundary.
-	var f Finding
-	data := []byte(`{"risk": "BOGUS"}`)
-	if err := json.Unmarshal(data, &f); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
-	}
-	if f.Risk != RiskInfo {
-		t.Errorf("invalid risk should default to info, got %q", f.Risk)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var f Finding
+			if err := json.Unmarshal([]byte(tt.json), &f); err != nil {
+				t.Fatalf("unmarshal failed: %v", err)
+			}
+			if f.Risk != tt.want {
+				t.Errorf("got %q, want %q", f.Risk, tt.want)
+			}
+		})
 	}
 }

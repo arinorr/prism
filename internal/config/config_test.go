@@ -9,6 +9,7 @@ import (
 )
 
 func TestDefault(t *testing.T) {
+	t.Parallel()
 	d := Default()
 	if d.Format != "html" {
 		t.Errorf("expected format 'html', got %q", d.Format)
@@ -28,6 +29,7 @@ func TestDefault(t *testing.T) {
 }
 
 func TestLoad_ValidYAML(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".prism.yml")
 	content := `
@@ -73,6 +75,7 @@ diff_chunk_bytes: 200000
 }
 
 func TestLoad_PartialYAML(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".prism.yml")
 	if err := os.WriteFile(path, []byte("model: opus\n"), 0o644); err != nil {
@@ -96,6 +99,7 @@ func TestLoad_PartialYAML(t *testing.T) {
 }
 
 func TestLoad_FileNotFound(t *testing.T) {
+	t.Parallel()
 	cfg, err := Load("/nonexistent/.prism.yml")
 	if err != nil {
 		t.Fatalf("expected no error for missing file, got: %v", err)
@@ -107,6 +111,7 @@ func TestLoad_FileNotFound(t *testing.T) {
 }
 
 func TestLoad_MalformedYAML(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".prism.yml")
 	if err := os.WriteFile(path, []byte("roles: [not closed"), 0o644); err != nil {
@@ -120,6 +125,7 @@ func TestLoad_MalformedYAML(t *testing.T) {
 }
 
 func TestLoad_ExplicitZeroRetries(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".prism.yml")
 	if err := os.WriteFile(path, []byte("max_retries: 0\n"), 0o644); err != nil {
@@ -139,6 +145,7 @@ func TestLoad_ExplicitZeroRetries(t *testing.T) {
 }
 
 func TestMerge_CLIOverridesFileOverridesDefaults(t *testing.T) {
+	t.Parallel()
 	def := Config{
 		AgentTimeout:  "5m",
 		MaxRetries:    IntPtr(1),
@@ -169,6 +176,7 @@ func TestMerge_CLIOverridesFileOverridesDefaults(t *testing.T) {
 }
 
 func TestMerge_ZeroValuesDoNotOverride(t *testing.T) {
+	t.Parallel()
 	def := Config{MaxRetries: IntPtr(2), Model: "opus"}
 	file := Config{} // all zero/nil
 	cli := Config{}  // all zero/nil
@@ -183,6 +191,7 @@ func TestMerge_ZeroValuesDoNotOverride(t *testing.T) {
 }
 
 func TestMerge_ExplicitZeroOverridesDefault(t *testing.T) {
+	t.Parallel()
 	def := Config{MaxRetries: IntPtr(3)}
 	cli := Config{MaxRetries: IntPtr(0)} // explicitly disable retries
 
@@ -193,6 +202,7 @@ func TestMerge_ExplicitZeroOverridesDefault(t *testing.T) {
 }
 
 func TestMerge_RolesOverride(t *testing.T) {
+	t.Parallel()
 	def := Config{}
 	file := Config{Roles: []string{"sentinel"}}
 	cli := Config{Roles: []string{"architect", "editor"}}
@@ -204,6 +214,7 @@ func TestMerge_RolesOverride(t *testing.T) {
 }
 
 func TestMerge_AllFieldsFromFile(t *testing.T) {
+	t.Parallel()
 	def := Config{}
 	file := Config{
 		Roles:          []string{"sentinel"},
@@ -241,6 +252,7 @@ func TestMerge_AllFieldsFromFile(t *testing.T) {
 }
 
 func TestMaxRetriesVal_Nil(t *testing.T) {
+	t.Parallel()
 	cfg := Config{}
 	if cfg.MaxRetriesVal() != 0 {
 		t.Errorf("expected 0 for nil, got %d", cfg.MaxRetriesVal())
@@ -248,6 +260,7 @@ func TestMaxRetriesVal_Nil(t *testing.T) {
 }
 
 func TestMaxRetriesVal_Set(t *testing.T) {
+	t.Parallel()
 	cfg := Config{MaxRetries: IntPtr(5)}
 	if cfg.MaxRetriesVal() != 5 {
 		t.Errorf("expected 5, got %d", cfg.MaxRetriesVal())
@@ -255,6 +268,7 @@ func TestMaxRetriesVal_Set(t *testing.T) {
 }
 
 func TestTimeoutDuration_Valid(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  time.Duration
@@ -274,6 +288,7 @@ func TestTimeoutDuration_Valid(t *testing.T) {
 }
 
 func TestTimeoutDuration_Empty(t *testing.T) {
+	t.Parallel()
 	cfg := Config{}
 	if d := cfg.TimeoutDuration(); d != 0 {
 		t.Errorf("expected 0 for empty timeout, got %v", d)
@@ -281,6 +296,7 @@ func TestTimeoutDuration_Empty(t *testing.T) {
 }
 
 func TestTimeoutDuration_Invalid(t *testing.T) {
+	t.Parallel()
 	cfg := Config{AgentTimeout: "not-a-duration"}
 	if d := cfg.TimeoutDuration(); d != 0 {
 		t.Errorf("expected 0 for invalid timeout, got %v", d)
@@ -288,6 +304,7 @@ func TestTimeoutDuration_Invalid(t *testing.T) {
 }
 
 func TestLoad_InvalidTimeout(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".prism.yml")
 	if err := os.WriteFile(path, []byte("agent_timeout: \"5 minutes\"\n"), 0o644); err != nil {

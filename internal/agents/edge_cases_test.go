@@ -7,6 +7,7 @@ import (
 // Parser edge cases.
 
 func TestParseFeedback_TruncatedJSON(t *testing.T) {
+	t.Parallel()
 	input := `{"findings": [{"file": "a.go", "line": 10, "risk"`
 	_, err := parseFeedback("test", input)
 	if err == nil {
@@ -15,6 +16,7 @@ func TestParseFeedback_TruncatedJSON(t *testing.T) {
 }
 
 func TestParseFeedback_WrongSchemaReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	// Valid JSON but no "findings" key — parses successfully with 0 findings.
 	// This is correct: the agent found nothing.
 	input := `{"errors": ["something went wrong"]}`
@@ -28,6 +30,7 @@ func TestParseFeedback_WrongSchemaReturnsEmpty(t *testing.T) {
 }
 
 func TestParseFeedback_NullFindingsReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	// null findings parses as empty array — agent found nothing.
 	input := `{"findings": null}`
 	fb, err := parseFeedback("test", input)
@@ -40,6 +43,7 @@ func TestParseFeedback_NullFindingsReturnsEmpty(t *testing.T) {
 }
 
 func TestParseFeedback_ExtraFieldsForwardCompat(t *testing.T) {
+	t.Parallel()
 	input := `{"findings":[{"file":"a.go","line":1,"risk":"info","summary":"ok","detail":"d","new_field":"v"}],"metadata":{}}`
 	fb, err := parseFeedback("test", input)
 	if err != nil {
@@ -51,6 +55,7 @@ func TestParseFeedback_ExtraFieldsForwardCompat(t *testing.T) {
 }
 
 func TestParseFeedback_NegativeConfidenceClamped(t *testing.T) {
+	t.Parallel()
 	input := `{"findings":[{"file":"a.go","line":1,"risk":"info","summary":"s","detail":"d","confidence":-0.5}]}`
 	fb, err := parseFeedback("test", input)
 	if err != nil {
@@ -63,6 +68,7 @@ func TestParseFeedback_NegativeConfidenceClamped(t *testing.T) {
 }
 
 func TestParseFeedback_ConfidenceExactlyAtThreshold(t *testing.T) {
+	t.Parallel()
 	input := `{"findings":[{"file":"a.go","line":1,"risk":"info","summary":"s","detail":"d","confidence":0.5}]}`
 	fb, err := parseFeedback("test", input)
 	if err != nil {
@@ -75,6 +81,7 @@ func TestParseFeedback_ConfidenceExactlyAtThreshold(t *testing.T) {
 }
 
 func TestParseFeedback_ConfidenceJustBelowThreshold(t *testing.T) {
+	t.Parallel()
 	input := `{"findings":[{"file":"a.go","line":1,"risk":"info","summary":"s","detail":"d","confidence":0.49}]}`
 	fb, err := parseFeedback("test", input)
 	if err != nil {
@@ -86,6 +93,7 @@ func TestParseFeedback_ConfidenceJustBelowThreshold(t *testing.T) {
 }
 
 func TestParseFeedback_SeverityBackwardCompat(t *testing.T) {
+	t.Parallel()
 	// Old "severity" field should be mapped to "risk".
 	input := `{"findings":[{"file":"a.go","line":1,"severity":"warning","summary":"s","detail":"d"}]}`
 	fb, err := parseFeedback("test", input)
@@ -101,6 +109,7 @@ func TestParseFeedback_SeverityBackwardCompat(t *testing.T) {
 }
 
 func TestParseFeedback_EmptyResponse(t *testing.T) {
+	t.Parallel()
 	_, err := parseFeedback("test", "")
 	if err == nil {
 		t.Fatal("expected error for empty response")
@@ -108,6 +117,7 @@ func TestParseFeedback_EmptyResponse(t *testing.T) {
 }
 
 func TestParseFeedback_WhitespaceOnlyResponse(t *testing.T) {
+	t.Parallel()
 	_, err := parseFeedback("test", "   \n\t  ")
 	if err == nil {
 		t.Fatal("expected error for whitespace-only response")
@@ -117,6 +127,7 @@ func TestParseFeedback_WhitespaceOnlyResponse(t *testing.T) {
 // Dedup edge cases.
 
 func TestDeduplicate_SameLineSameFile(t *testing.T) {
+	t.Parallel()
 	// Two findings at exactly the same line should merge.
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Nil pointer dereference", Detail: "d", Role: "sentinel"},
@@ -132,6 +143,7 @@ func TestDeduplicate_SameLineSameFile(t *testing.T) {
 }
 
 func TestDeduplicate_EmptySummary(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: RiskInfo, Category: "style", Scope: ScopeChanged, Summary: "", Detail: "d1", Role: "editor"},
 		{File: "a.go", Line: 10, Risk: RiskInfo, Category: "style", Scope: ScopeChanged, Summary: "", Detail: "d2", Role: "sentinel"},
@@ -144,6 +156,7 @@ func TestDeduplicate_EmptySummary(t *testing.T) {
 }
 
 func TestDeduplicate_SingleFindingWithTotalAgents(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 1, Risk: RiskInfo, Category: "style", Scope: ScopeChanged, Summary: "test", Detail: "d", Role: "editor"},
 	}
@@ -160,6 +173,7 @@ func TestDeduplicate_SingleFindingWithTotalAgents(t *testing.T) {
 }
 
 func TestDeduplicate_DifferentFilesSameIssue(t *testing.T) {
+	t.Parallel()
 	// Same summary but different files should NOT merge.
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Missing nil check", Detail: "d", Role: "sentinel"},
@@ -172,6 +186,7 @@ func TestDeduplicate_DifferentFilesSameIssue(t *testing.T) {
 }
 
 func TestDeduplicate_NilAndEmptySlice(t *testing.T) {
+	t.Parallel()
 	deduped := Deduplicate(nil, 7)
 	if len(deduped) != 0 {
 		t.Errorf("nil findings should produce empty deduped, got %d", len(deduped))
@@ -185,6 +200,7 @@ func TestDeduplicate_NilAndEmptySlice(t *testing.T) {
 // Health score edge cases.
 
 func TestHealthScore_NoFindings(t *testing.T) {
+	t.Parallel()
 	score := ComputeHealthScore(nil)
 	if score.Score != 100 {
 		t.Errorf("no findings should give 100, got %d", score.Score)
@@ -195,6 +211,7 @@ func TestHealthScore_NoFindings(t *testing.T) {
 }
 
 func TestHealthScore_ManyHighConsensusFindings(t *testing.T) {
+	t.Parallel()
 	// 5 critical findings all with unanimous consensus — score should floor at 0.
 	findings := make([]DedupedFinding, 5)
 	for i := range findings {
@@ -217,6 +234,7 @@ func TestHealthScore_ManyHighConsensusFindings(t *testing.T) {
 }
 
 func TestHealthScore_LowConsensusReducesImpact(t *testing.T) {
+	t.Parallel()
 	// A critical finding with 1/7 votes should penalize less than 7/7.
 	low := ComputeHealthScore([]DedupedFinding{
 		{Finding: Finding{Risk: RiskCritical, Scope: ScopeChanged}, VoteCount: 1, TotalAgents: 7},
@@ -232,6 +250,7 @@ func TestHealthScore_LowConsensusReducesImpact(t *testing.T) {
 // Normalize edge cases.
 
 func TestNormalizeFinding_InvalidRiskDefaultsToInfo(t *testing.T) {
+	t.Parallel()
 	f := Finding{Risk: "unknown_risk"}
 	NormalizeFinding(&f, "")
 	if f.Risk != RiskInfo {
@@ -240,6 +259,7 @@ func TestNormalizeFinding_InvalidRiskDefaultsToInfo(t *testing.T) {
 }
 
 func TestNormalizeFinding_InvalidScopeDefaultsToChanged(t *testing.T) {
+	t.Parallel()
 	f := Finding{Risk: RiskInfo, Scope: "invalid_scope"}
 	NormalizeFinding(&f, "")
 	if f.Scope != ScopeChanged {
@@ -248,6 +268,7 @@ func TestNormalizeFinding_InvalidScopeDefaultsToChanged(t *testing.T) {
 }
 
 func TestNormalizeFinding_MissingConfidenceGetsDefault(t *testing.T) {
+	t.Parallel()
 	f := Finding{Risk: RiskInfo, Confidence: 0}
 	NormalizeFinding(&f, "")
 	if f.Confidence != confidenceDefault {

@@ -79,6 +79,7 @@ func richTestData() *Data {
 // TestConsistency_AllFormatsContainSameFindings verifies that markdown, HTML,
 // and JSON reports all contain the same key data when given identical input.
 func TestConsistency_AllFormatsContainSameFindings(t *testing.T) {
+	t.Parallel()
 	d := richTestData()
 
 	md := Markdown(d)
@@ -157,6 +158,7 @@ func TestConsistency_AllFormatsContainSameFindings(t *testing.T) {
 // TestConsistency_EmptyFindingsAllFormats verifies all three formats handle
 // a review with zero findings gracefully.
 func TestConsistency_EmptyFindingsAllFormats(t *testing.T) {
+	t.Parallel()
 	d := &Data{
 		PR:     &gh.PR{Number: "1", Title: "Clean PR", Files: []gh.FileChange{{Path: "a.go"}}},
 		Result: &agents.ReviewResult{Summary: "No issues found.", HealthScore: agents.HealthScore{Score: 100, Grade: "A+", Verdict: "approve", Description: "Perfect"}},
@@ -188,6 +190,7 @@ func TestConsistency_EmptyFindingsAllFormats(t *testing.T) {
 // TestConsistency_SpecialCharsInFindings verifies that HTML-sensitive
 // characters in findings don't break report generation.
 func TestConsistency_SpecialCharsInFindings(t *testing.T) {
+	t.Parallel()
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Fix <script>alert('xss')</script>", Files: []gh.FileChange{{Path: "a.go"}}},
 		Result: &agents.ReviewResult{
@@ -232,6 +235,7 @@ func TestConsistency_SpecialCharsInFindings(t *testing.T) {
 // TestConsistency_GeneralFileFinding verifies that findings with empty file
 // names are rendered as "(general)" in reports.
 func TestConsistency_GeneralFileFinding(t *testing.T) {
+	t.Parallel()
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
 		Result: &agents.ReviewResult{

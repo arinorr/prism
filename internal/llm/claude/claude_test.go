@@ -21,6 +21,7 @@ func envelope(result string) []byte {
 }
 
 func TestComplete_JSONOutput(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name != "claude" {
 			t.Errorf("expected 'claude', got %q", name)
@@ -52,6 +53,7 @@ func TestComplete_JSONOutput(t *testing.T) {
 }
 
 func TestComplete_PlainOutput(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, name string, args ...string) ([]byte, error) {
 		// Even non-JSON requests now use --output-format json for usage metrics.
 		found := false
@@ -78,6 +80,7 @@ func TestComplete_PlainOutput(t *testing.T) {
 }
 
 func TestComplete_PlainOutputWithEnvelope(t *testing.T) {
+	t.Parallel()
 	// When Claude wraps even non-JSON requests in an envelope.
 	adapter := newWithRunner(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
 		return envelope("Summary text here."), nil
@@ -95,6 +98,7 @@ func TestComplete_PlainOutputWithEnvelope(t *testing.T) {
 }
 
 func TestComplete_SystemPromptPassedAsFlag(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		found := false
 		for i, a := range args {
@@ -121,6 +125,7 @@ func TestComplete_SystemPromptPassedAsFlag(t *testing.T) {
 }
 
 func TestComplete_NoSystemPromptOmitsFlag(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		for _, a := range args {
 			if a == "--append-system-prompt" {
@@ -139,6 +144,7 @@ func TestComplete_NoSystemPromptOmitsFlag(t *testing.T) {
 }
 
 func TestComplete_CommandError(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
 		return nil, fmt.Errorf("command not found")
 	})
@@ -153,6 +159,7 @@ func TestComplete_CommandError(t *testing.T) {
 }
 
 func TestComplete_InvalidEnvelope(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
 		return []byte("not json"), nil
 	})
@@ -167,6 +174,7 @@ func TestComplete_InvalidEnvelope(t *testing.T) {
 }
 
 func TestComplete_ModelPassedAsFlag(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		found := false
 		for i, a := range args {
@@ -190,6 +198,7 @@ func TestComplete_ModelPassedAsFlag(t *testing.T) {
 }
 
 func TestComplete_NoModelOmitsFlag(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		for _, a := range args {
 			if a == "--model" {
@@ -208,6 +217,7 @@ func TestComplete_NoModelOmitsFlag(t *testing.T) {
 }
 
 func TestParseEnvelope_Valid(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
 		return envelope("hello"), nil
 	})
@@ -221,6 +231,7 @@ func TestParseEnvelope_Valid(t *testing.T) {
 }
 
 func TestParseEnvelope_Invalid(t *testing.T) {
+	t.Parallel()
 	adapter := newWithRunner(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
 		return []byte("not json"), nil
 	})
@@ -231,6 +242,7 @@ func TestParseEnvelope_Invalid(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
+	t.Parallel()
 	adapter := New()
 	if adapter == nil {
 		t.Fatal("expected non-nil adapter")

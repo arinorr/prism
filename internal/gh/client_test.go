@@ -7,6 +7,7 @@ import (
 )
 
 func TestGitStatusToString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -27,6 +28,7 @@ func TestGitStatusToString(t *testing.T) {
 }
 
 func TestDetectBaseBranch(t *testing.T) {
+	t.Parallel()
 	client, _ := NewClient()
 	branch := client.detectBaseBranch()
 	if branch != "main" && branch != "master" {
@@ -35,6 +37,7 @@ func TestDetectBaseBranch(t *testing.T) {
 }
 
 func TestDetectBaseBranch_FallsBackToMain(t *testing.T) {
+	t.Parallel()
 	client := &Client{
 		run: func(name string, args ...string) ([]byte, error) {
 			return nil, fmt.Errorf("not found")
@@ -47,6 +50,7 @@ func TestDetectBaseBranch_FallsBackToMain(t *testing.T) {
 }
 
 func TestDetectBaseBranch_FindsMaster(t *testing.T) {
+	t.Parallel()
 	client := &Client{
 		run: func(name string, args ...string) ([]byte, error) {
 			// Fail for "main", succeed for "master".
@@ -65,6 +69,7 @@ func TestDetectBaseBranch_FindsMaster(t *testing.T) {
 }
 
 func TestNewClient(t *testing.T) {
+	t.Parallel()
 	client, err := NewClient()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -81,48 +86,56 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestValidatePRRef_ValidNumeric(t *testing.T) {
+	t.Parallel()
 	if err := ValidatePRRef("42"); err != nil {
 		t.Errorf("expected valid, got: %v", err)
 	}
 }
 
 func TestValidatePRRef_ValidURL(t *testing.T) {
+	t.Parallel()
 	if err := ValidatePRRef("https://github.com/org/repo/pull/42"); err != nil {
 		t.Errorf("expected valid, got: %v", err)
 	}
 }
 
 func TestValidatePRRef_ValidBranch(t *testing.T) {
+	t.Parallel()
 	if err := ValidatePRRef("feature/my-branch"); err != nil {
 		t.Errorf("expected valid, got: %v", err)
 	}
 }
 
 func TestValidatePRRef_FlagInjection(t *testing.T) {
+	t.Parallel()
 	if err := ValidatePRRef("--exec=evil"); err == nil {
 		t.Error("expected error for flag injection")
 	}
 }
 
 func TestValidatePRRef_DoubleDash(t *testing.T) {
+	t.Parallel()
 	if err := ValidatePRRef("--json"); err == nil {
 		t.Error("expected error for double-dash flag")
 	}
 }
 
 func TestValidatePRRef_SingleDash(t *testing.T) {
+	t.Parallel()
 	if err := ValidatePRRef("-v"); err == nil {
 		t.Error("expected error for single-dash flag")
 	}
 }
 
 func TestValidatePRRef_Empty(t *testing.T) {
+	t.Parallel()
 	if err := ValidatePRRef(""); err == nil {
 		t.Error("expected error for empty string")
 	}
 }
 
 func TestValidatePRRef_ShellMetachars(t *testing.T) {
+	t.Parallel()
 	for _, input := range []string{"42; rm -rf /", "$(whoami)", "42 && echo bad", "42`id`"} {
 		if err := ValidatePRRef(input); err == nil {
 			t.Errorf("expected error for %q", input)
@@ -131,6 +144,7 @@ func TestValidatePRRef_ShellMetachars(t *testing.T) {
 }
 
 func TestGetPRDiff_RejectsInvalidRef(t *testing.T) {
+	t.Parallel()
 	client := &Client{useGH: true, run: defaultRunner}
 	_, err := client.GetPRDiff("--exec=evil")
 	if err == nil {
@@ -142,6 +156,7 @@ func TestGetPRDiff_RejectsInvalidRef(t *testing.T) {
 }
 
 func TestGetPRDiff_RoutesToGH(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	client := &Client{
 		useGH: true,
@@ -187,6 +202,7 @@ func TestGetPRDiff_RoutesToGH(t *testing.T) {
 }
 
 func TestGetPRDiffGH_MetadataError(t *testing.T) {
+	t.Parallel()
 	client := &Client{
 		useGH: true,
 		run: func(name string, args ...string) ([]byte, error) {
@@ -203,6 +219,7 @@ func TestGetPRDiffGH_MetadataError(t *testing.T) {
 }
 
 func TestGetPRDiffGH_InvalidMetadataJSON(t *testing.T) {
+	t.Parallel()
 	client := &Client{
 		useGH: true,
 		run: func(name string, args ...string) ([]byte, error) {
@@ -219,6 +236,7 @@ func TestGetPRDiffGH_InvalidMetadataJSON(t *testing.T) {
 }
 
 func TestGetPRDiffGH_DiffError(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	client := &Client{
 		useGH: true,
@@ -240,6 +258,7 @@ func TestGetPRDiffGH_DiffError(t *testing.T) {
 }
 
 func TestGetPRDiffGit(t *testing.T) {
+	t.Parallel()
 	client := &Client{
 		useGH: false,
 		run: func(name string, args ...string) ([]byte, error) {
@@ -290,6 +309,7 @@ func TestGetPRDiffGit(t *testing.T) {
 }
 
 func TestGetPRDiffGit_DiffError(t *testing.T) {
+	t.Parallel()
 	client := &Client{
 		useGH: false,
 		run: func(name string, args ...string) ([]byte, error) {
@@ -309,6 +329,7 @@ func TestGetPRDiffGit_DiffError(t *testing.T) {
 }
 
 func TestGetPRDiffGit_NameStatusError(t *testing.T) {
+	t.Parallel()
 	client := &Client{
 		useGH: false,
 		run: func(name string, args ...string) ([]byte, error) {
@@ -334,6 +355,7 @@ func TestGetPRDiffGit_NameStatusError(t *testing.T) {
 }
 
 func TestPostComments_RequiresGH(t *testing.T) {
+	t.Parallel()
 	client := &Client{useGH: false}
 	pr := &PR{Number: "1", HeadSHA: "abc123"}
 	err := client.PostComments(pr, []Suggestion{{File: "a.go", Line: 1, Body: "test", Role: "test"}})
@@ -346,6 +368,7 @@ func TestPostComments_RequiresGH(t *testing.T) {
 }
 
 func TestPostComments_RequiresHeadSHA(t *testing.T) {
+	t.Parallel()
 	client := &Client{useGH: true}
 	pr := &PR{Number: "1", HeadSHA: ""}
 	err := client.PostComments(pr, []Suggestion{{File: "a.go", Line: 1, Body: "test", Role: "test"}})
@@ -358,6 +381,7 @@ func TestPostComments_RequiresHeadSHA(t *testing.T) {
 }
 
 func TestPostComments_EmptySuggestions(t *testing.T) {
+	t.Parallel()
 	client := &Client{useGH: true}
 	pr := &PR{Number: "1", HeadSHA: "abc123"}
 	err := client.PostComments(pr, []Suggestion{})
@@ -367,6 +391,7 @@ func TestPostComments_EmptySuggestions(t *testing.T) {
 }
 
 func TestPostComments_Success(t *testing.T) {
+	t.Parallel()
 	execCalls := 0
 	client := &Client{
 		useGH: true,
@@ -390,6 +415,7 @@ func TestPostComments_Success(t *testing.T) {
 }
 
 func TestPostComments_PartialFailure(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	client := &Client{
 		useGH: true,
@@ -421,6 +447,7 @@ func TestPostComments_PartialFailure(t *testing.T) {
 }
 
 func TestPR_Fields(t *testing.T) {
+	t.Parallel()
 	pr := &PR{
 		Number: "42", Title: "Test", Body: "desc",
 		Diff: "+ line", HeadSHA: "abc", Files: []FileChange{{Path: "a.go"}},
@@ -431,6 +458,7 @@ func TestPR_Fields(t *testing.T) {
 }
 
 func TestSuggestion_Fields(t *testing.T) {
+	t.Parallel()
 	s := Suggestion{File: "a.go", Line: 10, Body: "fix", Role: "sentinel"}
 	if s.File != "a.go" || s.Line != 10 || s.Role != "sentinel" {
 		t.Errorf("fields not set: %+v", s)

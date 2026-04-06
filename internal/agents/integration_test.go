@@ -295,6 +295,7 @@ func testSkills() map[string]string {
 // TestIntegration_FullReviewPipeline exercises the complete path:
 // dispatch agents → parse responses → deduplicate → score → summarize.
 func TestIntegration_FullReviewPipeline(t *testing.T) {
+	t.Parallel()
 	roles := testRoles()
 	orch := &Orchestrator{
 		roles:  roles,
@@ -388,6 +389,7 @@ func TestIntegration_FullReviewPipeline(t *testing.T) {
 // TestIntegration_ScopeDistribution verifies findings are correctly bucketed
 // by scope (changed, existing, codebase).
 func TestIntegration_ScopeDistribution(t *testing.T) {
+	t.Parallel()
 	orch := &Orchestrator{
 		roles:  testRoles(),
 		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
@@ -437,6 +439,7 @@ func TestIntegration_ScopeDistribution(t *testing.T) {
 // TestIntegration_PartialFailureProducesResults verifies that the pipeline
 // still produces a valid result when some agents fail.
 func TestIntegration_PartialFailureProducesResults(t *testing.T) {
+	t.Parallel()
 	var callCount int32
 	mock := &llmtest.Mock{
 		CompleteFunc: func(_ context.Context, req llm.Request) (string, llm.Usage, error) {
@@ -476,6 +479,7 @@ func TestIntegration_PartialFailureProducesResults(t *testing.T) {
 // TestIntegration_CleanPR verifies that agents returning empty findings
 // produce a healthy score.
 func TestIntegration_CleanPR(t *testing.T) {
+	t.Parallel()
 	orch := &Orchestrator{
 		roles:  testRoles(),
 		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
@@ -502,6 +506,7 @@ func TestIntegration_CleanPR(t *testing.T) {
 // TestIntegration_LowConfidenceFindingsFiltered verifies that findings below
 // the confidence threshold are dropped during parsing.
 func TestIntegration_LowConfidenceFindingsFiltered(t *testing.T) {
+	t.Parallel()
 	mock := &llmtest.Mock{
 		Response: `{"findings": [
 			{"file": "a.go", "line": 1, "risk": "warning", "category": "bug", "scope": "changed", "confidence": 0.9, "summary": "high confidence", "detail": "d"},
@@ -533,6 +538,7 @@ func TestIntegration_LowConfidenceFindingsFiltered(t *testing.T) {
 // TestIntegration_VerboseTracksPerAgentUsage verifies that per-agent usage
 // is collected even with verbose logging enabled.
 func TestIntegration_VerboseTracksPerAgentUsage(t *testing.T) {
+	t.Parallel()
 	roles := testRoles()[:3] // Sentinel, Know-It-All, Architect
 	orch := &Orchestrator{
 		roles:  roles,

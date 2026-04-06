@@ -37,6 +37,7 @@ func withMockClient(t *testing.T, pr *gh.PR, err error) {
 }
 
 func TestParseReviewArgs_BasicPR(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -53,6 +54,7 @@ func TestParseReviewArgs_BasicPR(t *testing.T) {
 }
 
 func TestParseReviewArgs_AllFlags(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{
 		"42", "--comment", "--verbose", "--dry-run", "--stdout",
 		"--roles", "sentinel,solver", "--format", "html",
@@ -84,6 +86,7 @@ func TestParseReviewArgs_AllFlags(t *testing.T) {
 }
 
 func TestParseReviewArgs_VShorthand(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "-v"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -94,6 +97,7 @@ func TestParseReviewArgs_VShorthand(t *testing.T) {
 }
 
 func TestParseReviewArgs_RolesEquals(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--roles=sentinel"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -104,6 +108,7 @@ func TestParseReviewArgs_RolesEquals(t *testing.T) {
 }
 
 func TestParseReviewArgs_FormatEquals(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--format=json"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -114,6 +119,7 @@ func TestParseReviewArgs_FormatEquals(t *testing.T) {
 }
 
 func TestParseReviewArgs_NoArgs(t *testing.T) {
+	t.Parallel()
 	_, err := parseReviewArgs([]string{})
 	if err == nil {
 		t.Fatal("expected error for no args")
@@ -124,6 +130,7 @@ func TestParseReviewArgs_NoArgs(t *testing.T) {
 }
 
 func TestParseReviewArgs_OnlyFlags(t *testing.T) {
+	t.Parallel()
 	_, err := parseReviewArgs([]string{"--verbose", "--dry-run"})
 	if err == nil {
 		t.Fatal("expected error when no PR ref given")
@@ -134,6 +141,7 @@ func TestParseReviewArgs_OnlyFlags(t *testing.T) {
 }
 
 func TestParseReviewArgs_UnknownFlag(t *testing.T) {
+	t.Parallel()
 	_, err := parseReviewArgs([]string{"42", "--nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for unknown flag")
@@ -144,6 +152,7 @@ func TestParseReviewArgs_UnknownFlag(t *testing.T) {
 }
 
 func TestParseReviewArgs_PRRefAsURL(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"https://github.com/org/repo/pull/42"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -154,6 +163,7 @@ func TestParseReviewArgs_PRRefAsURL(t *testing.T) {
 }
 
 func TestParseReviewArgs_FlagsBeforePR(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"--format", "md", "--comment", "42"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -170,72 +180,84 @@ func TestParseReviewArgs_FlagsBeforePR(t *testing.T) {
 }
 
 func TestSanitizeFilename_SimpleNumber(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename("42"); got != "42" {
 		t.Errorf("expected '42', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_URLStyleRef(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename("https://github.com/org/repo/pull/42"); got != "42" {
 		t.Errorf("expected '42', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_PathTraversal(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename("../../etc/passwd"); got != "passwd" {
 		t.Errorf("expected 'passwd', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_DoubleDots(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename("..42"); got != "42" {
 		t.Errorf("expected '42', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_Tilde(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename("~root"); got != "root" {
 		t.Errorf("expected 'root', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_Backslash(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename(`foo\bar`); got != "foobar" {
 		t.Errorf("expected 'foobar', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_SpecialChars(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename("PR#42!@$"); got != "PR42" {
 		t.Errorf("expected 'PR42', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_Empty(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename(""); got != "unknown" {
 		t.Errorf("expected 'unknown', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_OnlySpecialChars(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename("!!!"); got != "unknown" {
 		t.Errorf("expected 'unknown', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_Unicode(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename("PR-42-café"); got != "PR-42-caf" {
 		t.Errorf("expected 'PR-42-caf', got %q", got)
 	}
 }
 
 func TestSanitizeFilename_HyphenAndUnderscore(t *testing.T) {
+	t.Parallel()
 	if got := sanitizeFilename("my_pr-42"); got != "my_pr-42" {
 		t.Errorf("expected 'my_pr-42', got %q", got)
 	}
 }
 
 func TestWriteToFile_CreatesDirectories(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "nested", "report.md")
 	err := writeToFile("hello world", path)
@@ -252,6 +274,7 @@ func TestWriteToFile_CreatesDirectories(t *testing.T) {
 }
 
 func TestWriteToFile_OverwritesExisting(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.md")
 	if err := writeToFile("first", path); err != nil {
@@ -270,6 +293,7 @@ func TestWriteToFile_OverwritesExisting(t *testing.T) {
 }
 
 func TestWriteToFile_FilePermissions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.md")
 	if err := writeToFile("test", path); err != nil {
@@ -285,6 +309,7 @@ func TestWriteToFile_FilePermissions(t *testing.T) {
 }
 
 func TestWriteToFile_DirectoryPermissions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	subDir := filepath.Join(dir, "newdir")
 	path := filepath.Join(subDir, "report.md")
@@ -301,6 +326,7 @@ func TestWriteToFile_DirectoryPermissions(t *testing.T) {
 }
 
 func TestWriteToFile_InvalidPath(t *testing.T) {
+	t.Parallel()
 	err := writeToFile("content", "/dev/null/impossible/path.txt")
 	if err == nil {
 		t.Error("expected error for invalid path, got nil")
@@ -308,6 +334,7 @@ func TestWriteToFile_InvalidPath(t *testing.T) {
 }
 
 func TestWriteToFile_EmptyContent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "empty.txt")
 	err := writeToFile("", path)
@@ -370,6 +397,7 @@ func testPR() *gh.PR {
 }
 
 func TestOutputResults_NoFormat(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{}
 	err := outputResults(opts, testPR(), testResult(), nil, 0, "")
 	if err != nil {
@@ -378,6 +406,7 @@ func TestOutputResults_NoFormat(t *testing.T) {
 }
 
 func TestOutputResults_Markdown(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "md", toStdout: true}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
@@ -386,6 +415,7 @@ func TestOutputResults_Markdown(t *testing.T) {
 }
 
 func TestOutputResults_MarkdownLong(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "markdown", toStdout: true}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
@@ -394,6 +424,7 @@ func TestOutputResults_MarkdownLong(t *testing.T) {
 }
 
 func TestOutputResults_HTML(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "html", toStdout: true}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
@@ -402,6 +433,7 @@ func TestOutputResults_HTML(t *testing.T) {
 }
 
 func TestOutputResults_JSON(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "json", toStdout: true}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
@@ -410,6 +442,7 @@ func TestOutputResults_JSON(t *testing.T) {
 }
 
 func TestOutputResults_UnknownFormat(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "xml"}
 	err := outputResults(opts, testPR(), testResult(), nil, 0, opts.formatFlag)
 	if err == nil {
@@ -421,6 +454,7 @@ func TestOutputResults_UnknownFormat(t *testing.T) {
 }
 
 func TestOutputResults_WritesToFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	outPath := filepath.Join(dir, "prism-pr-1.json")
 	// Test writeToFile directly since outputResults uses the hardcoded defaultResultsDir.
@@ -438,6 +472,7 @@ func TestOutputResults_WritesToFile(t *testing.T) {
 }
 
 func TestOutputResults_MarkdownToFile(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "md", toStdout: false}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
@@ -447,6 +482,7 @@ func TestOutputResults_MarkdownToFile(t *testing.T) {
 }
 
 func TestOutputResults_HTMLToStdout(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "html", toStdout: true}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
@@ -455,6 +491,7 @@ func TestOutputResults_HTMLToStdout(t *testing.T) {
 }
 
 func TestOutputResults_HandlesCommentNoSuggestions(t *testing.T) {
+	t.Parallel()
 	// When --comment is set but there are no suggestions, outputResults
 	// should print "No inline suggestions to post." to signal it handled the flag.
 	// BUG: Before fix, outputResults silently ignored opts.comment.
@@ -540,6 +577,7 @@ func TestRunReview_BadRoles(t *testing.T) {
 }
 
 func TestParseReviewArgs_ModelFlag(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--model", "sonnet"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -550,6 +588,7 @@ func TestParseReviewArgs_ModelFlag(t *testing.T) {
 }
 
 func TestParseReviewArgs_ModelEquals(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--model=opus"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -560,6 +599,7 @@ func TestParseReviewArgs_ModelEquals(t *testing.T) {
 }
 
 func TestParseReviewArgs_TimeoutFlag(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--timeout", "2m"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -570,6 +610,7 @@ func TestParseReviewArgs_TimeoutFlag(t *testing.T) {
 }
 
 func TestParseReviewArgs_TimeoutEquals(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--timeout=30s"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -580,6 +621,7 @@ func TestParseReviewArgs_TimeoutEquals(t *testing.T) {
 }
 
 func TestParseReviewArgs_MaxRetries(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--max-retries", "3"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -590,6 +632,7 @@ func TestParseReviewArgs_MaxRetries(t *testing.T) {
 }
 
 func TestParseReviewArgs_MaxRetriesEquals(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--max-retries=0"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -601,6 +644,7 @@ func TestParseReviewArgs_MaxRetriesEquals(t *testing.T) {
 }
 
 func TestParseReviewArgs_ConfigFlag(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--config", "custom.yml"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -611,6 +655,7 @@ func TestParseReviewArgs_ConfigFlag(t *testing.T) {
 }
 
 func TestParseReviewArgs_ConfigEquals(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--config=my.yml"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -621,6 +666,7 @@ func TestParseReviewArgs_ConfigEquals(t *testing.T) {
 }
 
 func TestParseReviewArgs_DefaultConfig(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -631,6 +677,7 @@ func TestParseReviewArgs_DefaultConfig(t *testing.T) {
 }
 
 func TestParseReviewArgs_AllNewFlags(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{
 		"42", "--model", "haiku", "--timeout", "1m",
 		"--max-retries", "2", "--config", "test.yml",
@@ -653,6 +700,7 @@ func TestParseReviewArgs_AllNewFlags(t *testing.T) {
 }
 
 func TestOutputResults_MarkdownWithDedupedFindings(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "md", toStdout: true}
 	result := &agents.ReviewResult{
 		Summary: "Review complete.",
@@ -673,6 +721,7 @@ func TestOutputResults_MarkdownWithDedupedFindings(t *testing.T) {
 }
 
 func TestOutputResults_MarkdownWithFailedAgents(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "md", toStdout: true}
 	result := &agents.ReviewResult{
 		Summary:      "Partial review.",
@@ -700,6 +749,7 @@ func TestExecute_UnknownCommand(t *testing.T) {
 }
 
 func TestIsInteractive_InTest(t *testing.T) {
+	t.Parallel()
 	// In tests, stdin is typically not a terminal.
 	result := isInteractive()
 	// In CI/test, this should be false (stdin is piped).
@@ -767,6 +817,7 @@ func TestRunReview_BadConfig(t *testing.T) {
 }
 
 func TestParseReviewArgs_YesFlag(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--yes"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -777,6 +828,7 @@ func TestParseReviewArgs_YesFlag(t *testing.T) {
 }
 
 func TestParseReviewArgs_YShorthand(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "-y"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -787,6 +839,7 @@ func TestParseReviewArgs_YShorthand(t *testing.T) {
 }
 
 func TestOutputResults_JSONToStdout(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "json", toStdout: true}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
@@ -795,6 +848,7 @@ func TestOutputResults_JSONToStdout(t *testing.T) {
 }
 
 func TestOutputResults_JSONToFile(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "json", toStdout: false}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
@@ -804,6 +858,7 @@ func TestOutputResults_JSONToFile(t *testing.T) {
 }
 
 func TestOutputResults_HTMLToFile(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{formatFlag: "html", toStdout: false}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, opts.formatFlag)
 	if err != nil {
@@ -813,6 +868,7 @@ func TestOutputResults_HTMLToFile(t *testing.T) {
 }
 
 func TestOutputResults_FormatFromConfig(t *testing.T) {
+	t.Parallel()
 	// When formatFlag comes from config (6th arg) not CLI opts.
 	opts := &reviewOptions{toStdout: true}
 	err := outputResults(opts, testPR(), testResult(), []agents.Role{{Name: "Test"}}, 0, "md")
@@ -872,6 +928,7 @@ func TestRunReview_LargeDiffWithYes(t *testing.T) {
 }
 
 func TestValidateOptions_ValidFormats(t *testing.T) {
+	t.Parallel()
 	for _, f := range []string{"plain", "md", "markdown", "html", "json", ""} {
 		opts := &reviewOptions{formatFlag: f}
 		merged := &config.Config{}
@@ -882,6 +939,7 @@ func TestValidateOptions_ValidFormats(t *testing.T) {
 }
 
 func TestValidateOptions_InvalidFormat(t *testing.T) {
+	t.Parallel()
 	for _, f := range []string{"md,html", "xml", "csv"} {
 		opts := &reviewOptions{formatFlag: f}
 		merged := &config.Config{}
@@ -897,6 +955,7 @@ func TestValidateOptions_InvalidFormat(t *testing.T) {
 }
 
 func TestValidateOptions_InvalidTimeout(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{timeoutFlag: "5 minutes"}
 	merged := &config.Config{}
 	err := validateOptions(opts, merged)
@@ -909,6 +968,7 @@ func TestValidateOptions_InvalidTimeout(t *testing.T) {
 }
 
 func TestValidateOptions_ValidTimeout(t *testing.T) {
+	t.Parallel()
 	for _, d := range []string{"2m", "30s"} {
 		opts := &reviewOptions{timeoutFlag: d}
 		merged := &config.Config{}
@@ -919,6 +979,7 @@ func TestValidateOptions_ValidTimeout(t *testing.T) {
 }
 
 func TestOutputResults_PlainFormat(t *testing.T) {
+	t.Parallel()
 	opts := &reviewOptions{}
 	err := outputResults(opts, testPR(), testResult(), nil, 0, "plain")
 	if err != nil {
@@ -944,6 +1005,7 @@ func TestRunReview_InvalidFormatFailsFast(t *testing.T) {
 }
 
 func TestParseReviewArgs_EstimateFlag(t *testing.T) {
+	t.Parallel()
 	opts, err := parseReviewArgs([]string{"42", "--estimate"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -969,6 +1031,7 @@ func TestRunReview_EstimateExitsEarly(t *testing.T) {
 }
 
 func TestPrintEstimate(t *testing.T) {
+	t.Parallel()
 	// Just verify it doesn't panic with reasonable inputs.
 	printEstimate(10000, 7)
 	printEstimate(0, 1)

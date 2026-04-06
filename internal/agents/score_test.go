@@ -3,6 +3,7 @@ package agents
 import "testing"
 
 func TestComputeHealthScore_Perfect(t *testing.T) {
+	t.Parallel()
 	score := ComputeHealthScore(nil)
 	if score.Score != 100 {
 		t.Errorf("expected 100, got %d", score.Score)
@@ -16,6 +17,7 @@ func TestComputeHealthScore_Perfect(t *testing.T) {
 }
 
 func TestComputeHealthScore_EmptyFindings(t *testing.T) {
+	t.Parallel()
 	score := ComputeHealthScore([]DedupedFinding{})
 	if score.Score != 100 {
 		t.Errorf("expected 100, got %d", score.Score)
@@ -23,6 +25,7 @@ func TestComputeHealthScore_EmptyFindings(t *testing.T) {
 }
 
 func TestComputeHealthScore_OneCriticalChanged(t *testing.T) {
+	t.Parallel()
 	findings := []DedupedFinding{
 		{
 			Finding:     Finding{Risk: RiskCritical, Scope: ScopeChanged},
@@ -44,6 +47,7 @@ func TestComputeHealthScore_OneCriticalChanged(t *testing.T) {
 }
 
 func TestComputeHealthScore_WeightedByVotes(t *testing.T) {
+	t.Parallel()
 	// 1/7 vote on a critical = -20 * (1/7) ≈ -2.86, score ≈ 97.
 	findings := []DedupedFinding{
 		{
@@ -59,6 +63,7 @@ func TestComputeHealthScore_WeightedByVotes(t *testing.T) {
 }
 
 func TestComputeHealthScore_ExistingIssuesLessImpact(t *testing.T) {
+	t.Parallel()
 	// Existing critical = -5 (full weight).
 	findings := []DedupedFinding{
 		{
@@ -74,6 +79,7 @@ func TestComputeHealthScore_ExistingIssuesLessImpact(t *testing.T) {
 }
 
 func TestComputeHealthScore_CodebaseMinimalImpact(t *testing.T) {
+	t.Parallel()
 	findings := []DedupedFinding{
 		{
 			Finding:     Finding{Risk: RiskWarning, Scope: ScopeCodebase},
@@ -89,6 +95,7 @@ func TestComputeHealthScore_CodebaseMinimalImpact(t *testing.T) {
 }
 
 func TestComputeHealthScore_Floor(t *testing.T) {
+	t.Parallel()
 	// 10 full-weight criticals in changed scope = -200, floored to 0.
 	findings := make([]DedupedFinding, 10)
 	for i := range findings {
@@ -111,6 +118,7 @@ func TestComputeHealthScore_Floor(t *testing.T) {
 }
 
 func TestComputeHealthScore_GradeBoundaries(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		score int
 		grade string
@@ -129,6 +137,7 @@ func TestComputeHealthScore_GradeBoundaries(t *testing.T) {
 }
 
 func TestComputeHealthScore_MixedFindings(t *testing.T) {
+	t.Parallel()
 	findings := []DedupedFinding{
 		{Finding: Finding{Risk: RiskCritical, Scope: ScopeChanged}, VoteCount: 5, TotalAgents: 7},  // -20 * 5/7 ≈ -14.3
 		{Finding: Finding{Risk: RiskWarning, Scope: ScopeChanged}, VoteCount: 3, TotalAgents: 7},   // -8 * 3/7 ≈ -3.4

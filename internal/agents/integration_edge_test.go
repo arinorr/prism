@@ -14,6 +14,7 @@ import (
 // TestIntegration_UnanimousConsensus verifies that when all agents find the
 // same issue, dedup merges them into a single finding with VoteCount == TotalAgents.
 func TestIntegration_UnanimousConsensus(t *testing.T) {
+	t.Parallel()
 	// Every agent returns the same critical finding with slightly different wording.
 	responses := map[string]string{
 		"sentinel":      `{"findings":[{"file":"db.go","line":10,"risk":"critical","category":"security","scope":"changed","confidence":0.95,"summary":"SQL injection vulnerability","detail":"Query uses string concatenation."}]}`,
@@ -72,6 +73,7 @@ func TestIntegration_UnanimousConsensus(t *testing.T) {
 // findings for files not in the PR (e.g. codebase-scope observations).
 // These should pass through and appear in the result.
 func TestIntegration_FindingsForFilesNotInPR(t *testing.T) {
+	t.Parallel()
 	mock := &llmtest.Mock{
 		Response: `{"findings":[
 			{"file":"auth.go","line":10,"risk":"warning","category":"bug","scope":"changed","confidence":0.8,"summary":"Bug in PR file","detail":"d"},
@@ -116,6 +118,7 @@ func TestIntegration_FindingsForFilesNotInPR(t *testing.T) {
 
 // TestIntegration_EmptyDiff verifies behavior when PR has an empty diff.
 func TestIntegration_EmptyDiff(t *testing.T) {
+	t.Parallel()
 	mock := &llmtest.Mock{Response: `{"findings":[]}`}
 	orch := &Orchestrator{
 		roles:  testRoles()[:1],
@@ -136,6 +139,7 @@ func TestIntegration_EmptyDiff(t *testing.T) {
 
 // TestIntegration_AllAgentsTimeout verifies error when every agent fails.
 func TestIntegration_AllAgentsTimeout(t *testing.T) {
+	t.Parallel()
 	mock := &llmtest.Mock{Err: context.DeadlineExceeded}
 	orch := &Orchestrator{
 		roles:  testRoles()[:2],
@@ -156,6 +160,7 @@ func TestIntegration_AllAgentsTimeout(t *testing.T) {
 // TestIntegration_MalformedLLMResponses verifies the pipeline handles
 // various broken LLM outputs gracefully.
 func TestIntegration_MalformedLLMResponses(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		response string
@@ -204,7 +209,9 @@ func TestIntegration_MalformedLLMResponses(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mock := &llmtest.Mock{Response: tt.response}
 			orch := &Orchestrator{
 				roles:  testRoles()[:1],
@@ -236,6 +243,7 @@ func TestIntegration_MalformedLLMResponses(t *testing.T) {
 // inline suggestions are only created for warning+ findings that have
 // a file and line number.
 func TestIntegration_SuggestionsOnlyForWarningPlusWithLine(t *testing.T) {
+	t.Parallel()
 	mock := &llmtest.Mock{
 		Response: `{"findings":[
 			{"file":"a.go","line":10,"risk":"critical","category":"bug","scope":"changed","confidence":0.9,"summary":"critical with line","detail":"d"},

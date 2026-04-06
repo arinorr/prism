@@ -56,6 +56,7 @@ index aaa..bbb 100644
 `
 
 func TestCompress_StripLockFiles(t *testing.T) {
+	t.Parallel()
 	input := sampleDiff + lockFileDiff
 	result, summary := Compress(input, DefaultOptions())
 
@@ -71,6 +72,7 @@ func TestCompress_StripLockFiles(t *testing.T) {
 }
 
 func TestCompress_StripGenerated(t *testing.T) {
+	t.Parallel()
 	input := sampleDiff + generatedDiff
 	result, summary := Compress(input, DefaultOptions())
 
@@ -83,6 +85,7 @@ func TestCompress_StripGenerated(t *testing.T) {
 }
 
 func TestCompress_StripBinary(t *testing.T) {
+	t.Parallel()
 	input := sampleDiff + binaryDiff
 	result, summary := Compress(input, DefaultOptions())
 
@@ -95,6 +98,7 @@ func TestCompress_StripBinary(t *testing.T) {
 }
 
 func TestCompress_StripVendor(t *testing.T) {
+	t.Parallel()
 	input := sampleDiff + vendorDiff
 	result, summary := Compress(input, DefaultOptions())
 
@@ -107,6 +111,7 @@ func TestCompress_StripVendor(t *testing.T) {
 }
 
 func TestCompress_PreservesCodeChanges(t *testing.T) {
+	t.Parallel()
 	result, _ := Compress(sampleDiff, DefaultOptions())
 
 	if !strings.Contains(result, "added line") {
@@ -121,6 +126,7 @@ func TestCompress_PreservesCodeChanges(t *testing.T) {
 }
 
 func TestCompress_ReduceContext(t *testing.T) {
+	t.Parallel()
 	opts := DefaultOptions()
 	opts.ContextLines = 1
 
@@ -140,6 +146,7 @@ func TestCompress_ReduceContext(t *testing.T) {
 }
 
 func TestCompress_StripAllContext(t *testing.T) {
+	t.Parallel()
 	opts := DefaultOptions()
 	opts.ContextLines = 0
 
@@ -155,6 +162,7 @@ func TestCompress_StripAllContext(t *testing.T) {
 }
 
 func TestCompress_KeepAllContext(t *testing.T) {
+	t.Parallel()
 	opts := DefaultOptions()
 	opts.ContextLines = -1
 
@@ -172,6 +180,7 @@ func TestCompress_KeepAllContext(t *testing.T) {
 }
 
 func TestCompress_MixedDiff(t *testing.T) {
+	t.Parallel()
 	input := sampleDiff + lockFileDiff + binaryDiff + generatedDiff + vendorDiff
 	result, summary := Compress(input, DefaultOptions())
 
@@ -196,6 +205,7 @@ func TestCompress_MixedDiff(t *testing.T) {
 }
 
 func TestCompress_Summary(t *testing.T) {
+	t.Parallel()
 	input := sampleDiff + lockFileDiff
 	_, summary := Compress(input, DefaultOptions())
 
@@ -208,6 +218,7 @@ func TestCompress_Summary(t *testing.T) {
 }
 
 func TestCompress_NoCompression(t *testing.T) {
+	t.Parallel()
 	opts := NoCompression()
 	result, summary := Compress(sampleDiff, opts)
 
@@ -223,6 +234,7 @@ func TestCompress_NoCompression(t *testing.T) {
 }
 
 func TestCompress_CustomPatterns(t *testing.T) {
+	t.Parallel()
 	customDiff := `diff --git a/custom/output.go b/custom/output.go
 index abc..def 100644
 --- a/custom/output.go
@@ -246,6 +258,7 @@ index abc..def 100644
 }
 
 func TestCompress_EmptyDiff(t *testing.T) {
+	t.Parallel()
 	result, summary := Compress("", DefaultOptions())
 	if result != "" {
 		t.Error("empty diff should return empty string")
@@ -256,6 +269,7 @@ func TestCompress_EmptyDiff(t *testing.T) {
 }
 
 func TestExtractFilePath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -273,6 +287,7 @@ func TestExtractFilePath(t *testing.T) {
 }
 
 func TestIsLockFile(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"package-lock.json", "yarn.lock", "go.sum", "Cargo.lock"} {
 		if !isLockFile(name) {
 			t.Errorf("expected %q to be a lock file", name)
@@ -284,6 +299,7 @@ func TestIsLockFile(t *testing.T) {
 }
 
 func TestIsBinaryDiff(t *testing.T) {
+	t.Parallel()
 	if !isBinaryDiff(binaryDiff) {
 		t.Error("expected binary diff to be detected")
 	}

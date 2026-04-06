@@ -107,6 +107,12 @@
 - Post review summaries to a channel
 - Mention authors when critical issues found
 
+### Golden file tests for report output
+- Add `internal/report/testdata/` with golden files for markdown, HTML, JSON
+- Full output comparison instead of substring checks
+- Catches whitespace, formatting, and structural regressions
+- Wait until report format stabilizes before implementing
+
 ### VS Code extension
 - Review current branch changes from the editor
 - Inline annotations from findings
