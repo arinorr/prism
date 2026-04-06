@@ -407,19 +407,29 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 	return writeToFile(output, outPath)
 }
 
+// Estimation constants calibrated against Claude Sonnet (April 2026).
+const (
+	// bytesPerToken is the average bytes per token for code (UTF-8).
+	bytesPerToken = 4
+	// promptOverheadTokens is the approximate overhead per agent from the
+	// skill prompt, PR metadata, and output format instructions.
+	promptOverheadTokens = 2000
+	// expectedOutputTokens is the average output per agent (findings JSON).
+	expectedOutputTokens = 1000
+	// Sonnet pricing per million tokens (used for rough cost estimate).
+	sonnetInputPricePerM  = 3.0
+	sonnetOutputPricePerM = 15.0
+)
+
 // printEstimate shows projected token usage based on diff size and exits.
-// Rough heuristic: ~4 bytes per token for code, each agent gets the full
-// diff as input plus ~2K tokens of skill/prompt overhead, and produces
-// ~1K tokens of output.
 func printEstimate(diffBytes, agentCount int) {
-	tokensPerAgent := diffBytes/4 + 2000 // input estimate per agent
-	outputPerAgent := 1000               // output estimate per agent
+	tokensPerAgent := diffBytes/bytesPerToken + promptOverheadTokens
 	totalInput := tokensPerAgent * agentCount
-	totalOutput := outputPerAgent * agentCount
+	totalOutput := expectedOutputTokens * agentCount
 	total := totalInput + totalOutput
 
-	// Rough cost estimate based on Claude Sonnet pricing (~$3/M input, ~$15/M output).
-	costEstimate := float64(totalInput)/1_000_000*3.0 + float64(totalOutput)/1_000_000*15.0
+	costEstimate := float64(totalInput)/1_000_000*sonnetInputPricePerM +
+		float64(totalOutput)/1_000_000*sonnetOutputPricePerM
 
 	fmt.Println("📏 Token estimate (approximate):")
 	fmt.Printf("   Diff size:    %d bytes (~%dk tokens per agent)\n", diffBytes, tokensPerAgent/1000)
@@ -428,7 +438,8 @@ func printEstimate(diffBytes, agentCount int) {
 	fmt.Printf("   Est. output:  ~%dk tokens\n", totalOutput/1000)
 	fmt.Printf("   Est. total:   ~%dk tokens\n", total/1000)
 	fmt.Printf("   Est. cost:    ~$%.2f\n", costEstimate)
-	fmt.Println("\n   Note: actual usage depends on model, caching, and response length.")
+	fmt.Println("\n   Note: estimate assumes Sonnet pricing. Actual cost varies by model,")
+	fmt.Println("   caching, and response length. Opus roles cost ~5x more, Haiku ~10x less.")
 }
 
 var filenameAllowlist = regexp.MustCompile(`[^a-zA-Z0-9_-]`)

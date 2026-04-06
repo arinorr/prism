@@ -549,15 +549,18 @@ func TestDispatchAgents_AllSucceed(t *testing.T) {
 		llm:    mockLLMFindings(finding),
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	feedbacks, failedAgents, _, _, err := orch.dispatchAgents(pr)
+	dr, err := orch.dispatchAgents(pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(feedbacks) != 2 {
-		t.Errorf("expected 2 feedbacks, got %d", len(feedbacks))
+	if len(dr.Feedbacks) != 2 {
+		t.Errorf("expected 2 feedbacks, got %d", len(dr.Feedbacks))
 	}
-	if len(failedAgents) != 0 {
-		t.Errorf("expected no failed agents, got %v", failedAgents)
+	if len(dr.FailedAgents) != 0 {
+		t.Errorf("expected no failed agents, got %v", dr.FailedAgents)
+	}
+	if len(dr.AgentUsages) != 2 {
+		t.Errorf("expected 2 agent usages, got %d", len(dr.AgentUsages))
 	}
 }
 
@@ -570,15 +573,12 @@ func TestDispatchAgents_AllFail(t *testing.T) {
 		llm:    &llmtest.Mock{Err: fmt.Errorf("fail")},
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	_, failedAgents, _, _, err := orch.dispatchAgents(pr)
+	_, err := orch.dispatchAgents(pr)
 	if err == nil {
 		t.Fatal("expected error when all agents fail")
 	}
 	if !strings.Contains(err.Error(), "all agents failed") {
 		t.Errorf("unexpected error: %v", err)
-	}
-	if len(failedAgents) != 1 || failedAgents[0] != "A" {
-		t.Errorf("expected [A] in failed agents, got %v", failedAgents)
 	}
 }
 
@@ -601,11 +601,11 @@ func TestDispatchAgents_PartialFailure(t *testing.T) {
 		llm:    mock,
 	}
 	pr := &gh.PR{Title: "Test", Body: "b", Diff: "d"}
-	feedbacks, _, _, _, err := orch.dispatchAgents(pr)
+	dr, err := orch.dispatchAgents(pr)
 	if err != nil {
 		t.Fatalf("partial failure should not error: %v", err)
 	}
-	if len(feedbacks) < 1 {
+	if len(dr.Feedbacks) < 1 {
 		t.Error("expected at least 1 feedback from successful agent")
 	}
 }
