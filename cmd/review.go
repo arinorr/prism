@@ -266,12 +266,6 @@ func runReview(args []string) error {
 	compressedPR := *pr
 	compressedPR.Diff = compressed
 
-	// Check diff size against thresholds.
-	sizeResult := sizecheck.Check(len(compressed), merged.DiffWarnBytes, merged.DiffChunkBytes)
-	if sizeResult.Warn {
-		fmt.Fprintf(os.Stderr, "⚠️  %s\n\n", sizeResult.Message)
-	}
-
 	// Show estimate. In --estimate mode, print and exit.
 	printEstimate(len(compressed), roles)
 	if opts.estimate {
@@ -280,6 +274,7 @@ func runReview(args []string) error {
 
 	// In non-interactive mode (CI), fail hard on very large diffs
 	// to avoid burning tokens on reviews that won't be effective.
+	sizeResult := sizecheck.Check(len(compressed), merged.DiffWarnBytes, merged.DiffChunkBytes)
 	if sizeResult.SuggestChunk && !opts.yes && !isInteractive() {
 		return fmt.Errorf("diff too large for effective review (%dKB). Use --yes to override or split the PR",
 			len(compressed)/1024)
