@@ -26,16 +26,6 @@ func (m *mockClient) PostComments(_ *gh.PR, _ []gh.Suggestion) error {
 	return nil
 }
 
-// withMockClient replaces the GH client constructor for the duration of a test.
-func withMockClient(t *testing.T, pr *gh.PR, err error) {
-	t.Helper()
-	orig := newGHClient
-	newGHClient = func() (prClient, error) {
-		return &mockClient{pr: pr, err: err}, nil
-	}
-	t.Cleanup(func() { newGHClient = orig })
-}
-
 func TestParseReviewArgs_BasicPR(t *testing.T) {
 	opts, err := parseReviewArgs([]string{"42"})
 	if err != nil {
@@ -822,7 +812,7 @@ func TestOutputResults_FormatFromConfig(t *testing.T) {
 }
 
 func TestRunReview_FullPipelineWithMockClient(t *testing.T) {
-	withMockClient(t, &gh.PR{
+	client := &mockClient{pr: &gh.PR{
 		Number: "42",
 		Title:  "Test PR",
 		Diff:   "diff content here",
@@ -830,11 +820,11 @@ func TestRunReview_FullPipelineWithMockClient(t *testing.T) {
 			{Path: "src/app.ts", Status: "modified"},
 			{Path: "main.go", Status: "modified"},
 		},
-	}, nil)
+	}}
 
 	// This will fail at the orchestrator (skill files not found from test binary)
 	// but exercises config loading, role parsing, size check, and language detection.
-	err := runReview([]string{"42", "--dry-run", "--yes"})
+	err := runReviewWith([]string{"42", "--dry-run", "--yes"}, client)
 	// Dry run succeeds even without real skill files since it doesn't call claude.
 	// But it will fail loading skills. Either way, we exercise the path.
 	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
@@ -843,9 +833,9 @@ func TestRunReview_FullPipelineWithMockClient(t *testing.T) {
 }
 
 func TestRunReview_MockClientGetPRDiffError(t *testing.T) {
-	withMockClient(t, nil, os.ErrNotExist)
+	client := &mockClient{err: os.ErrNotExist}
 
-	err := runReview([]string{"42"})
+	err := runReviewWith([]string{"42"}, client)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -856,15 +846,15 @@ func TestRunReview_MockClientGetPRDiffError(t *testing.T) {
 
 func TestRunReview_LargeDiffWithYes(t *testing.T) {
 	largeDiff := strings.Repeat("x", 200000) // 200KB, above warn threshold
-	withMockClient(t, &gh.PR{
+	client := &mockClient{pr: &gh.PR{
 		Number: "42",
 		Title:  "Big PR",
 		Diff:   largeDiff,
 		Files:  []gh.FileChange{{Path: "big.go"}},
-	}, nil)
+	}}
 
 	// --yes skips the interactive prompt; --dry-run avoids needing skill files.
-	err := runReview([]string{"42", "--yes", "--dry-run"})
+	err := runReviewWith([]string{"42", "--yes", "--dry-run"}, client)
 	// Will fail at skill loading, but the size check + confirmation skip path is exercised.
 	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
 		t.Fatalf("unexpected error: %v", err)
@@ -927,14 +917,14 @@ func TestOutputResults_PlainFormat(t *testing.T) {
 }
 
 func TestRunReview_InvalidFormatFailsFast(t *testing.T) {
-	withMockClient(t, &gh.PR{
+	client := &mockClient{pr: &gh.PR{
 		Number: "42",
 		Title:  "Test PR",
 		Diff:   "diff content",
 		Files:  []gh.FileChange{{Path: "main.go", Status: "modified"}},
-	}, nil)
+	}}
 
-	err := runReview([]string{"42", "--format", "xml"})
+	err := runReviewWith([]string{"42", "--format", "xml"}, client)
 	if err == nil {
 		t.Fatal("expected error for invalid format")
 	}

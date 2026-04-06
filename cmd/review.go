@@ -29,11 +29,6 @@ type prClient interface {
 	PostComments(pr *gh.PR, suggestions []gh.Suggestion) error
 }
 
-// newGHClient creates a new GitHub client. Replaced in tests.
-var newGHClient = func() (prClient, error) {
-	return gh.NewClient()
-}
-
 // reviewOptions holds parsed CLI flags for the review command.
 type reviewOptions struct {
 	prRef       string
@@ -132,13 +127,15 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 		return config.Config{}, fmt.Errorf("failed to load config: %w", cfgErr)
 	}
 	cliCfg := config.Config{
-		Model:        opts.modelFlag,
-		Format:       opts.formatFlag,
-		AgentTimeout: opts.timeoutFlag,
-		MaxBudgetUSD: opts.budgetFlag,
+		Model:            opts.modelFlag,
+		Format:           opts.formatFlag,
+		AgentTimeout:     opts.timeoutFlag,
+		MaxBudgetUSD:     opts.budgetFlag,
+		MaxRetries:       config.MaxRetriesNotSet,
+		DiffContextLines: config.DiffContextLinesNotSet,
 	}
 	if opts.retriesFlag >= 0 {
-		cliCfg.MaxRetries = config.IntPtr(opts.retriesFlag)
+		cliCfg.MaxRetries = opts.retriesFlag
 	}
 	if opts.rolesFlag != "" {
 		cliCfg.Roles = strings.Split(opts.rolesFlag, ",")
@@ -191,15 +188,10 @@ func resolveRoles(merged *config.Config) ([]agents.Role, error) {
 }
 
 // fetchAndCheckPR fetches the PR diff and checks its size, prompting for confirmation if large.
-func fetchAndCheckPR(opts *reviewOptions, merged *config.Config) (*gh.PR, prClient, error) {
-	client, err := newGHClient()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to initialize GitHub client: %w", err)
-	}
-
+func fetchAndCheckPR(client prClient, opts *reviewOptions, merged *config.Config) (*gh.PR, error) {
 	pr, err := client.GetPRDiff(opts.prRef)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get PR diff: %w", err)
+		return nil, fmt.Errorf("failed to get PR diff: %w", err)
 	}
 
 	// Check diff size and prompt for confirmation if large.
@@ -212,15 +204,23 @@ func fetchAndCheckPR(opts *reviewOptions, merged *config.Config) (*gh.PR, prClie
 			scanner.Scan()
 			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
 			if answer != "y" && answer != "yes" {
-				return nil, nil, fmt.Errorf("review canceled — diff too large")
+				return nil, fmt.Errorf("review canceled — diff too large")
 			}
 		}
 	}
 
-	return pr, client, nil
+	return pr, nil
 }
 
 func runReview(args []string) error {
+	client, err := gh.NewClient()
+	if err != nil {
+		return fmt.Errorf("failed to initialize GitHub client: %w", err)
+	}
+	return runReviewWith(args, client)
+}
+
+func runReviewWith(args []string, client prClient) error {
 	opts, err := parseReviewArgs(args)
 	if err != nil {
 		return err
@@ -240,7 +240,7 @@ func runReview(args []string) error {
 		return err
 	}
 
-	pr, client, err := fetchAndCheckPR(opts, &merged)
+	pr, err := fetchAndCheckPR(client, opts, &merged)
 	if err != nil {
 		return err
 	}
@@ -293,6 +293,12 @@ func runReview(args []string) error {
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)
 	}
+
+	if result.DryRun != nil {
+		printDryRun(result.DryRun, opts.verbose)
+		return nil
+	}
+
 	elapsed := time.Since(start)
 
 	// Print usage summary. Input tokens include cache hits/misses since the
@@ -402,6 +408,41 @@ func sanitizeFilename(s string) string {
 		return defaultFilenameSlug
 	}
 	return s
+}
+
+const previewMaxBytes = 500
+
+// printDryRun formats and prints the dry run result to stdout.
+func printDryRun(dr *agents.DryRunResult, verbose bool) {
+	fmt.Println("🏜️  DRY RUN — no agents will be called")
+	fmt.Printf("Diff size: %d bytes\n\n", dr.DiffBytes)
+
+	fmt.Printf("Agents that would run (%d):\n", len(dr.Roles))
+	for _, r := range dr.Roles {
+		fmt.Printf("   • %s — %s\n", r.Name, r.Description)
+		if verbose {
+			fmt.Printf("     Skill file: %s (%d bytes)\n", r.SkillFile, dr.SkillSizes[r.Slug])
+		}
+	}
+
+	if verbose {
+		if dr.Model != "" {
+			fmt.Printf("\nModel: %s\n", dr.Model)
+		}
+		if dr.Timeout > 0 {
+			fmt.Printf("Agent timeout: %s\n", dr.Timeout)
+		}
+		fmt.Printf("Max retries: %d\n", dr.MaxRetries)
+	}
+
+	fmt.Printf("\nSample prompt (for %s):\n", dr.Roles[0].Name)
+	fmt.Println("───────────────────────────────────────")
+	if len(dr.SamplePrompt) > previewMaxBytes {
+		fmt.Printf("%s\n... (%d bytes total)\n", dr.SamplePrompt[:previewMaxBytes], len(dr.SamplePrompt))
+	} else {
+		fmt.Println(dr.SamplePrompt)
+	}
+	fmt.Println("───────────────────────────────────────")
 }
 
 // isInteractive returns true if stdin is a terminal (not piped or in CI).
