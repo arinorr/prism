@@ -5,6 +5,7 @@ import (
 )
 
 func TestDeduplicate_IdenticalFindings(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "missing timeout", Role: "architect"},
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "missing timeout", Role: "solver"},
@@ -26,6 +27,7 @@ func TestDeduplicate_IdenticalFindings(t *testing.T) {
 }
 
 func TestDeduplicate_CloseLinesSimilarSummary(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "no timeout on scan operation", Role: "architect"},
 		{File: "a.go", Line: 12, Risk: "critical", Summary: "missing timeout on scan operation", Role: "sentinel"},
@@ -44,6 +46,7 @@ func TestDeduplicate_CloseLinesSimilarSummary(t *testing.T) {
 }
 
 func TestDeduplicate_DistantLinesNotMerged(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "missing timeout", Role: "architect"},
 		{File: "a.go", Line: 100, Risk: "warning", Summary: "missing timeout", Role: "solver"},
@@ -55,6 +58,7 @@ func TestDeduplicate_DistantLinesNotMerged(t *testing.T) {
 }
 
 func TestDeduplicate_DifferentSummariesNotMerged(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "missing timeout", Role: "architect"},
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "unused variable detected", Role: "editor"},
@@ -66,6 +70,7 @@ func TestDeduplicate_DifferentSummariesNotMerged(t *testing.T) {
 }
 
 func TestDeduplicate_DifferentFilesNotMerged(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "missing timeout", Role: "architect"},
 		{File: "b.go", Line: 10, Risk: "warning", Summary: "missing timeout", Role: "solver"},
@@ -77,6 +82,7 @@ func TestDeduplicate_DifferentFilesNotMerged(t *testing.T) {
 }
 
 func TestDeduplicate_SingleFinding(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "info", Summary: "consider renaming", Role: "editor"},
 	}
@@ -90,6 +96,7 @@ func TestDeduplicate_SingleFinding(t *testing.T) {
 }
 
 func TestDeduplicate_Empty(t *testing.T) {
+	t.Parallel()
 	result := Deduplicate(nil, 5)
 	if len(result) != 0 {
 		t.Fatalf("expected 0, got %d", len(result))
@@ -97,6 +104,7 @@ func TestDeduplicate_Empty(t *testing.T) {
 }
 
 func TestDeduplicate_SortOrder(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "b.go", Line: 1, Risk: "info", Summary: "style note", Role: "editor"},
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "missing timeout on operation", Role: "architect"},
@@ -118,6 +126,7 @@ func TestDeduplicate_SortOrder(t *testing.T) {
 }
 
 func TestDeduplicate_KeepsBestDetail(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "missing timeout", Detail: "short", Role: "a"},
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "missing timeout", Detail: "a much longer and more detailed explanation of the issue", Role: "b"},
@@ -132,6 +141,7 @@ func TestDeduplicate_KeepsBestDetail(t *testing.T) {
 }
 
 func TestJaccardSimilarity_Identical(t *testing.T) {
+	t.Parallel()
 	s := jaccardSimilarity("missing timeout on scan", "missing timeout on scan")
 	if s != 1.0 {
 		t.Errorf("expected 1.0, got %f", s)
@@ -139,6 +149,7 @@ func TestJaccardSimilarity_Identical(t *testing.T) {
 }
 
 func TestJaccardSimilarity_Similar(t *testing.T) {
+	t.Parallel()
 	s := jaccardSimilarity("missing timeout on scan operation", "no timeout on scan operation")
 	// "missing" and "no" differ, rest overlap: 3/5 = 0.6.
 	if s < jaccardThreshold {
@@ -147,6 +158,7 @@ func TestJaccardSimilarity_Similar(t *testing.T) {
 }
 
 func TestJaccardSimilarity_Different(t *testing.T) {
+	t.Parallel()
 	s := jaccardSimilarity("missing timeout", "unused variable detected")
 	if s >= jaccardThreshold {
 		t.Errorf("expected below threshold for different summaries, got %f", s)
@@ -154,6 +166,7 @@ func TestJaccardSimilarity_Different(t *testing.T) {
 }
 
 func TestDeduplicate_PreservesAgentDetails(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "warning", Summary: "missing timeout", Detail: "architect view", CodeExample: "// add timeout", Role: "architect"},
 		{File: "a.go", Line: 10, Risk: "critical", Summary: "missing timeout", Detail: "sentinel view is much longer and more detailed", CodeExample: "ctx, cancel := ...", Role: "sentinel"},
@@ -185,6 +198,7 @@ func TestDeduplicate_PreservesAgentDetails(t *testing.T) {
 }
 
 func TestDeduplicate_SingleFindingHasOneAgentDetail(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "info", Summary: "note", Detail: "some detail", Role: "editor"},
 	}
@@ -204,6 +218,7 @@ func TestDeduplicate_SingleFindingHasOneAgentDetail(t *testing.T) {
 }
 
 func TestJaccardSimilarity_BothEmpty(t *testing.T) {
+	t.Parallel()
 	s := jaccardSimilarity("", "")
 	if s != 1.0 {
 		t.Errorf("expected 1.0 for both empty, got %f", s)
@@ -213,6 +228,7 @@ func TestJaccardSimilarity_BothEmpty(t *testing.T) {
 // Hybrid dedup tests.
 
 func TestDeduplicate_HybridTier1_SameFileCategoryNearbyLines(t *testing.T) {
+	t.Parallel()
 	// Same file, same category, lines within wideLineThreshold (20).
 	// Summaries use different wording but prefix stemming creates enough
 	// overlap to exceed tier 1's 0.065 threshold.
@@ -242,6 +258,7 @@ func TestDeduplicate_HybridTier1_SameFileCategoryNearbyLines(t *testing.T) {
 }
 
 func TestDeduplicate_HybridTier2_SameFileCategoryDistantLines(t *testing.T) {
+	t.Parallel()
 	// Same file, same category, lines beyond wideLineThreshold (20) but
 	// within sameCategoryLineLimit (100). Tier 2 threshold of 0.15 applies.
 	s1 := "Duplicated severity counting logic across functions"
@@ -263,6 +280,7 @@ func TestDeduplicate_HybridTier2_SameFileCategoryDistantLines(t *testing.T) {
 }
 
 func TestDeduplicate_HybridTier2_RejectsBelowThreshold(t *testing.T) {
+	t.Parallel()
 	// Same file, same category, distance 25 (past tier 1's 20-line limit).
 	// Similarity is between tier 1 (0.065) and tier 2 (0.15) thresholds.
 	// Should NOT merge — too low for tier 2, too far for tier 1.
@@ -288,6 +306,7 @@ func TestDeduplicate_HybridTier2_RejectsBelowThreshold(t *testing.T) {
 }
 
 func TestDeduplicate_HybridTier3_SameFileCloseLinesDifferentCategory(t *testing.T) {
+	t.Parallel()
 	// Same file, close lines, but different categories.
 	// Falls back to standard Jaccard threshold of 0.4.
 	s1 := "missing timeout on scan operation"
@@ -309,6 +328,7 @@ func TestDeduplicate_HybridTier3_SameFileCloseLinesDifferentCategory(t *testing.
 }
 
 func TestDeduplicate_HybridNoMatch_DifferentCategoryDistantLowSimilarity(t *testing.T) {
+	t.Parallel()
 	// Same file, different categories, distant lines, low text similarity.
 	// Should NOT merge — no tier matches.
 	findings := []Finding{
@@ -324,6 +344,7 @@ func TestDeduplicate_HybridNoMatch_DifferentCategoryDistantLowSimilarity(t *test
 }
 
 func TestDeduplicate_HybridNoMatch_SameCategoryDifferentFile(t *testing.T) {
+	t.Parallel()
 	// Different files — should never merge regardless of other signals.
 	findings := []Finding{
 		{File: "a.go", Line: 10, Risk: "warning", Category: "design",
@@ -338,6 +359,7 @@ func TestDeduplicate_HybridNoMatch_SameCategoryDifferentFile(t *testing.T) {
 }
 
 func TestDeduplicate_HybridNoMatch_SameCategoryZeroSimilarity(t *testing.T) {
+	t.Parallel()
 	// Same file, same category, nearby lines, but completely unrelated summaries.
 	// Even tier 1's lenient 0.05 threshold should reject zero similarity.
 	findings := []Finding{
@@ -353,6 +375,7 @@ func TestDeduplicate_HybridNoMatch_SameCategoryZeroSimilarity(t *testing.T) {
 }
 
 func TestDeduplicate_HybridMergesRealWorldDuplicates(t *testing.T) {
+	t.Parallel()
 	// Reproduces the actual duplicate findings from the Prism self-review
 	// that motivated this feature. These 5 findings were all about the same
 	// DRY issue but used different wording, causing them not to merge.
@@ -378,6 +401,7 @@ func TestDeduplicate_HybridMergesRealWorldDuplicates(t *testing.T) {
 }
 
 func TestDeduplicate_HybridEmptyCategoryFallsToTier3(t *testing.T) {
+	t.Parallel()
 	// Empty categories should not qualify for tiers 1/2. These findings
 	// are close enough and similar enough to merge via tier 3 (Jaccard >= 0.4).
 	findings := []Finding{
@@ -391,6 +415,7 @@ func TestDeduplicate_HybridEmptyCategoryFallsToTier3(t *testing.T) {
 }
 
 func TestDeduplicate_HybridEmptyCategoryNoTier1(t *testing.T) {
+	t.Parallel()
 	// Empty categories should NOT get tier 1's lenient threshold.
 	// These findings have low text similarity and would only merge
 	// via tier 1 — with empty categories they should stay separate.
@@ -405,6 +430,7 @@ func TestDeduplicate_HybridEmptyCategoryNoTier1(t *testing.T) {
 }
 
 func TestBestSimilarity_SelectsHighestNotFirst(t *testing.T) {
+	t.Parallel()
 	summaries := []string{"error in code", "defect in implementation", "bug in procedure"}
 	tokens := make([]map[string]bool, len(summaries))
 	for i, s := range summaries {
@@ -428,6 +454,7 @@ func TestBestSimilarity_SelectsHighestNotFirst(t *testing.T) {
 }
 
 func TestBestSimilarity_ZeroValueWorks(t *testing.T) {
+	t.Parallel()
 	// A DedupedFinding constructed without voterTokens should still work —
 	// bestSimilarity derives tokens from the embedded Finding's Summary.
 	group := &DedupedFinding{
@@ -445,6 +472,7 @@ func TestBestSimilarity_ZeroValueWorks(t *testing.T) {
 }
 
 func TestDeduplicate_HybridTier2_RejectsDistantFindings(t *testing.T) {
+	t.Parallel()
 	// Same file, same category, but lines 500 apart (beyond sameCategoryLineLimit=100).
 	// Should NOT merge even with moderate text similarity.
 	findings := []Finding{
@@ -460,6 +488,7 @@ func TestDeduplicate_HybridTier2_RejectsDistantFindings(t *testing.T) {
 }
 
 func TestDeduplicate_HybridTier2_BoundaryAtLimit(t *testing.T) {
+	t.Parallel()
 	// Lines exactly at sameCategoryLineLimit (100) should still merge via tier 2.
 	// Lines at 101 should NOT merge (falls to tier 3 which needs higher similarity).
 	findings100 := []Finding{
@@ -486,6 +515,7 @@ func TestDeduplicate_HybridTier2_BoundaryAtLimit(t *testing.T) {
 }
 
 func TestDeduplicate_HybridOrderIndependence(t *testing.T) {
+	t.Parallel()
 	// The same findings in different order should produce the same group count.
 	// This validates that bestSimilarity's multi-summary matching prevents
 	// greedy-ordering effects.
@@ -511,5 +541,72 @@ func TestDeduplicate_HybridOrderIndependence(t *testing.T) {
 
 	if forwardCount != reversedCount {
 		t.Errorf("order sensitivity: forward=%d groups, reversed=%d groups", forwardCount, reversedCount)
+	}
+}
+
+// Edge cases.
+
+func TestDeduplicate_SameLineSameFile(t *testing.T) {
+	t.Parallel()
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Nil pointer dereference", Detail: "d", Role: "sentinel"},
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Possible nil dereference", Detail: "d", Role: "solver"},
+	}
+	deduped := Deduplicate(findings, 2)
+	if len(deduped) != 1 {
+		t.Errorf("same line + same category + similar summary should merge, got %d", len(deduped))
+	}
+	if len(deduped) > 0 && deduped[0].VoteCount != 2 {
+		t.Errorf("expected 2 votes, got %d", deduped[0].VoteCount)
+	}
+}
+
+func TestDeduplicate_EmptySummary(t *testing.T) {
+	t.Parallel()
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskInfo, Category: "style", Scope: ScopeChanged, Summary: "", Detail: "d1", Role: "editor"},
+		{File: "a.go", Line: 10, Risk: RiskInfo, Category: "style", Scope: ScopeChanged, Summary: "", Detail: "d2", Role: "sentinel"},
+	}
+	deduped := Deduplicate(findings, 2)
+	if len(deduped) == 0 {
+		t.Error("expected at least 1 deduped finding even with empty summaries")
+	}
+}
+
+func TestDeduplicate_SingleFindingWithTotalAgents(t *testing.T) {
+	t.Parallel()
+	deduped := Deduplicate([]Finding{
+		{File: "a.go", Line: 1, Risk: RiskInfo, Category: "style", Scope: ScopeChanged, Summary: "test", Detail: "d", Role: "editor"},
+	}, 7)
+	if len(deduped) != 1 {
+		t.Errorf("expected 1, got %d", len(deduped))
+	}
+	if deduped[0].VoteCount != 1 {
+		t.Errorf("expected 1 vote, got %d", deduped[0].VoteCount)
+	}
+	if deduped[0].TotalAgents != 7 {
+		t.Errorf("expected 7 total agents, got %d", deduped[0].TotalAgents)
+	}
+}
+
+func TestDeduplicate_DifferentFilesSameIssue(t *testing.T) {
+	t.Parallel()
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Missing nil check", Detail: "d", Role: "sentinel"},
+		{File: "b.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Missing nil check", Detail: "d", Role: "solver"},
+	}
+	deduped := Deduplicate(findings, 2)
+	if len(deduped) != 2 {
+		t.Errorf("different files should not merge, got %d", len(deduped))
+	}
+}
+
+func TestDeduplicate_NilAndEmptySlice(t *testing.T) {
+	t.Parallel()
+	if len(Deduplicate(nil, 7)) != 0 {
+		t.Error("nil findings should produce empty deduped")
+	}
+	if len(Deduplicate([]Finding{}, 7)) != 0 {
+		t.Error("empty findings should produce empty deduped")
 	}
 }

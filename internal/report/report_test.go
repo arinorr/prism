@@ -9,6 +9,7 @@ import (
 
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm"
 )
 
 func testData() *Data {
@@ -39,6 +40,7 @@ func testData() *Data {
 }
 
 func TestMarkdown_ContainsHeader(t *testing.T) {
+	t.Parallel()
 	md := Markdown(testData())
 	if !strings.Contains(md, "# Prism Review: PR #42") {
 		t.Error("markdown should contain PR header")
@@ -49,6 +51,7 @@ func TestMarkdown_ContainsHeader(t *testing.T) {
 }
 
 func TestMarkdown_ContainsSummary(t *testing.T) {
+	t.Parallel()
 	md := Markdown(testData())
 	if !strings.Contains(md, "Overall looks good") {
 		t.Error("markdown should contain synthesis summary")
@@ -56,6 +59,7 @@ func TestMarkdown_ContainsSummary(t *testing.T) {
 }
 
 func TestMarkdown_ContainsFindings(t *testing.T) {
+	t.Parallel()
 	md := Markdown(testData())
 	if !strings.Contains(md, "Nil pointer") {
 		t.Error("markdown should contain critical finding")
@@ -73,6 +77,7 @@ func TestMarkdown_ContainsFindings(t *testing.T) {
 }
 
 func TestMarkdown_ContainsMetadata(t *testing.T) {
+	t.Parallel()
 	md := Markdown(testData())
 	if !strings.Contains(md, "Solver, Editor, Test Engineer") {
 		t.Error("markdown should list roles")
@@ -83,6 +88,7 @@ func TestMarkdown_ContainsMetadata(t *testing.T) {
 }
 
 func TestMarkdown_ContainsSuggestionCount(t *testing.T) {
+	t.Parallel()
 	md := Markdown(testData())
 	if !strings.Contains(md, "1 inline suggestions") {
 		t.Error("markdown should mention suggestion count")
@@ -90,6 +96,7 @@ func TestMarkdown_ContainsSuggestionCount(t *testing.T) {
 }
 
 func TestHTML_ValidOutput(t *testing.T) {
+	t.Parallel()
 	html, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -106,6 +113,7 @@ func TestHTML_ValidOutput(t *testing.T) {
 }
 
 func TestJSON_ValidOutput(t *testing.T) {
+	t.Parallel()
 	j, err := JSON(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -122,6 +130,7 @@ func TestJSON_ValidOutput(t *testing.T) {
 }
 
 func TestGroupByFile_SortsBySeverity(t *testing.T) {
+	t.Parallel()
 	findings := []agents.Finding{
 		{File: "a.go", Risk: "info", Summary: "info item"},
 		{File: "a.go", Risk: "critical", Summary: "critical item"},
@@ -140,6 +149,7 @@ func TestGroupByFile_SortsBySeverity(t *testing.T) {
 }
 
 func TestSeverityBadge(t *testing.T) {
+	t.Parallel()
 	if !strings.Contains(severityBadge("critical"), "critical") {
 		t.Error("critical badge should contain 'critical'")
 	}
@@ -152,6 +162,7 @@ func TestSeverityBadge(t *testing.T) {
 }
 
 func TestAgentColorClass(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		role string
 		want string
@@ -173,6 +184,7 @@ func TestAgentColorClass(t *testing.T) {
 }
 
 func TestHTML_ContainsAgentBadges(t *testing.T) {
+	t.Parallel()
 	// Use deduped data which has agent details with badges.
 	out, err := HTML(dedupedTestData())
 	if err != nil {
@@ -187,6 +199,7 @@ func TestHTML_ContainsAgentBadges(t *testing.T) {
 }
 
 func TestHTML_UsesTemplate(t *testing.T) {
+	t.Parallel()
 	// Verify the template renders without errors for various data shapes.
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test"},
@@ -206,6 +219,7 @@ func TestHTML_UsesTemplate(t *testing.T) {
 }
 
 func TestHTML_DashboardRendered(t *testing.T) {
+	t.Parallel()
 	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -220,6 +234,7 @@ func TestHTML_DashboardRendered(t *testing.T) {
 }
 
 func TestMarkdown_NoLine0InDetails(t *testing.T) {
+	t.Parallel()
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
 		Result: &agents.ReviewResult{
@@ -243,6 +258,7 @@ func TestMarkdown_NoLine0InDetails(t *testing.T) {
 }
 
 func TestJSON_NilSlicesSerializeAsEmptyArrays(t *testing.T) {
+	t.Parallel()
 	d := &Data{
 		PR:     &gh.PR{Number: "1", Title: "Test"},
 		Result: &agents.ReviewResult{Summary: "ok"},
@@ -271,6 +287,7 @@ func TestJSON_NilSlicesSerializeAsEmptyArrays(t *testing.T) {
 }
 
 func TestHTML_ContainsDashboard(t *testing.T) {
+	t.Parallel()
 	html, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -287,6 +304,7 @@ func TestHTML_ContainsDashboard(t *testing.T) {
 }
 
 func TestHTML_ContainsFileGroups(t *testing.T) {
+	t.Parallel()
 	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -300,6 +318,7 @@ func TestHTML_ContainsFileGroups(t *testing.T) {
 }
 
 func TestHTML_EscapesXSSInFindings(t *testing.T) {
+	t.Parallel()
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "<script>alert('xss')</script>", Files: []gh.FileChange{{Path: "a.go"}}},
 		Result: &agents.ReviewResult{
@@ -331,6 +350,7 @@ func TestHTML_EscapesXSSInFindings(t *testing.T) {
 }
 
 func TestGroupByFile_EmptyFile(t *testing.T) {
+	t.Parallel()
 	findings := []agents.Finding{
 		{File: "", Risk: "info", Summary: "general note"},
 	}
@@ -344,6 +364,7 @@ func TestGroupByFile_EmptyFile(t *testing.T) {
 }
 
 func TestGroupByFile_MultipleFiles(t *testing.T) {
+	t.Parallel()
 	findings := []agents.Finding{
 		{File: "b.go", Risk: "info", Summary: "b note"},
 		{File: "a.go", Risk: "warning", Summary: "a note"},
@@ -398,6 +419,7 @@ func dedupedTestData() *Data {
 }
 
 func TestMarkdown_DedupedFindings(t *testing.T) {
+	t.Parallel()
 	d := dedupedTestData()
 	output := Markdown(d)
 	if !strings.Contains(output, "5/7") {
@@ -412,6 +434,7 @@ func TestMarkdown_DedupedFindings(t *testing.T) {
 }
 
 func TestMarkdown_FailedAgents(t *testing.T) {
+	t.Parallel()
 	d := dedupedTestData()
 	output := Markdown(d)
 	if !strings.Contains(output, "2 agent(s) failed") {
@@ -423,6 +446,7 @@ func TestMarkdown_FailedAgents(t *testing.T) {
 }
 
 func TestHTML_FailedAgents(t *testing.T) {
+	t.Parallel()
 	d := dedupedTestData()
 	output, err := HTML(d)
 	if err != nil {
@@ -434,6 +458,7 @@ func TestHTML_FailedAgents(t *testing.T) {
 }
 
 func TestHTML_DedupedFindings(t *testing.T) {
+	t.Parallel()
 	d := dedupedTestData()
 	output, err := HTML(d)
 	if err != nil {
@@ -448,6 +473,7 @@ func TestHTML_DedupedFindings(t *testing.T) {
 }
 
 func TestHTML_DedupedFindingsPreferredOverRaw(t *testing.T) {
+	t.Parallel()
 	// When both Findings and DedupedFindings are present, deduped should win.
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
@@ -484,6 +510,7 @@ func TestHTML_DedupedFindingsPreferredOverRaw(t *testing.T) {
 }
 
 func TestJSON_DedupedFindings(t *testing.T) {
+	t.Parallel()
 	d := dedupedTestData()
 	output, err := JSON(d)
 	if err != nil {
@@ -506,6 +533,7 @@ func TestJSON_DedupedFindings(t *testing.T) {
 }
 
 func TestGroupDedupedByFile(t *testing.T) {
+	t.Parallel()
 	findings := []agents.DedupedFinding{
 		{Finding: agents.Finding{File: "b.go", Line: 1, Risk: "info"}, VoteCount: 1},
 		{Finding: agents.Finding{File: "a.go", Line: 10, Risk: "critical"}, VoteCount: 3},
@@ -528,6 +556,7 @@ func TestGroupDedupedByFile(t *testing.T) {
 }
 
 func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
+	t.Parallel()
 	findings := []agents.DedupedFinding{
 		{Finding: agents.Finding{File: "", Risk: "info"}, VoteCount: 1},
 	}
@@ -541,6 +570,7 @@ func TestGroupDedupedByFile_EmptyFile(t *testing.T) {
 }
 
 func TestGroupDedupedByFile_SortedBySeverity(t *testing.T) {
+	t.Parallel()
 	// z.go has critical, a.go has warning, m.go has info.
 	// Severity order differs from alphabetical order.
 	findings := []agents.DedupedFinding{
@@ -560,6 +590,7 @@ func TestGroupDedupedByFile_SortedBySeverity(t *testing.T) {
 }
 
 func TestGroupDedupedByFile_AlphabeticalFallback(t *testing.T) {
+	t.Parallel()
 	// Both files have critical findings — should fall back to alphabetical.
 	findings := []agents.DedupedFinding{
 		{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical"}, VoteCount: 1},
@@ -577,6 +608,7 @@ func TestGroupDedupedByFile_AlphabeticalFallback(t *testing.T) {
 }
 
 func TestGroupDedupedByFile_MultipleRisksPerFile(t *testing.T) {
+	t.Parallel()
 	// b.go has 1 critical + 1 warning, a.go has 1 critical only.
 	// b.go should sort first (same critical count, but more warnings).
 	findings := []agents.DedupedFinding{
@@ -596,6 +628,7 @@ func TestGroupDedupedByFile_MultipleRisksPerFile(t *testing.T) {
 }
 
 func TestGroupDedupedByFile_BothSeveritiesEqualFallback(t *testing.T) {
+	t.Parallel()
 	// Both files have 1 critical and 1 warning — full tiebreak to alphabetical.
 	findings := []agents.DedupedFinding{
 		{Finding: agents.Finding{File: "z.go", Line: 1, Risk: "critical"}, VoteCount: 1},
@@ -615,6 +648,7 @@ func TestGroupDedupedByFile_BothSeveritiesEqualFallback(t *testing.T) {
 }
 
 func TestHTML_FailedAgentsBanner(t *testing.T) {
+	t.Parallel()
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
 		Result: &agents.ReviewResult{
@@ -636,6 +670,7 @@ func TestHTML_FailedAgentsBanner(t *testing.T) {
 }
 
 func TestMarkdown_NoFailedAgents(t *testing.T) {
+	t.Parallel()
 	d := &Data{
 		PR:     &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
 		Result: &agents.ReviewResult{Summary: "Clean."},
@@ -648,6 +683,7 @@ func TestMarkdown_NoFailedAgents(t *testing.T) {
 }
 
 func TestHTML_ContainsGauge(t *testing.T) {
+	t.Parallel()
 	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -664,6 +700,7 @@ func TestHTML_ContainsGauge(t *testing.T) {
 }
 
 func TestHTML_ContainsDetailsElements(t *testing.T) {
+	t.Parallel()
 	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -677,6 +714,7 @@ func TestHTML_ContainsDetailsElements(t *testing.T) {
 }
 
 func TestHTML_ContainsCategoryBadge(t *testing.T) {
+	t.Parallel()
 	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -690,6 +728,7 @@ func TestHTML_ContainsCategoryBadge(t *testing.T) {
 }
 
 func TestHTML_ContainsCodeExample(t *testing.T) {
+	t.Parallel()
 	d := dedupedTestData()
 	out, err := HTML(d)
 	if err != nil {
@@ -707,6 +746,7 @@ func TestHTML_ContainsCodeExample(t *testing.T) {
 }
 
 func TestHTML_GroupsByScope(t *testing.T) {
+	t.Parallel()
 	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -720,6 +760,7 @@ func TestHTML_GroupsByScope(t *testing.T) {
 }
 
 func TestHTML_SingleAgentNoAgentDetails(t *testing.T) {
+	t.Parallel()
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}}},
 		Result: &agents.ReviewResult{
@@ -751,6 +792,7 @@ func TestHTML_SingleAgentNoAgentDetails(t *testing.T) {
 }
 
 func TestMarkdown_GroupsByScope(t *testing.T) {
+	t.Parallel()
 	md := Markdown(testData())
 	if !strings.Contains(md, "Issues in this PR") {
 		t.Error("markdown should contain 'Issues in this PR' scope section")
@@ -761,6 +803,7 @@ func TestMarkdown_GroupsByScope(t *testing.T) {
 }
 
 func TestMarkdown_HealthScore(t *testing.T) {
+	t.Parallel()
 	md := Markdown(testData())
 	if !strings.Contains(md, "Health Score") {
 		t.Error("markdown should contain health score header")
@@ -774,6 +817,7 @@ func TestMarkdown_HealthScore(t *testing.T) {
 }
 
 func TestJSON_HealthScore(t *testing.T) {
+	t.Parallel()
 	d := testData()
 	output, err := JSON(d)
 	if err != nil {
@@ -791,6 +835,7 @@ func TestJSON_HealthScore(t *testing.T) {
 }
 
 func TestHTML_GaugeNeedleRotation(t *testing.T) {
+	t.Parallel()
 	// Formula: rotation = int(score * 1.8) - 90
 	// Score 0 → -90° (left), 50 → 0° (up), 100 → +90° (right).
 	// int() truncates toward zero, so 46*1.8=82.8 → 82 → 82-90 = -8.
@@ -805,7 +850,9 @@ func TestHTML_GaugeNeedleRotation(t *testing.T) {
 		{"score 46 points left of center", 46, -8},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			d := testData()
 			d.Result.HealthScore.Score = tt.score
 			out, err := HTML(d)
@@ -834,6 +881,7 @@ func extractFileHeaders(html string) []string {
 }
 
 func TestHTML_FilesOrderedBySeverity(t *testing.T) {
+	t.Parallel()
 	// z.go has critical, m.go has warning, a.go has info.
 	// Severity order (z, m, a) differs from alphabetical (a, m, z).
 	d := &Data{
@@ -868,6 +916,7 @@ func TestHTML_FilesOrderedBySeverity(t *testing.T) {
 }
 
 func TestHTML_FilesOrderedBySeverity_AlphabeticalFallback(t *testing.T) {
+	t.Parallel()
 	// Both files have critical findings — should fall back to alphabetical.
 	d := &Data{
 		PR: &gh.PR{Number: "1", Title: "Test", Files: []gh.FileChange{{Path: "a.go"}, {Path: "z.go"}}},
@@ -896,6 +945,7 @@ func TestHTML_FilesOrderedBySeverity_AlphabeticalFallback(t *testing.T) {
 }
 
 func TestHTML_DashboardConsolidated(t *testing.T) {
+	t.Parallel()
 	out, err := HTML(testData())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -920,5 +970,47 @@ func TestHTML_DashboardConsolidated(t *testing.T) {
 	}
 	if !strings.Contains(out, "findings from") {
 		t.Error("dashboard should contain finding count summary")
+	}
+}
+
+func TestMarkdown_UsageFooter(t *testing.T) {
+	t.Parallel()
+	d := testData()
+	d.Usage = llm.Usage{InputTokens: 50000, OutputTokens: 10000, CostUSD: 1.23}
+	out := Markdown(d)
+	if !strings.Contains(out, "Review stats:") {
+		t.Error("markdown should contain usage footer when usage is set")
+	}
+	if !strings.Contains(out, "$1.23") {
+		t.Error("markdown should contain cost in usage footer")
+	}
+	if !strings.Contains(out, "50k input") {
+		t.Error("markdown should show input token count")
+	}
+}
+
+func TestMarkdown_NoUsageFooterWhenEmpty(t *testing.T) {
+	t.Parallel()
+	d := testData()
+	// Usage is zero-value — no footer should appear.
+	out := Markdown(d)
+	if strings.Contains(out, "Review stats:") {
+		t.Error("markdown should not contain usage footer when usage is zero")
+	}
+}
+
+func TestHTML_UsageFooter(t *testing.T) {
+	t.Parallel()
+	d := testData()
+	d.Usage = llm.Usage{InputTokens: 50000, OutputTokens: 10000, CostUSD: 1.23}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "50k input") {
+		t.Error("HTML should contain input tokens in footer")
+	}
+	if !strings.Contains(out, "1.23") {
+		t.Error("HTML should contain cost in footer")
 	}
 }

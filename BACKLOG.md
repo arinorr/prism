@@ -26,12 +26,9 @@
 - Could pre-index the repo structure and key files to stay within token budget
 - Future: support data flow annotations (SECURITY.md or inline comments) for structural verification
 
-### Token usage reporting
-- Show estimated token usage before running (`--estimate` flag)
-- Show actual token usage after running (input/output per agent + synthesis)
-- Show cost estimate based on model pricing
-- Surface in the report: "This review used ~130K tokens (~$X)"
-- Verbose mode shows per-agent breakdown
+### Token usage reporting — remaining
+- Future: refine `--estimate` heuristic with real-world calibration data
+- Future: per-agent breakdown in JSON report (currently only aggregate)
 
 ### Incremental / follow-up reviews
 - Track previous review results per PR (store in `results/` or `.prism/`)
@@ -44,7 +41,7 @@
 ### Agentic review (Agent SDK migration)
 - Migrate from `claude --print` subprocesses to the Claude Agent SDK
 - Enables agents to: read files beyond the diff, search the codebase, browse docs, use web search
-- Prerequisite for Standard/Deep review modes and the Codebase Expert role
+- Prerequisite for Standard/Deep review modes and the Verification Agent
 - Would also enable: streaming progress, multi-turn agent conversations, tool use
 - Agents could verify their own findings (e.g. "does this function exist?", "what does this API actually accept?")
 - Significant architectural change — the orchestrator would manage agent sessions instead of one-shot prompts
@@ -56,70 +53,35 @@
   - **Python**: bare `except:`, missing type hints, mutable default args, `__init__` complexity, Django/Flask security patterns
   - **Rust**: ownership patterns, lifetime annotations, unsafe blocks, error handling with `?`
 
-### Configurable model and settings
-- Let users pick which Claude model agents use
-- Set max token budget per agent
-- Configure agent timeouts
-- Support a `.prism.yml` config file per-repo
+## Done
 
-### Better error recovery
-- Retry failed agents once before giving up
-- Graceful degradation: if 1-2 agents fail, still produce a review
-- Timeout handling for hung agents
+### Configurable model and settings (PR #11)
+- `.prism.yml` config file with layered precedence (defaults < file < CLI)
+- `--model`, `--timeout`, `--max-retries`, `--max-budget-usd` flags
+- Per-role preferred models (opus for Architect/Sentinel, sonnet for others, haiku for Editor)
 
-### Code quality improvements (Thorsten Ball style)
+### Better error recovery (PR #11)
+- Retry failed agents with configurable `--max-retries` (default: 1)
+- Graceful degradation: partial results if some agents fail
+- Per-agent timeout with `--timeout` flag
 
-Idiomatic Go improvements following Thorsten Ball's principles (simple, explicit,
-no magic, make the zero value useful). These are structural refactors that don't
-change behavior.
+### Token usage reporting
+- Actual token usage shown after running (total input/output + cost + time)
+- Per-agent timing streamed in verbose mode during review
+- Per-agent summary table printed after review in verbose mode
+- `--estimate` flag for pre-flight token/cost estimate from diff size
+- Usage surfaced in markdown and HTML report footers
+- JSON report includes full usage breakdown
+- Cost calculated from Claude CLI response envelope
 
-**2d. Fill in io.Writer defaults at construction**
-- Add `NewOptions()` that sets `Out=os.Stdout`, `ErrOut=os.Stderr`
-- Remove nil checks in `out()` and `errOut()` methods on Orchestrator
-- Principle: make the zero value useful — writers should never be nil
-- Files: `internal/agents/orchestrator.go`, `cmd/review.go`
-
-**2e. DryRun returns data, caller formats**
-- `planDryRun()` returns a `DryRunResult` struct with role count, diff bytes,
-  sample prompt, model, timeout
-- `cmd/review.go` handles formatting/printing the dry run output
-- Principle: separate data from formatting — functions return data, callers render
-- Files: `internal/agents/orchestrator.go`, `cmd/review.go`
-
-**2f. Config sentinel values instead of pointers**
-- Replace `MaxRetries *int` and `DiffContextLines *int` with plain `int`
-- Use -1 as "not set" sentinel instead of nil pointer indirection
-- Remove `IntPtr()` helper function
-- Principle: simpler types, no pointer indirection for optional values
-- Files: `internal/config/config.go`, `cmd/review.go`
-
-**2g. Extract parser.go from orchestrator**
-- Move parsing logic into its own file `parser.go` (same `agents` package)
-- Includes: `rawFinding`, `rawFeedback`, `parseFeedback`, `tryParseStrategies`,
-  `parseDirectJSON`, `parseCodeBlock`, `parseJSONMarker`, `NormalizeFinding`,
-  `truncateUTF8`
-- Orchestrator just calls `parseFeedback()` — same API, better file organization
-- Principle: each file has one job
-- Files: `internal/agents/orchestrator.go` → `internal/agents/parser.go`
-
-**2h. Split report package into data + generators**
-- Separate data preparation from rendering across multiple files:
-  - `data.go` — Data struct, file grouping, scope splitting, severity counting
-  - `generator.go` — shared types (htmlFinding, htmlFileGroup, etc.)
-  - `markdown.go` — `Markdown()` function
-  - `html.go` — `HTML()` function + template string + CSS
-  - `json.go` — `JSON()` function
-- Each generator takes prepared data and renders one format
-- Adding new formats (SARIF, TUI) means adding one file
-- Principle: separate concerns, each file has one responsibility
-- Files: `internal/report/report.go` → split into 5 files
-
-**2i. Markdown report via text/template (depends on 2h)**
-- Replace ~100 lines of `fmt.Fprintf` calls with a `text/template`
-- Same pattern as the HTML report: data in, rendered output out
-- Template string is the "shape" of the markdown, readable at a glance
-- Principle: separate what to render from how to render it
-- Files: `internal/report/markdown.go`
+### Code quality improvements — Thorsten Ball style (PRs #18, #19, #20)
+- **2d.** io.Writer defaults at construction — no nil checks needed
+- **2e.** DryRun returns data, caller formats — separation of data and presentation
+- **2f.** Attempted sentinel values, reverted to `*int` — pointers are the right tool here
+- **2g.** Extract parser.go from orchestrator — each file has one job
+- **2h.** Split report package into data + generators — separate concerns
+- **2i.** Markdown report via text/template with embed.FS — separate shape from logic
+- **Pike.** Inject GitHub client via parameter — no package-level mutable state
 
 ## Ideas
 
@@ -144,6 +106,12 @@ change behavior.
 ### Slack/Discord integration
 - Post review summaries to a channel
 - Mention authors when critical issues found
+
+### Golden file tests for report output
+- Add `internal/report/testdata/` with golden files for markdown, HTML, JSON
+- Full output comparison instead of substring checks
+- Catches whitespace, formatting, and structural regressions
+- Wait until report format stabilizes before implementing
 
 ### VS Code extension
 - Review current branch changes from the editor

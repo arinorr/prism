@@ -13,9 +13,9 @@ import (
 	"github.com/arinorr/prism/internal/config"
 	"github.com/arinorr/prism/internal/diff"
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm"
 	"github.com/arinorr/prism/internal/llm/claude"
 	"github.com/arinorr/prism/internal/report"
-	"github.com/arinorr/prism/internal/sizecheck"
 )
 
 const (
@@ -40,6 +40,7 @@ type reviewOptions struct {
 	comment     bool
 	verbose     bool
 	dryRun      bool
+	estimate    bool
 	toStdout    bool
 	yes         bool
 	rolesFlag   string
@@ -83,6 +84,8 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.verbose = true
 		case "--dry-run":
 			opts.dryRun = true
+		case "--estimate":
+			opts.estimate = true
 		case "--yes", "-y":
 			opts.yes = true
 		case "--no-compress":
@@ -190,8 +193,8 @@ func resolveRoles(merged *config.Config) ([]agents.Role, error) {
 	return agents.AllRoles, nil
 }
 
-// fetchAndCheckPR fetches the PR diff and checks its size, prompting for confirmation if large.
-func fetchAndCheckPR(opts *reviewOptions, merged *config.Config) (*gh.PR, prClient, error) {
+// fetchPR fetches the PR diff from GitHub.
+func fetchPR(opts *reviewOptions) (*gh.PR, prClient, error) {
 	client, err := newGHClient()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize GitHub client: %w", err)
@@ -200,21 +203,6 @@ func fetchAndCheckPR(opts *reviewOptions, merged *config.Config) (*gh.PR, prClie
 	pr, err := client.GetPRDiff(opts.prRef)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get PR diff: %w", err)
-	}
-
-	// Check diff size and prompt for confirmation if large.
-	sizeResult := sizecheck.Check(len(pr.Diff), merged.DiffWarnBytes, merged.DiffChunkBytes)
-	if sizeResult.Warn {
-		fmt.Fprintf(os.Stderr, "⚠️  %s\n", sizeResult.Message)
-		if !opts.yes && isInteractive() {
-			fmt.Fprint(os.Stderr, "Continue anyway? [y/N] ")
-			scanner := bufio.NewScanner(os.Stdin)
-			scanner.Scan()
-			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-			if answer != "y" && answer != "yes" {
-				return nil, nil, fmt.Errorf("review canceled — diff too large")
-			}
-		}
 	}
 
 	return pr, client, nil
@@ -240,7 +228,7 @@ func runReview(args []string) error {
 		return err
 	}
 
-	pr, client, err := fetchAndCheckPR(opts, &merged)
+	pr, client, err := fetchPR(opts)
 	if err != nil {
 		return err
 	}
@@ -274,6 +262,23 @@ func runReview(args []string) error {
 	compressedPR := *pr
 	compressedPR.Diff = compressed
 
+	// Show estimate. In --estimate mode, print and exit.
+	// Otherwise, show a confirmation prompt before spending tokens.
+	printEstimate(len(compressed), roles)
+	if opts.estimate {
+		return nil
+	}
+	if !opts.yes && !opts.dryRun && isInteractive() {
+		fmt.Print("Continue? [Y/n] ")
+		scanner := bufio.NewScanner(os.Stdin)
+		scanner.Scan()
+		answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+		if answer == "n" || answer == "no" {
+			return fmt.Errorf("review canceled")
+		}
+	}
+	fmt.Println()
+
 	// Dispatch agents.
 	llmBackend := claude.New()
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
@@ -298,10 +303,19 @@ func runReview(args []string) error {
 	// Print usage summary. Input tokens include cache hits/misses since the
 	// Claude CLI reports cached tokens separately from uncached ones.
 	u := result.Usage
-	totalInput := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	totalInput := u.TotalInputTokens()
 	totalTokens := totalInput + u.OutputTokens
-	fmt.Printf("   📊 Tokens: %dk input, %dk output (%dk total) | Cost: $%.2f | Time: %s\n\n",
+	fmt.Printf("   📊 Tokens: %dk input, %dk output (%dk total) | Cost: $%.2f | Time: %s\n",
 		totalInput/1000, u.OutputTokens/1000, totalTokens/1000, u.CostUSD, elapsed.Round(time.Second))
+
+	if opts.verbose && len(result.AgentUsages) > 0 {
+		fmt.Println()
+		for _, au := range result.AgentUsages {
+			agentTotal := au.Usage.TotalTokens()
+			fmt.Printf("      %-16s %6dk tokens  $%.2f\n", au.Role, agentTotal/1000, au.Usage.CostUSD)
+		}
+	}
+	fmt.Println()
 
 	// Resolve format: CLI flag > config file > none.
 	formatFlag := opts.formatFlag
@@ -383,10 +397,75 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 
 	repo := sanitizeFilename(pr.Repo)
 	prNum := sanitizeFilename(pr.Number)
-	timestamp := time.Now().Format("20060102-150405")
+	timestamp := time.Now().Format("2006-01-02_3-04pm")
 	dir := filepath.Join(defaultResultsDir, fmt.Sprintf("%s-pr-%s", repo, prNum))
 	outPath := filepath.Join(dir, fmt.Sprintf("%s-pr-%s-%s.%s", repo, prNum, timestamp, ext))
 	return writeToFile(output, outPath)
+}
+
+// Estimation constants calibrated against Claude Sonnet (April 2026).
+const (
+	// bytesPerToken is the average bytes per token for code (UTF-8).
+	bytesPerToken = 4
+	// promptOverheadTokens is the approximate overhead per agent from the
+	// skill prompt, PR metadata, and output format instructions.
+	promptOverheadTokens = 2000
+	// expectedOutputTokens is the average output per agent (findings JSON).
+	expectedOutputTokens = 1000
+)
+
+// printEstimate shows projected token usage based on diff size and roles.
+func printEstimate(diffBytes int, roles []agents.Role) {
+	tokensPerAgent := diffBytes/bytesPerToken + promptOverheadTokens
+	totalInput := tokensPerAgent * len(roles)
+	totalOutput := expectedOutputTokens * len(roles)
+	total := totalInput + totalOutput
+
+	// Group roles by model for cost breakdown.
+	modelCounts := make(map[string]int)
+	for _, r := range roles {
+		model := r.Model
+		if model == "" {
+			model = agents.ModelTierStandard
+		}
+		modelCounts[model]++
+	}
+
+	// Estimate cost per model tier using pricing from the LLM layer.
+	var costEstimate float64
+	for model, count := range modelCounts {
+		pricing := llm.ModelPricing(model)
+		costEstimate += pricing.EstimateCost(tokensPerAgent*count, expectedOutputTokens*count)
+	}
+
+	fmt.Println("📏 Token estimate (approximate):")
+	fmt.Printf("   Diff size:    %d bytes (~%dk tokens per agent)\n", diffBytes, tokensPerAgent/1000)
+	fmt.Printf("   Agents:       %d\n", len(roles))
+
+	// Show model breakdown so users understand cost drivers.
+	for _, model := range []string{agents.ModelTierDeep, agents.ModelTierStandard, agents.ModelTierFast} {
+		count := modelCounts[model]
+		if count == 0 {
+			continue
+		}
+		var names []string
+		for _, r := range roles {
+			m := r.Model
+			if m == "" {
+				m = agents.ModelTierStandard
+			}
+			if m == model {
+				names = append(names, r.Name)
+			}
+		}
+		fmt.Printf("     %-6s ×%d    %s\n", model, count, strings.Join(names, ", "))
+	}
+
+	fmt.Printf("   Est. input:   ~%dk tokens\n", totalInput/1000)
+	fmt.Printf("   Est. output:  ~%dk tokens\n", totalOutput/1000)
+	fmt.Printf("   Est. total:   ~%dk tokens\n", total/1000)
+	fmt.Printf("   Est. cost:    ~$%.2f\n", costEstimate)
+	fmt.Println("\n   Note: actual cost varies by caching and response length.")
 }
 
 var filenameAllowlist = regexp.MustCompile(`[^a-zA-Z0-9_-]`)

@@ -65,6 +65,23 @@ var (
 	validScopes = map[string]bool{ScopeChanged: true, ScopeExisting: true, ScopeCodebase: true}
 )
 
+// AgentUsage tracks token usage for a single agent in a review.
+// Stored in ReviewResult.AgentUsages for verbose per-agent breakdowns.
+// Includes usage from failed attempts (retries consume tokens even on failure).
+type AgentUsage struct {
+	Role  string
+	Usage llm.Usage
+}
+
+// dispatchResult groups the outputs of dispatchAgents to keep the function
+// signature clean (avoiding 5 return values).
+type dispatchResult struct {
+	Feedbacks    []Feedback
+	FailedAgents []string
+	TotalUsage   llm.Usage
+	AgentUsages  []AgentUsage
+}
+
 // ReviewResult is the synthesized output from all agents.
 type ReviewResult struct {
 	Summary         string
@@ -73,7 +90,8 @@ type ReviewResult struct {
 	HealthScore     HealthScore
 	Suggestions     []gh.Suggestion
 	FailedAgents    []string
-	Usage           llm.Usage // aggregated token usage across all LLM calls
+	Usage           llm.Usage    // aggregated token usage across all LLM calls
+	AgentUsages     []AgentUsage // per-agent breakdown
 }
 
 // Options controls orchestrator behavior.
@@ -186,15 +204,16 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 	}
 
 	// Phase 1: Dispatch all agents in parallel.
-	feedbacks, failedAgents, agentUsage, err := o.dispatchAgents(pr)
+	dr, err := o.dispatchAgents(pr)
 	if err != nil {
 		return nil, err
 	}
 
 	// Phase 2: Collect, deduplicate, and summarize findings (deterministic, no LLM call).
-	result := o.collectAndSummarize(feedbacks)
-	result.FailedAgents = failedAgents
-	result.Usage = agentUsage
+	result := o.collectAndSummarize(dr.Feedbacks)
+	result.FailedAgents = dr.FailedAgents
+	result.Usage = dr.TotalUsage
+	result.AgentUsages = dr.AgentUsages
 
 	return result, nil
 }
@@ -240,7 +259,7 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 	}, nil
 }
 
-func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, llm.Usage, error) {
+func (o *Orchestrator) dispatchAgents(pr *gh.PR) (*dispatchResult, error) {
 	var (
 		mu           sync.Mutex
 		wg           sync.WaitGroup
@@ -248,6 +267,7 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, llm.Usag
 		errs         []error
 		failedAgents []string
 		totalUsage   llm.Usage
+		agentUsages  = make([]AgentUsage, 0, len(o.roles))
 		done         int
 	)
 
@@ -267,6 +287,7 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, llm.Usag
 			mu.Lock()
 			defer mu.Unlock()
 			totalUsage = totalUsage.Add(usage)
+			agentUsages = append(agentUsages, AgentUsage{Role: r.Name, Usage: usage})
 			done++
 			if err != nil {
 				errs = append(errs, fmt.Errorf("[%s] %w", r.Name, err))
@@ -287,10 +308,15 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR) ([]Feedback, []string, llm.Usag
 	}
 
 	if len(feedbacks) == 0 {
-		return nil, failedAgents, totalUsage, fmt.Errorf("all agents failed: %w", errors.Join(errs...))
+		return nil, fmt.Errorf("all agents failed: %w", errors.Join(errs...))
 	}
 
-	return feedbacks, failedAgents, totalUsage, nil
+	return &dispatchResult{
+		Feedbacks:    feedbacks,
+		FailedAgents: failedAgents,
+		TotalUsage:   totalUsage,
+		AgentUsages:  agentUsages,
+	}, nil
 }
 
 func (o *Orchestrator) runAgentWithRetry(role *Role, pr *gh.PR) (*Feedback, llm.Usage, error) {

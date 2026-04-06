@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseRoles_Single(t *testing.T) {
+	t.Parallel()
 	roles, err := ParseRoles("architect")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -19,6 +20,7 @@ func TestParseRoles_Single(t *testing.T) {
 }
 
 func TestParseRoles_Multiple(t *testing.T) {
+	t.Parallel()
 	roles, err := ParseRoles("know-it-all, editor, sentinel")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -39,6 +41,7 @@ func TestParseRoles_Multiple(t *testing.T) {
 }
 
 func TestParseRoles_CaseInsensitive(t *testing.T) {
+	t.Parallel()
 	roles, err := ParseRoles("Architect, SOLVER")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -49,6 +52,7 @@ func TestParseRoles_CaseInsensitive(t *testing.T) {
 }
 
 func TestParseRoles_Unknown(t *testing.T) {
+	t.Parallel()
 	_, err := ParseRoles("architect,nonexistent")
 	if err == nil {
 		t.Fatal("expected error for unknown role, got nil")
@@ -59,6 +63,7 @@ func TestParseRoles_Unknown(t *testing.T) {
 }
 
 func TestParseRoles_UnknownErrorListsTestEngineer(t *testing.T) {
+	t.Parallel()
 	_, err := ParseRoles("bogus")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -69,6 +74,7 @@ func TestParseRoles_UnknownErrorListsTestEngineer(t *testing.T) {
 }
 
 func TestParseRoles_ErrorListsAllRoles(t *testing.T) {
+	t.Parallel()
 	_, err := ParseRoles("bogus")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -81,6 +87,7 @@ func TestParseRoles_ErrorListsAllRoles(t *testing.T) {
 }
 
 func TestParseRoles_AllRoles(t *testing.T) {
+	t.Parallel()
 	input := "know-it-all,architect,solver,editor,optimizer,sentinel,test-engineer"
 	roles, err := ParseRoles(input)
 	if err != nil {
@@ -92,12 +99,14 @@ func TestParseRoles_AllRoles(t *testing.T) {
 }
 
 func TestAllRoles_Count(t *testing.T) {
+	t.Parallel()
 	if len(AllRoles) != 7 {
 		t.Errorf("expected 7 roles in AllRoles, got %d", len(AllRoles))
 	}
 }
 
 func TestAllRoles_HaveSkillFiles(t *testing.T) {
+	t.Parallel()
 	for _, r := range AllRoles {
 		if r.SkillFile == "" {
 			t.Errorf("role %q has empty SkillFile", r.Slug)

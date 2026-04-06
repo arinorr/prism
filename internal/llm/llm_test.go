@@ -10,6 +10,7 @@ import (
 )
 
 func TestMock_ReturnsResponse(t *testing.T) {
+	t.Parallel()
 	m := &llmtest.Mock{Response: "hello"}
 	resp, _, err := m.Complete(context.Background(), llm.Request{UserPrompt: "test"})
 	if err != nil {
@@ -21,6 +22,7 @@ func TestMock_ReturnsResponse(t *testing.T) {
 }
 
 func TestMock_ReturnsError(t *testing.T) {
+	t.Parallel()
 	m := &llmtest.Mock{Err: fmt.Errorf("fail")}
 	_, _, err := m.Complete(context.Background(), llm.Request{})
 	if err == nil {
@@ -29,6 +31,7 @@ func TestMock_ReturnsError(t *testing.T) {
 }
 
 func TestMock_RecordsCalls(t *testing.T) {
+	t.Parallel()
 	m := &llmtest.Mock{Response: "ok"}
 	_, _, _ = m.Complete(context.Background(), llm.Request{UserPrompt: "first"})
 	_, _, _ = m.Complete(context.Background(), llm.Request{UserPrompt: "second"})
@@ -44,6 +47,7 @@ func TestMock_RecordsCalls(t *testing.T) {
 }
 
 func TestMock_CompleteFunc(t *testing.T) {
+	t.Parallel()
 	m := &llmtest.Mock{
 		CompleteFunc: func(_ context.Context, req llm.Request) (string, llm.Usage, error) {
 			return "custom: " + req.UserPrompt, llm.Usage{}, nil
@@ -59,6 +63,7 @@ func TestMock_CompleteFunc(t *testing.T) {
 }
 
 func TestMock_CompleteFuncOverridesResponse(t *testing.T) {
+	t.Parallel()
 	m := &llmtest.Mock{
 		Response: "should not be returned",
 		CompleteFunc: func(_ context.Context, _ llm.Request) (string, llm.Usage, error) {
