@@ -543,3 +543,70 @@ func TestDeduplicate_HybridOrderIndependence(t *testing.T) {
 		t.Errorf("order sensitivity: forward=%d groups, reversed=%d groups", forwardCount, reversedCount)
 	}
 }
+
+// Edge cases.
+
+func TestDeduplicate_SameLineSameFile(t *testing.T) {
+	t.Parallel()
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Nil pointer dereference", Detail: "d", Role: "sentinel"},
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Possible nil dereference", Detail: "d", Role: "solver"},
+	}
+	deduped := Deduplicate(findings, 2)
+	if len(deduped) != 1 {
+		t.Errorf("same line + same category + similar summary should merge, got %d", len(deduped))
+	}
+	if len(deduped) > 0 && deduped[0].VoteCount != 2 {
+		t.Errorf("expected 2 votes, got %d", deduped[0].VoteCount)
+	}
+}
+
+func TestDeduplicate_EmptySummary(t *testing.T) {
+	t.Parallel()
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskInfo, Category: "style", Scope: ScopeChanged, Summary: "", Detail: "d1", Role: "editor"},
+		{File: "a.go", Line: 10, Risk: RiskInfo, Category: "style", Scope: ScopeChanged, Summary: "", Detail: "d2", Role: "sentinel"},
+	}
+	deduped := Deduplicate(findings, 2)
+	if len(deduped) == 0 {
+		t.Error("expected at least 1 deduped finding even with empty summaries")
+	}
+}
+
+func TestDeduplicate_SingleFindingWithTotalAgents(t *testing.T) {
+	t.Parallel()
+	deduped := Deduplicate([]Finding{
+		{File: "a.go", Line: 1, Risk: RiskInfo, Category: "style", Scope: ScopeChanged, Summary: "test", Detail: "d", Role: "editor"},
+	}, 7)
+	if len(deduped) != 1 {
+		t.Errorf("expected 1, got %d", len(deduped))
+	}
+	if deduped[0].VoteCount != 1 {
+		t.Errorf("expected 1 vote, got %d", deduped[0].VoteCount)
+	}
+	if deduped[0].TotalAgents != 7 {
+		t.Errorf("expected 7 total agents, got %d", deduped[0].TotalAgents)
+	}
+}
+
+func TestDeduplicate_DifferentFilesSameIssue(t *testing.T) {
+	t.Parallel()
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Missing nil check", Detail: "d", Role: "sentinel"},
+		{File: "b.go", Line: 10, Risk: RiskWarning, Category: "bug", Scope: ScopeChanged, Summary: "Missing nil check", Detail: "d", Role: "solver"},
+	}
+	deduped := Deduplicate(findings, 2)
+	if len(deduped) != 2 {
+		t.Errorf("different files should not merge, got %d", len(deduped))
+	}
+}
+
+func TestDeduplicate_NilAndEmptySlice(t *testing.T) {
+	t.Parallel()
+	if len(Deduplicate(nil, 7)) != 0 {
+		t.Error("nil findings should produce empty deduped")
+	}
+	if len(Deduplicate([]Finding{}, 7)) != 0 {
+		t.Error("empty findings should produce empty deduped")
+	}
+}

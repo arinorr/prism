@@ -150,3 +150,48 @@ func TestComputeHealthScore_MixedFindings(t *testing.T) {
 		t.Errorf("expected ~81, got %d", score.Score)
 	}
 }
+
+// Edge cases.
+
+func TestHealthScore_NoFindings(t *testing.T) {
+	t.Parallel()
+	score := ComputeHealthScore(nil)
+	if score.Score != 100 || score.Grade != "A+" {
+		t.Errorf("no findings: expected 100/A+, got %d/%s", score.Score, score.Grade)
+	}
+}
+
+func TestHealthScore_ManyHighConsensusFindings(t *testing.T) {
+	t.Parallel()
+	findings := make([]DedupedFinding, 5)
+	for i := range findings {
+		findings[i] = DedupedFinding{
+			Finding:     Finding{Risk: RiskCritical, Scope: ScopeChanged},
+			VoteCount:   7,
+			TotalAgents: 7,
+		}
+	}
+	score := ComputeHealthScore(findings)
+	if score.Score != 0 {
+		t.Errorf("5 unanimous criticals should floor at 0, got %d", score.Score)
+	}
+	if score.Grade != "F" {
+		t.Errorf("expected grade F, got %q", score.Grade)
+	}
+	if score.Verdict != VerdictDiscuss {
+		t.Errorf("expected verdict %q, got %q", VerdictDiscuss, score.Verdict)
+	}
+}
+
+func TestHealthScore_LowConsensusReducesImpact(t *testing.T) {
+	t.Parallel()
+	low := ComputeHealthScore([]DedupedFinding{
+		{Finding: Finding{Risk: RiskCritical, Scope: ScopeChanged}, VoteCount: 1, TotalAgents: 7},
+	})
+	high := ComputeHealthScore([]DedupedFinding{
+		{Finding: Finding{Risk: RiskCritical, Scope: ScopeChanged}, VoteCount: 7, TotalAgents: 7},
+	})
+	if low.Score <= high.Score {
+		t.Errorf("low consensus (%d) should score higher than high consensus (%d)", low.Score, high.Score)
+	}
+}
