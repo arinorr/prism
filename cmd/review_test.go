@@ -919,9 +919,9 @@ func TestRunReview_LargeDiffWithYes(t *testing.T) {
 		Files:  []gh.FileChange{{Path: "big.go"}},
 	}, nil)
 
-	// --yes skips the interactive prompt; --dry-run avoids needing skill files.
+	// --yes skips the confirmation prompt; --dry-run avoids needing skill files.
 	err := runReview([]string{"42", "--yes", "--dry-run"})
-	// Will fail at skill loading, but the size check + confirmation skip path is exercised.
+	// Will fail at skill loading, but the estimate + confirmation skip path is exercised.
 	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -15,7 +15,6 @@ import (
 	"github.com/arinorr/prism/internal/gh"
 	"github.com/arinorr/prism/internal/llm/claude"
 	"github.com/arinorr/prism/internal/report"
-	"github.com/arinorr/prism/internal/sizecheck"
 )
 
 const (
@@ -193,8 +192,8 @@ func resolveRoles(merged *config.Config) ([]agents.Role, error) {
 	return agents.AllRoles, nil
 }
 
-// fetchAndCheckPR fetches the PR diff and checks its size, prompting for confirmation if large.
-func fetchAndCheckPR(opts *reviewOptions, merged *config.Config) (*gh.PR, prClient, error) {
+// fetchPR fetches the PR diff from GitHub.
+func fetchPR(opts *reviewOptions) (*gh.PR, prClient, error) {
 	client, err := newGHClient()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize GitHub client: %w", err)
@@ -203,22 +202,6 @@ func fetchAndCheckPR(opts *reviewOptions, merged *config.Config) (*gh.PR, prClie
 	pr, err := client.GetPRDiff(opts.prRef)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get PR diff: %w", err)
-	}
-
-	// Check diff size and prompt for confirmation if large.
-	// Skip in estimate mode — we're not hitting any models.
-	sizeResult := sizecheck.Check(len(pr.Diff), merged.DiffWarnBytes, merged.DiffChunkBytes)
-	if sizeResult.Warn && !opts.estimate {
-		fmt.Fprintf(os.Stderr, "⚠️  %s\n", sizeResult.Message)
-		if !opts.yes && isInteractive() {
-			fmt.Fprint(os.Stderr, "Continue anyway? [y/N] ")
-			scanner := bufio.NewScanner(os.Stdin)
-			scanner.Scan()
-			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-			if answer != "y" && answer != "yes" {
-				return nil, nil, fmt.Errorf("review canceled — diff too large")
-			}
-		}
 	}
 
 	return pr, client, nil
@@ -244,7 +227,7 @@ func runReview(args []string) error {
 		return err
 	}
 
-	pr, client, err := fetchAndCheckPR(opts, &merged)
+	pr, client, err := fetchPR(opts)
 	if err != nil {
 		return err
 	}
@@ -278,11 +261,22 @@ func runReview(args []string) error {
 	compressedPR := *pr
 	compressedPR.Diff = compressed
 
-	// Estimate mode: show projected token usage and exit.
+	// Show estimate. In --estimate mode, print and exit.
+	// Otherwise, show a confirmation prompt before spending tokens.
+	printEstimate(len(compressed), roles)
 	if opts.estimate {
-		printEstimate(len(compressed), roles)
 		return nil
 	}
+	if !opts.yes && !opts.dryRun && isInteractive() {
+		fmt.Print("Continue? [Y/n] ")
+		scanner := bufio.NewScanner(os.Stdin)
+		scanner.Scan()
+		answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+		if answer == "n" || answer == "no" {
+			return fmt.Errorf("review canceled")
+		}
+	}
+	fmt.Println()
 
 	// Dispatch agents.
 	llmBackend := claude.New()
