@@ -610,3 +610,110 @@ func TestDeduplicate_NilAndEmptySlice(t *testing.T) {
 		t.Error("empty findings should produce empty deduped")
 	}
 }
+
+// Dual-score fields.
+
+func TestDeduplicate_AgentDetailPreservesRisk(t *testing.T) {
+	t.Parallel()
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskCritical, Category: "bug", Summary: "nil ptr", Detail: "d", Role: "sentinel"},
+		{File: "a.go", Line: 10, Risk: RiskInfo, Category: "bug", Summary: "nil pointer", Detail: "d", Role: "editor"},
+	}
+	deduped := Deduplicate(findings, 7)
+	if len(deduped) != 1 {
+		t.Fatalf("expected 1 deduped, got %d", len(deduped))
+	}
+	if len(deduped[0].AgentDetails) != 2 {
+		t.Fatalf("expected 2 agent details, got %d", len(deduped[0].AgentDetails))
+	}
+	// Each detail should preserve the original voter's risk.
+	risks := map[Risk]bool{}
+	for _, ad := range deduped[0].AgentDetails {
+		risks[ad.Risk] = true
+	}
+	if !risks[RiskCritical] || !risks[RiskInfo] {
+		t.Errorf("agent details should preserve both critical and info, got %v", risks)
+	}
+}
+
+func TestDeduplicate_ConsensusMethod(t *testing.T) {
+	t.Parallel()
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Summary: "issue", Detail: "d", Role: "a"},
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Summary: "issue", Detail: "d", Role: "b"},
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Summary: "issue", Detail: "d", Role: "c"},
+	}
+	deduped := Deduplicate(findings, 7)
+	if len(deduped) != 1 {
+		t.Fatalf("expected 1 deduped, got %d", len(deduped))
+	}
+	consensus := deduped[0].Consensus()
+	expected := 3.0 / 7.0
+	if consensus < expected-0.01 || consensus > expected+0.01 {
+		t.Errorf("expected consensus %.3f, got %.3f", expected, consensus)
+	}
+}
+
+func TestDeduplicate_CompositeSeverityMethod(t *testing.T) {
+	t.Parallel()
+	// 2 criticals + 1 info → composite should be > 2.0 (gravity amplifies criticals).
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskCritical, Category: "bug", Summary: "nil ptr deref", Detail: "d", Role: "sentinel"},
+		{File: "a.go", Line: 10, Risk: RiskCritical, Category: "bug", Summary: "nil pointer", Detail: "d", Role: "solver"},
+		{File: "a.go", Line: 10, Risk: RiskInfo, Category: "bug", Summary: "nil pointer issue", Detail: "d", Role: "editor"},
+	}
+	deduped := Deduplicate(findings, 7)
+	if len(deduped) != 1 {
+		t.Fatalf("expected 1 deduped, got %d", len(deduped))
+	}
+	cs := deduped[0].CompositeSeverity()
+	if cs <= 2.0 {
+		t.Errorf("2 criticals + 1 info with gravity should produce composite > 2.0, got %.2f", cs)
+	}
+}
+
+func TestDeduplicate_RiskDerivedFromComposite(t *testing.T) {
+	t.Parallel()
+	// All agents say warning → composite around 2.0 → Risk should be warning.
+	findings := []Finding{
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Summary: "issue here", Detail: "d", Role: "a"},
+		{File: "a.go", Line: 10, Risk: RiskWarning, Category: "bug", Summary: "issue here", Detail: "d", Role: "b"},
+	}
+	deduped := Deduplicate(findings, 7)
+	if len(deduped) != 1 {
+		t.Fatalf("expected 1 deduped, got %d", len(deduped))
+	}
+	if deduped[0].Risk != RiskWarning {
+		t.Errorf("unanimous warning should derive Risk=warning, got %q", deduped[0].Risk)
+	}
+}
+
+func TestDisagreementSpread_High(t *testing.T) {
+	t.Parallel()
+	details := []AgentDetail{
+		{Risk: RiskCritical},
+		{Risk: RiskInfo},
+	}
+	if spread := DisagreementSpread(details); spread != 2 {
+		t.Errorf("critical vs info spread should be 2, got %d", spread)
+	}
+}
+
+func TestDisagreementSpread_Low(t *testing.T) {
+	t.Parallel()
+	details := []AgentDetail{
+		{Risk: RiskWarning},
+		{Risk: RiskWarning},
+		{Risk: RiskWarning},
+	}
+	if spread := DisagreementSpread(details); spread != 0 {
+		t.Errorf("all warning spread should be 0, got %d", spread)
+	}
+}
+
+func TestDisagreementSpread_SingleAgent(t *testing.T) {
+	t.Parallel()
+	if spread := DisagreementSpread([]AgentDetail{{Risk: RiskCritical}}); spread != 0 {
+		t.Errorf("single agent spread should be 0, got %d", spread)
+	}
+}

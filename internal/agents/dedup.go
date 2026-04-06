@@ -36,9 +36,18 @@ const (
 	jaccardThresholdNearby = 0.065
 )
 
+// Composite severity constants.
+const (
+	criticalGravityMultiplier  = 2.0 // critical votes are harder to override
+	domainAuthorityMultiplier  = 1.5 // domain experts carry more weight
+	compositeCriticalThreshold = 2.5 // composite >= this → critical
+	compositeWarningThreshold  = 1.7 // composite >= this → warning
+)
+
 // AgentDetail captures one agent's individual perspective on a finding.
 type AgentDetail struct {
 	Role        string `json:"role"`
+	Risk        Risk   `json:"risk"` // this agent's individual severity opinion
 	Detail      string `json:"detail"`
 	CodeExample string `json:"code_example,omitempty"`
 }
@@ -51,6 +60,87 @@ type DedupedFinding struct {
 	Voters       []string          `json:"voters"`
 	AgentDetails []AgentDetail     `json:"agent_details"`
 	voterTokens  []map[string]bool // cached tokenized summaries to avoid re-tokenization
+}
+
+// Consensus returns the fraction of agents that flagged this issue (0.0-1.0).
+// Distinct from Finding.Confidence which is the LLM's self-assessed confidence.
+func (df *DedupedFinding) Consensus() float64 {
+	if df.TotalAgents == 0 {
+		return 0
+	}
+	return float64(df.VoteCount) / float64(df.TotalAgents)
+}
+
+// CompositeSeverity returns a weighted average severity (1.0-3.0) computed from
+// all agents' individual opinions. Critical votes carry 2x weight, and domain
+// experts carry 1.5x weight for findings in their specialty.
+func (df *DedupedFinding) CompositeSeverity() float64 {
+	return computeCompositeSeverity(df.AgentDetails, df.Category)
+}
+
+// SeverityNumeric maps a risk label to a numeric value for weighted averaging.
+func SeverityNumeric(r Risk) float64 {
+	switch r {
+	case RiskCritical:
+		return 3.0
+	case RiskWarning:
+		return 2.0
+	default:
+		return 1.0
+	}
+}
+
+// computeCompositeSeverity calculates a weighted average severity from agent votes.
+// Critical votes get extra weight (gravity), and domain-authority votes carry
+// more weight when the finding category matches their specialty.
+func computeCompositeSeverity(details []AgentDetail, findingCategory string) float64 {
+	if len(details) == 0 {
+		return 1.0
+	}
+	var weightedSum, totalWeight float64
+	for _, d := range details {
+		w := 1.0
+		if d.Risk == RiskCritical {
+			w *= criticalGravityMultiplier
+		}
+		if IsDomainAuthority(d.Role, findingCategory) {
+			w *= domainAuthorityMultiplier
+		}
+		weightedSum += SeverityNumeric(d.Risk) * w
+		totalWeight += w
+	}
+	return weightedSum / totalWeight
+}
+
+// compositeSeverityToRisk maps a numeric composite back to a risk label.
+func compositeSeverityToRisk(cs float64) Risk {
+	switch {
+	case cs >= compositeCriticalThreshold:
+		return RiskCritical
+	case cs >= compositeWarningThreshold:
+		return RiskWarning
+	default:
+		return RiskInfo
+	}
+}
+
+// DisagreementSpread returns the spread between the highest and lowest severity
+// opinions. A spread of 2 means critical vs info — triggers debate.
+func DisagreementSpread(details []AgentDetail) int {
+	if len(details) < 2 {
+		return 0
+	}
+	minSev, maxSev := 3, 1
+	for _, d := range details {
+		n := int(SeverityNumeric(d.Risk))
+		if n < minSev {
+			minSev = n
+		}
+		if n > maxSev {
+			maxSev = n
+		}
+	}
+	return maxSev - minSev
 }
 
 // Deduplicate merges findings that refer to the same issue using hybrid
@@ -74,7 +164,7 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 				break
 			}
 		}
-		ad := AgentDetail{Role: f.Role, Detail: f.Detail, CodeExample: f.CodeExample}
+		ad := AgentDetail{Role: f.Role, Risk: f.Risk, Detail: f.Detail, CodeExample: f.CodeExample}
 		if idx < 0 {
 			groups = append(groups, DedupedFinding{
 				Finding:      *f,
@@ -96,9 +186,14 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 		if len(f.CodeExample) > len(groups[idx].CodeExample) {
 			groups[idx].CodeExample = f.CodeExample
 		}
-		if f.Risk.Order() < groups[idx].Risk.Order() {
-			groups[idx].Risk = f.Risk
-		}
+		// Risk is computed below as composite — not "highest wins."
+	}
+
+	// Compute composite severity and derive Risk label for each group.
+	// Invariant: after this loop, DedupedFinding fields are frozen.
+	// Data flow: dispatch → debate (mutates raw feedbacks) → dedup (freeze) → score.
+	for i := range groups {
+		groups[i].Risk = compositeSeverityToRisk(groups[i].CompositeSeverity())
 	}
 
 	// Sort: vote count desc, severity asc, file asc, line asc.
