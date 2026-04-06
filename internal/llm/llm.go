@@ -64,7 +64,12 @@ func (u Usage) Add(other Usage) Usage {
 	}
 }
 
+// TotalInputTokens returns all input tokens (direct + cache creation + cache read).
+func (u Usage) TotalInputTokens() int {
+	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+}
+
 // TotalTokens returns the total token count (input + output + cache).
 func (u Usage) TotalTokens() int {
-	return u.InputTokens + u.OutputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	return u.TotalInputTokens() + u.OutputTokens
 }

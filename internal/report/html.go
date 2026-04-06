@@ -218,7 +218,7 @@ func HTML(d *Data) (string, error) {
 		GradeColor:       gradeColor(d.Result.HealthScore.Score),
 		GaugeDashOffset:  251 - (d.Result.HealthScore.Score*251)/100, // 251 ~ pi*80, the semicircle arc length
 		HasUsage:         d.Usage.TotalTokens() > 0,
-		InputTokensK:     (d.Usage.InputTokens + d.Usage.CacheCreationInputTokens + d.Usage.CacheReadInputTokens) / 1000,
+		InputTokensK:     d.Usage.TotalInputTokens() / 1000,
 		OutputTokensK:    d.Usage.OutputTokens / 1000,
 		TotalTokensK:     d.Usage.TotalTokens() / 1000,
 		CostUSD:          fmt.Sprintf("%.2f", d.Usage.CostUSD),

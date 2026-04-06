@@ -302,7 +302,7 @@ func runReview(args []string) error {
 	// Print usage summary. Input tokens include cache hits/misses since the
 	// Claude CLI reports cached tokens separately from uncached ones.
 	u := result.Usage
-	totalInput := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	totalInput := u.TotalInputTokens()
 	totalTokens := totalInput + u.OutputTokens
 	fmt.Printf("   📊 Tokens: %dk input, %dk output (%dk total) | Cost: $%.2f | Time: %s\n",
 		totalInput/1000, u.OutputTokens/1000, totalTokens/1000, u.CostUSD, elapsed.Round(time.Second))
@@ -396,7 +396,7 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 
 	repo := sanitizeFilename(pr.Repo)
 	prNum := sanitizeFilename(pr.Number)
-	timestamp := time.Now().Format("20060102-150405")
+	timestamp := time.Now().Format("2006-01-02_3-04pm")
 	dir := filepath.Join(defaultResultsDir, fmt.Sprintf("%s-pr-%s", repo, prNum))
 	outPath := filepath.Join(dir, fmt.Sprintf("%s-pr-%s-%s.%s", repo, prNum, timestamp, ext))
 	return writeToFile(output, outPath)
@@ -428,7 +428,7 @@ func printEstimate(diffBytes int, roles []agents.Role) {
 	for _, r := range roles {
 		model := r.Model
 		if model == "" {
-			model = "sonnet"
+			model = agents.ModelTierStandard
 		}
 		modelCounts[model]++
 	}
@@ -455,7 +455,7 @@ func printEstimate(diffBytes int, roles []agents.Role) {
 	fmt.Printf("   Agents:       %d\n", len(roles))
 
 	// Show model breakdown so users understand cost drivers.
-	for _, model := range []string{"opus", "sonnet", "haiku"} {
+	for _, model := range []string{agents.ModelTierDeep, agents.ModelTierStandard, agents.ModelTierFast} {
 		count := modelCounts[model]
 		if count == 0 {
 			continue
@@ -464,7 +464,7 @@ func printEstimate(diffBytes int, roles []agents.Role) {
 		for _, r := range roles {
 			m := r.Model
 			if m == "" {
-				m = "sonnet"
+				m = agents.ModelTierStandard
 			}
 			if m == model {
 				names = append(names, r.Name)

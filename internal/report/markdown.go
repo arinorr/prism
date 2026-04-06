@@ -130,7 +130,7 @@ func Markdown(d *Data) string {
 
 	// Usage summary.
 	if d.Usage.TotalTokens() > 0 {
-		totalInput := d.Usage.InputTokens + d.Usage.CacheCreationInputTokens + d.Usage.CacheReadInputTokens
+		totalInput := d.Usage.TotalInputTokens()
 		fmt.Fprintf(&b, "---\n\n**Review stats:** %dk input + %dk output = %dk tokens | $%.2f",
 			totalInput/1000, d.Usage.OutputTokens/1000, (totalInput+d.Usage.OutputTokens)/1000, d.Usage.CostUSD)
 		if d.Duration != "" {
