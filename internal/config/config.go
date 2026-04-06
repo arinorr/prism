@@ -21,6 +21,7 @@ type Config struct {
 	MaxRetries       *int     `yaml:"max_retries"`
 	MaxBudgetUSD     float64  `yaml:"max_budget_usd"`
 	DiffContextLines *int     `yaml:"diff_context_lines"` // nil = use default (1), -1 = keep all
+	Debate           bool     `yaml:"debate"`
 	NoCompress       bool     `yaml:"no_compress"`
 	StripPatterns    []string `yaml:"strip_patterns"`
 	DiffWarnBytes    int      `yaml:"diff_warn_bytes"`
@@ -101,6 +102,9 @@ func mergeInto(dst, src *Config) {
 	}
 	if src.DiffContextLines != nil {
 		dst.DiffContextLines = src.DiffContextLines
+	}
+	if src.Debate {
+		dst.Debate = true
 	}
 	if src.NoCompress {
 		dst.NoCompress = true

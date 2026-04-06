@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1017,5 +1018,157 @@ func TestTryParseStrategies_FallsThrough(t *testing.T) {
 	raw, ok := tryParseStrategies(response)
 	if !ok || raw == nil {
 		t.Fatal("should fall through to code block strategy")
+	}
+}
+
+// Debate round tests.
+
+func TestRunDebateRound_HighDisagreementTriggersLLM(t *testing.T) {
+	t.Parallel()
+	// Set up feedbacks where agents disagree (critical vs info on same finding).
+	feedbacks := []Feedback{
+		{Role: "sentinel", Findings: []Finding{
+			{File: "auth.go", Line: 10, Risk: RiskCritical, Category: CategorySecurity, Summary: "SQL injection", Detail: "d"},
+		}},
+		{Role: "editor", Findings: []Finding{
+			{File: "auth.go", Line: 10, Risk: RiskInfo, Category: CategorySecurity, Summary: "SQL injection risk", Detail: "d"},
+		}},
+	}
+
+	mock := &llmtest.Mock{
+		Response: `{"risk": "warning", "reasoning": "Compromise between critical and info."}`,
+		UsageVal: llm.Usage{InputTokens: 1000, OutputTokens: 200, CostUSD: 0.01},
+	}
+	orch := &Orchestrator{
+		opts: &Options{Debate: true, Out: io.Discard, ErrOut: io.Discard},
+		llm:  mock,
+	}
+
+	usage := orch.runDebateRound(feedbacks)
+
+	// LLM should have been called (high disagreement: critical vs info = spread 2).
+	if len(mock.Calls) == 0 {
+		t.Fatal("expected LLM call for high-disagreement finding")
+	}
+	if usage.InputTokens == 0 {
+		t.Error("expected non-zero usage from debate round")
+	}
+
+	// Both findings should have been resolved to "warning".
+	for _, fb := range feedbacks {
+		for _, f := range fb.Findings {
+			if f.File == "auth.go" && f.Risk != RiskWarning {
+				t.Errorf("expected risk resolved to warning, got %q (role: %s)", f.Risk, fb.Role)
+			}
+		}
+	}
+}
+
+func TestRunDebateRound_LowDisagreementSkips(t *testing.T) {
+	t.Parallel()
+	// Both agents agree on warning — no debate needed.
+	feedbacks := []Feedback{
+		{Role: "sentinel", Findings: []Finding{
+			{File: "auth.go", Line: 10, Risk: RiskWarning, Summary: "issue", Detail: "d"},
+		}},
+		{Role: "solver", Findings: []Finding{
+			{File: "auth.go", Line: 10, Risk: RiskWarning, Summary: "issue", Detail: "d"},
+		}},
+	}
+
+	mock := &llmtest.Mock{Response: `{"risk": "warning", "reasoning": "no-op"}`}
+	orch := &Orchestrator{
+		opts: &Options{Debate: true, Out: io.Discard, ErrOut: io.Discard},
+		llm:  mock,
+	}
+
+	orch.runDebateRound(feedbacks)
+
+	// No LLM call — spread is 0 (both warning).
+	if len(mock.Calls) != 0 {
+		t.Errorf("expected no LLM calls for low disagreement, got %d", len(mock.Calls))
+	}
+}
+
+func TestRunDebateRound_FailureKeepsOriginal(t *testing.T) {
+	t.Parallel()
+	feedbacks := []Feedback{
+		{Role: "sentinel", Findings: []Finding{
+			{File: "auth.go", Line: 10, Risk: RiskCritical, Summary: "vuln", Detail: "d"},
+		}},
+		{Role: "editor", Findings: []Finding{
+			{File: "auth.go", Line: 10, Risk: RiskInfo, Summary: "vuln", Detail: "d"},
+		}},
+	}
+
+	mock := &llmtest.Mock{Err: fmt.Errorf("LLM unavailable")}
+	orch := &Orchestrator{
+		opts: &Options{Debate: true, Out: io.Discard, ErrOut: io.Discard},
+		llm:  mock,
+	}
+
+	orch.runDebateRound(feedbacks)
+
+	// Original risks should be preserved since debate failed.
+	if feedbacks[0].Findings[0].Risk != RiskCritical {
+		t.Errorf("sentinel's finding should still be critical, got %q", feedbacks[0].Findings[0].Risk)
+	}
+	if feedbacks[1].Findings[0].Risk != RiskInfo {
+		t.Errorf("editor's finding should still be info, got %q", feedbacks[1].Findings[0].Risk)
+	}
+}
+
+func TestBuildDebatePrompt(t *testing.T) {
+	t.Parallel()
+	dg := &disputeGroup{
+		File:     "auth.go",
+		Line:     42,
+		Category: CategorySecurity,
+		Summary:  "SQL injection",
+		Findings: []Finding{
+			{Role: "sentinel", Risk: RiskCritical, Detail: "This is a critical injection."},
+			{Role: "editor", Risk: RiskInfo, Detail: "Might not be exploitable."},
+		},
+	}
+	prompt := buildDebatePrompt(dg)
+
+	if !strings.Contains(prompt, "auth.go") {
+		t.Error("prompt should contain file name")
+	}
+	if !strings.Contains(prompt, "sentinel (says critical)") {
+		t.Error("prompt should contain sentinel's opinion with risk")
+	}
+	if !strings.Contains(prompt, "editor (says info)") {
+		t.Error("prompt should contain editor's opinion with risk")
+	}
+}
+
+func TestApplyDebateResolution(t *testing.T) {
+	t.Parallel()
+	feedbacks := []Feedback{
+		{Role: "sentinel", Findings: []Finding{
+			{File: "auth.go", Line: 10, Risk: RiskCritical, Summary: "vuln"},
+			{File: "other.go", Line: 50, Risk: RiskWarning, Summary: "unrelated"},
+		}},
+		{Role: "editor", Findings: []Finding{
+			{File: "auth.go", Line: 12, Risk: RiskInfo, Summary: "vuln"},
+		}},
+	}
+
+	dg := &disputeGroup{File: "auth.go", Line: 10}
+	res := &debateResolution{Risk: RiskWarning, Reasoning: "Compromise."}
+
+	applyDebateResolution(feedbacks, dg, res)
+
+	// auth.go findings within lineThreshold should be resolved.
+	if feedbacks[0].Findings[0].Risk != RiskWarning {
+		t.Errorf("sentinel auth.go should be warning, got %q", feedbacks[0].Findings[0].Risk)
+	}
+	if feedbacks[1].Findings[0].Risk != RiskWarning {
+		t.Errorf("editor auth.go should be warning, got %q", feedbacks[1].Findings[0].Risk)
+	}
+	// other.go should be untouched.
+	if feedbacks[0].Findings[1].Risk != RiskWarning {
+		t.Errorf("other.go should remain warning, got %q", feedbacks[0].Findings[1].Risk)
 	}
 }

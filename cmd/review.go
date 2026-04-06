@@ -41,6 +41,7 @@ type reviewOptions struct {
 	verbose     bool
 	dryRun      bool
 	estimate    bool
+	debate      bool
 	toStdout    bool
 	yes         bool
 	rolesFlag   string
@@ -86,6 +87,8 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.dryRun = true
 		case "--estimate":
 			opts.estimate = true
+		case "--debate":
+			opts.debate = true
 		case "--yes", "-y":
 			opts.yes = true
 		case "--no-compress":
@@ -284,6 +287,7 @@ func runReview(args []string) error {
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
 		Verbose:      opts.verbose,
 		DryRun:       opts.dryRun,
+		Debate:       opts.debate || merged.Debate,
 		Model:        merged.Model,
 		AgentTimeout: merged.TimeoutDuration(),
 		MaxRetries:   merged.MaxRetriesVal(),

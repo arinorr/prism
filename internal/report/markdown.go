@@ -51,7 +51,7 @@ func Markdown(d *Data) string {
 					if f.Line > 0 {
 						line = fmt.Sprintf("%d", f.Line)
 					}
-					votes := fmt.Sprintf("%d/%d", f.VoteCount, f.TotalAgents)
+					votes := fmt.Sprintf("%d/%d (%.0f%%)", f.VoteCount, f.TotalAgents, f.Consensus()*100)
 					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
 						line, severityBadge(f.Risk), f.Category, votes, f.Summary)
 				}
@@ -64,12 +64,13 @@ func Markdown(d *Data) string {
 						continue
 					}
 					voters := strings.Join(f.Voters, ", ")
+					consensus := fmt.Sprintf("%.0f%%", f.Consensus()*100)
 					if f.Line > 0 {
-						fmt.Fprintf(&b, "**%s** (line %d, %d/%d agents: %s) — %s\n\n",
-							severityBadge(f.Risk), f.Line, f.VoteCount, f.TotalAgents, voters, f.Summary)
+						fmt.Fprintf(&b, "**%s** (line %d, consensus: %s, %d/%d agents: %s) — %s\n\n",
+							severityBadge(f.Risk), f.Line, consensus, f.VoteCount, f.TotalAgents, voters, f.Summary)
 					} else {
-						fmt.Fprintf(&b, "**%s** (%d/%d agents: %s) — %s\n\n",
-							severityBadge(f.Risk), f.VoteCount, f.TotalAgents, voters, f.Summary)
+						fmt.Fprintf(&b, "**%s** (consensus: %s, %d/%d agents: %s) — %s\n\n",
+							severityBadge(f.Risk), consensus, f.VoteCount, f.TotalAgents, voters, f.Summary)
 					}
 					b.WriteString(f.Detail)
 					b.WriteString("\n\n")

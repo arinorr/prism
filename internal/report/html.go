@@ -72,11 +72,13 @@ type htmlFinding struct {
 	FindingIndex      int
 	VoteCount         int
 	TotalAgents       int
+	ConsensusPercent  int
 }
 
 type htmlAgentDetail struct {
 	Role           string
 	RoleClass      string
+	Risk           string // this agent's individual severity opinion
 	Detail         string
 	CodeExample    string
 	HasCodeExample bool
@@ -267,6 +269,7 @@ func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
 			agentDetails = append(agentDetails, htmlAgentDetail{
 				Role:           ad.Role,
 				RoleClass:      agentColorClass(ad.Role),
+				Risk:           string(ad.Risk),
 				Detail:         ad.Detail,
 				CodeExample:    ad.CodeExample,
 				HasCodeExample: ad.CodeExample != "",
@@ -293,6 +296,7 @@ func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
 			FindingIndex:      *idx,
 			VoteCount:         f.VoteCount,
 			TotalAgents:       f.TotalAgents,
+			ConsensusPercent:  int(f.Consensus() * 100),
 		})
 		*idx++
 	}
@@ -551,7 +555,7 @@ details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; 
       <span class="severity {{.RiskClass}}">{{.Risk}}</span>
       <span class="cat-badge {{.CategoryClass}}">{{.Category}}</span>
       {{- if gt .VoteCount 1}}
-      <span class="vote-count">{{.VoteCount}}/{{.TotalAgents}}</span>
+      <span class="vote-count">{{.VoteCount}}/{{.TotalAgents}} ({{.ConsensusPercent}}%)</span>
       {{- end}}
       <span class="finding-text">{{.Summary}}</span>
       {{- if .HasLine}}
@@ -568,7 +572,7 @@ details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; 
       {{- if .HasMultipleAgents}}
       {{- range .AgentDetails}}
       <details class="agent-detail">
-        <summary><span class="agent-badge {{.RoleClass}}">{{.Role}}</span> perspective</summary>
+        <summary><span class="agent-badge {{.RoleClass}}">{{.Role}}</span> says {{.Risk}}</summary>
         <div class="agent-body">
           <p>{{.Detail}}</p>
           {{- if .HasCodeExample}}

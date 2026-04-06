@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -98,6 +99,7 @@ type ReviewResult struct {
 type Options struct {
 	Verbose      bool
 	DryRun       bool
+	Debate       bool // enable severity debate round for high-disagreement findings
 	Model        string
 	AgentTimeout time.Duration
 	MaxRetries   int
@@ -207,6 +209,13 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 	dr, err := o.dispatchAgents(pr)
 	if err != nil {
 		return nil, err
+	}
+
+	// Phase 1.5: Debate high-disagreement findings (optional).
+	// Runs before dedup so resolved severities flow into composite scoring.
+	if o.opts.Debate {
+		debateUsage := o.runDebateRound(dr.Feedbacks)
+		dr.TotalUsage = dr.TotalUsage.Add(debateUsage)
 	}
 
 	// Phase 2: Collect, deduplicate, and summarize findings (deterministic, no LLM call).
@@ -544,7 +553,8 @@ func buildDeterministicSummary(findings []DedupedFinding, score HealthScore, age
 		fmt.Fprintf(&b, "%d finding(s) flagged by 3+ agents:\n\n", len(highConsensus))
 		for i := range highConsensus {
 			f := &highConsensus[i]
-			fmt.Fprintf(&b, "- **%s** (%d/%d agents): %s\n", f.Risk, f.VoteCount, f.TotalAgents, f.Summary)
+			fmt.Fprintf(&b, "- **%s** (consensus: %.0f%%, %d/%d agents): %s\n",
+				f.Risk, f.Consensus()*100, f.VoteCount, f.TotalAgents, f.Summary)
 		}
 		b.WriteString("\n")
 	}
@@ -601,6 +611,172 @@ Output ONLY valid JSON in this format:
 
 func (o *Orchestrator) skill(role *Role) string {
 	return o.skills[role.Slug]
+}
+
+// Debate round.
+
+const debateDisagreementThreshold = 2 // critical vs info triggers debate
+
+const debateSystemPrompt = `You are a senior code review arbitrator. Multiple reviewers disagree on the severity of a finding. Analyze their perspectives and determine the correct severity level.
+
+Consider:
+- Critical means it will cause failures, data loss, or security breach in production
+- Warning means it should be fixed before merge but is not immediately dangerous
+- Info means it is a suggestion for improvement
+
+Output ONLY valid JSON: {"risk": "critical|warning|info", "reasoning": "brief explanation"}`
+
+// disputeGroup is a lightweight grouping of raw findings by file+line proximity,
+// used to identify high-disagreement findings for the debate round.
+type disputeGroup struct {
+	File     string
+	Line     int
+	Summary  string
+	Category string
+	Findings []Finding // the raw findings in this group
+}
+
+// debateResolution is the LLM arbitrator's response.
+type debateResolution struct {
+	Risk      Risk   `json:"risk"`
+	Reasoning string `json:"reasoning"`
+}
+
+// runDebateRound identifies high-disagreement findings and resolves them via LLM.
+// It modifies feedbacks in place so dedup sees resolved severities.
+func (o *Orchestrator) runDebateRound(feedbacks []Feedback) llm.Usage {
+	groups := findDisputedFindings(feedbacks)
+
+	var totalUsage llm.Usage
+	var debateCount int
+	for _, dg := range groups {
+		if DisagreementSpread(findingDetails(dg.Findings)) < debateDisagreementThreshold {
+			continue
+		}
+		debateCount++
+		o.logf("   ⚖️  Debating: %s (line %d) — %s\n", dg.File, dg.Line, dg.Summary)
+
+		resolved, usage, err := o.resolveDispute(&dg)
+		totalUsage = totalUsage.Add(usage)
+		if err != nil {
+			o.errLogf("   ⚠️  Debate failed for %s:%d: %v\n", dg.File, dg.Line, err)
+			continue
+		}
+
+		if o.opts.Verbose {
+			o.logf("   ⚖️  Resolved to %s: %s\n", resolved.Risk, resolved.Reasoning)
+		}
+
+		applyDebateResolution(feedbacks, &dg, resolved)
+	}
+
+	if debateCount > 0 {
+		o.logf("   ⚖️  Debated %d finding(s)\n\n", debateCount)
+	}
+	return totalUsage
+}
+
+// findDisputedFindings groups raw findings by file+line proximity using the
+// same matching criteria as dedup (matchesGroup), but without the expensive
+// merging, sorting, or token caching.
+func findDisputedFindings(feedbacks []Feedback) []disputeGroup {
+	var all []Finding
+	for _, fb := range feedbacks {
+		for i := range fb.Findings {
+			fb.Findings[i].Role = fb.Role
+			all = append(all, fb.Findings[i])
+		}
+	}
+
+	var groups []disputeGroup
+	for fi := range all {
+		f := &all[fi]
+		matched := false
+		for i := range groups {
+			if groups[i].File == f.File && abs(groups[i].Line-f.Line) <= lineThreshold {
+				groups[i].Findings = append(groups[i].Findings, *f)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			groups = append(groups, disputeGroup{
+				File:     f.File,
+				Line:     f.Line,
+				Summary:  f.Summary,
+				Category: f.Category,
+				Findings: []Finding{*f},
+			})
+		}
+	}
+	return groups
+}
+
+// findingDetails converts raw findings to AgentDetails for DisagreementSpread.
+func findingDetails(findings []Finding) []AgentDetail {
+	details := make([]AgentDetail, len(findings))
+	for i := range findings {
+		details[i] = AgentDetail{Role: findings[i].Role, Risk: findings[i].Risk}
+	}
+	return details
+}
+
+func (o *Orchestrator) resolveDispute(dg *disputeGroup) (*debateResolution, llm.Usage, error) {
+	prompt := buildDebatePrompt(dg)
+
+	ctx := context.Background()
+	if o.opts.AgentTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.opts.AgentTimeout)
+		defer cancel()
+	}
+
+	response, usage, err := o.llm.Complete(ctx, llm.Request{
+		SystemPrompt: debateSystemPrompt,
+		UserPrompt:   prompt,
+		JSONOutput:   true,
+		Model:        ModelTierStandard,
+		MaxBudgetUSD: o.opts.MaxBudgetUSD,
+	})
+	if err != nil {
+		return nil, usage, err
+	}
+
+	var res debateResolution
+	if err := json.Unmarshal([]byte(strings.TrimSpace(response)), &res); err != nil {
+		return nil, usage, fmt.Errorf("failed to parse debate response: %w", err)
+	}
+	if !res.Risk.Valid() {
+		return nil, usage, fmt.Errorf("invalid risk in debate resolution: %q", res.Risk)
+	}
+	return &res, usage, nil
+}
+
+func buildDebatePrompt(dg *disputeGroup) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Finding under dispute:\n")
+	fmt.Fprintf(&b, "File: %s, Line: %d\n", dg.File, dg.Line)
+	fmt.Fprintf(&b, "Category: %s\n", dg.Category)
+	fmt.Fprintf(&b, "Summary: %s\n\n", dg.Summary)
+	fmt.Fprintf(&b, "Agent opinions:\n")
+	for i := range dg.Findings {
+		f := &dg.Findings[i]
+		fmt.Fprintf(&b, "- %s (says %s): %s\n", f.Role, f.Risk, f.Detail)
+	}
+	fmt.Fprintf(&b, "\nDetermine the correct severity level based on the evidence above.")
+	return b.String()
+}
+
+// applyDebateResolution overwrites the Risk of matching findings in feedbacks.
+func applyDebateResolution(feedbacks []Feedback, dg *disputeGroup, res *debateResolution) {
+	for fi := range feedbacks {
+		for fj := range feedbacks[fi].Findings {
+			f := &feedbacks[fi].Findings[fj]
+			if f.File == dg.File && abs(f.Line-dg.Line) <= lineThreshold {
+				f.Risk = res.Risk
+			}
+		}
+	}
 }
 
 // parseFeedback, NormalizeFinding, and truncateUTF8 are in parser.go.

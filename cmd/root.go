@@ -46,6 +46,7 @@ Options:
   --max-retries    Number of retries per agent on failure (default: 1)
   --max-budget-usd Maximum dollar spend per agent call (e.g. 0.50)
   --config         Path to config file (default: .prism.yml)
+  --debate         Enable severity debate for high-disagreement findings
   --no-compress    Disable diff compression (send raw diff to agents)
   --stdout         Print report to terminal instead of saving to file
   -y, --yes        Skip confirmation prompt (auto-confirm estimate)
