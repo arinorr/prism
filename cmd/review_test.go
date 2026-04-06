@@ -1033,7 +1033,12 @@ func TestRunReview_EstimateExitsEarly(t *testing.T) {
 func TestPrintEstimate(t *testing.T) {
 	t.Parallel()
 	// Just verify it doesn't panic with reasonable inputs.
-	printEstimate(10000, 7)
-	printEstimate(0, 1)
-	printEstimate(500000, 3)
+	roles := []agents.Role{
+		{Name: "Sentinel", Model: "opus"},
+		{Name: "Know-It-All", Model: "sonnet"},
+		{Name: "Editor", Model: "haiku"},
+	}
+	printEstimate(10000, roles)
+	printEstimate(0, roles[:1])
+	printEstimate(500000, roles)
 }

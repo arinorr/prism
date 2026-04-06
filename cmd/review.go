@@ -206,8 +206,9 @@ func fetchAndCheckPR(opts *reviewOptions, merged *config.Config) (*gh.PR, prClie
 	}
 
 	// Check diff size and prompt for confirmation if large.
+	// Skip in estimate mode — we're not hitting any models.
 	sizeResult := sizecheck.Check(len(pr.Diff), merged.DiffWarnBytes, merged.DiffChunkBytes)
-	if sizeResult.Warn {
+	if sizeResult.Warn && !opts.estimate {
 		fmt.Fprintf(os.Stderr, "⚠️  %s\n", sizeResult.Message)
 		if !opts.yes && isInteractive() {
 			fmt.Fprint(os.Stderr, "Continue anyway? [y/N] ")
@@ -279,7 +280,7 @@ func runReview(args []string) error {
 
 	// Estimate mode: show projected token usage and exit.
 	if opts.estimate {
-		printEstimate(len(compressed), len(roles))
+		printEstimate(len(compressed), roles)
 		return nil
 	}
 
@@ -421,25 +422,68 @@ const (
 	sonnetOutputPricePerM = 15.0
 )
 
-// printEstimate shows projected token usage based on diff size and exits.
-func printEstimate(diffBytes, agentCount int) {
+// printEstimate shows projected token usage based on diff size and roles.
+func printEstimate(diffBytes int, roles []agents.Role) {
 	tokensPerAgent := diffBytes/bytesPerToken + promptOverheadTokens
-	totalInput := tokensPerAgent * agentCount
-	totalOutput := expectedOutputTokens * agentCount
+	totalInput := tokensPerAgent * len(roles)
+	totalOutput := expectedOutputTokens * len(roles)
 	total := totalInput + totalOutput
 
-	costEstimate := float64(totalInput)/1_000_000*sonnetInputPricePerM +
-		float64(totalOutput)/1_000_000*sonnetOutputPricePerM
+	// Group roles by model for cost breakdown.
+	modelCounts := make(map[string]int)
+	for _, r := range roles {
+		model := r.Model
+		if model == "" {
+			model = "sonnet"
+		}
+		modelCounts[model]++
+	}
+
+	// Estimate cost per model tier.
+	var costEstimate float64
+	for model, count := range modelCounts {
+		input := float64(tokensPerAgent * count)
+		output := float64(expectedOutputTokens * count)
+		var inRate, outRate float64
+		switch model {
+		case "opus":
+			inRate, outRate = 15.0, 75.0
+		case "haiku":
+			inRate, outRate = 0.25, 1.25
+		default: // sonnet
+			inRate, outRate = sonnetInputPricePerM, sonnetOutputPricePerM
+		}
+		costEstimate += input/1_000_000*inRate + output/1_000_000*outRate
+	}
 
 	fmt.Println("📏 Token estimate (approximate):")
 	fmt.Printf("   Diff size:    %d bytes (~%dk tokens per agent)\n", diffBytes, tokensPerAgent/1000)
-	fmt.Printf("   Agents:       %d\n", agentCount)
+	fmt.Printf("   Agents:       %d\n", len(roles))
+
+	// Show model breakdown so users understand cost drivers.
+	for _, model := range []string{"opus", "sonnet", "haiku"} {
+		count := modelCounts[model]
+		if count == 0 {
+			continue
+		}
+		var names []string
+		for _, r := range roles {
+			m := r.Model
+			if m == "" {
+				m = "sonnet"
+			}
+			if m == model {
+				names = append(names, r.Name)
+			}
+		}
+		fmt.Printf("     %-6s ×%d    %s\n", model, count, strings.Join(names, ", "))
+	}
+
 	fmt.Printf("   Est. input:   ~%dk tokens\n", totalInput/1000)
 	fmt.Printf("   Est. output:  ~%dk tokens\n", totalOutput/1000)
 	fmt.Printf("   Est. total:   ~%dk tokens\n", total/1000)
 	fmt.Printf("   Est. cost:    ~$%.2f\n", costEstimate)
-	fmt.Println("\n   Note: estimate assumes Sonnet pricing. Actual cost varies by model,")
-	fmt.Println("   caching, and response length. Opus roles cost ~5x more, Haiku ~10x less.")
+	fmt.Println("\n   Note: actual cost varies by caching and response length.")
 }
 
 var filenameAllowlist = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
