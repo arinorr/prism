@@ -143,6 +143,17 @@ func DisagreementSpread(details []AgentDetail) int {
 	return maxSev - minSev
 }
 
+// findMatchingGroup returns the index of the first group that matches f,
+// or -1 if no group matches.
+func findMatchingGroup(groups []DedupedFinding, f *Finding) int {
+	for i := range groups {
+		if matchesGroup(&groups[i], f) {
+			return i
+		}
+	}
+	return -1
+}
+
 // Deduplicate merges findings that refer to the same issue using hybrid
 // scoring: structural signals (same file, same category, line proximity)
 // lower the text similarity threshold. This catches semantically identical
@@ -157,36 +168,31 @@ func Deduplicate(findings []Finding, totalAgents int) []DedupedFinding {
 
 	for fi := range findings {
 		f := &findings[fi]
-		idx := -1
-		for i := range groups {
-			if matchesGroup(&groups[i], f) {
-				idx = i
-				break
-			}
-		}
 		ad := AgentDetail{Role: f.Role, Risk: f.Risk, Detail: f.Detail, CodeExample: f.CodeExample}
-		if idx < 0 {
-			groups = append(groups, DedupedFinding{
-				Finding:      *f,
-				VoteCount:    1,
-				TotalAgents:  totalAgents,
-				Voters:       []string{f.Role},
-				AgentDetails: []AgentDetail{ad},
-				voterTokens:  []map[string]bool{tokenize(f.Summary)},
-			})
+
+		if matched := findMatchingGroup(groups, f); matched >= 0 {
+			groups[matched].VoteCount++
+			groups[matched].Voters = append(groups[matched].Voters, f.Role)
+			groups[matched].AgentDetails = append(groups[matched].AgentDetails, ad)
+			groups[matched].voterTokens = append(groups[matched].voterTokens, tokenize(f.Summary))
+			if len(f.Detail) > len(groups[matched].Detail) {
+				groups[matched].Detail = f.Detail
+			}
+			if len(f.CodeExample) > len(groups[matched].CodeExample) {
+				groups[matched].CodeExample = f.CodeExample
+			}
+			// Risk is computed below as composite — not "highest wins."
 			continue
 		}
-		groups[idx].VoteCount++
-		groups[idx].Voters = append(groups[idx].Voters, f.Role)
-		groups[idx].AgentDetails = append(groups[idx].AgentDetails, ad)
-		groups[idx].voterTokens = append(groups[idx].voterTokens, tokenize(f.Summary))
-		if len(f.Detail) > len(groups[idx].Detail) {
-			groups[idx].Detail = f.Detail
-		}
-		if len(f.CodeExample) > len(groups[idx].CodeExample) {
-			groups[idx].CodeExample = f.CodeExample
-		}
-		// Risk is computed below as composite — not "highest wins."
+
+		groups = append(groups, DedupedFinding{
+			Finding:      *f,
+			VoteCount:    1,
+			TotalAgents:  totalAgents,
+			Voters:       []string{f.Role},
+			AgentDetails: []AgentDetail{ad},
+			voterTokens:  []map[string]bool{tokenize(f.Summary)},
+		})
 	}
 
 	// Compute composite severity and derive Risk label for each group.

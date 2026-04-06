@@ -7,6 +7,7 @@ import (
 
 const version = "0.1.0"
 
+// Execute parses the command-line arguments and runs the appropriate subcommand.
 func Execute() error {
 	if len(os.Args) < 2 {
 		printUsage()
