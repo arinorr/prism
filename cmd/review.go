@@ -16,6 +16,7 @@ import (
 	"github.com/arinorr/prism/internal/llm"
 	"github.com/arinorr/prism/internal/llm/claude"
 	"github.com/arinorr/prism/internal/report"
+	"github.com/arinorr/prism/internal/sizecheck"
 )
 
 const (
@@ -266,11 +267,19 @@ func runReview(args []string) error {
 	compressedPR.Diff = compressed
 
 	// Show estimate. In --estimate mode, print and exit.
-	// Otherwise, show a confirmation prompt before spending tokens.
 	printEstimate(len(compressed), roles)
 	if opts.estimate {
 		return nil
 	}
+
+	// In non-interactive mode (CI), fail hard on very large diffs
+	// to avoid burning tokens on reviews that won't be effective.
+	sizeResult := sizecheck.Check(len(compressed), merged.DiffWarnBytes, merged.DiffChunkBytes)
+	if sizeResult.SuggestChunk && !opts.yes && !isInteractive() {
+		return fmt.Errorf("diff too large for effective review (%dKB). Use --yes to override or split the PR",
+			len(compressed)/1024)
+	}
+
 	if !opts.yes && !opts.dryRun && isInteractive() {
 		fmt.Print("Continue? [Y/n] ")
 		scanner := bufio.NewScanner(os.Stdin)
