@@ -9,6 +9,7 @@ import (
 
 	"github.com/arinorr/prism/internal/agents"
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/llm"
 )
 
 func testData() *Data {
@@ -920,5 +921,44 @@ func TestHTML_DashboardConsolidated(t *testing.T) {
 	}
 	if !strings.Contains(out, "findings from") {
 		t.Error("dashboard should contain finding count summary")
+	}
+}
+
+func TestMarkdown_UsageFooter(t *testing.T) {
+	d := testData()
+	d.Usage = llm.Usage{InputTokens: 50000, OutputTokens: 10000, CostUSD: 1.23}
+	out := Markdown(d)
+	if !strings.Contains(out, "Review stats:") {
+		t.Error("markdown should contain usage footer when usage is set")
+	}
+	if !strings.Contains(out, "$1.23") {
+		t.Error("markdown should contain cost in usage footer")
+	}
+	if !strings.Contains(out, "50k input") {
+		t.Error("markdown should show input token count")
+	}
+}
+
+func TestMarkdown_NoUsageFooterWhenEmpty(t *testing.T) {
+	d := testData()
+	// Usage is zero-value — no footer should appear.
+	out := Markdown(d)
+	if strings.Contains(out, "Review stats:") {
+		t.Error("markdown should not contain usage footer when usage is zero")
+	}
+}
+
+func TestHTML_UsageFooter(t *testing.T) {
+	d := testData()
+	d.Usage = llm.Usage{InputTokens: 50000, OutputTokens: 10000, CostUSD: 1.23}
+	out, err := HTML(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "50k input") {
+		t.Error("HTML should contain input tokens in footer")
+	}
+	if !strings.Contains(out, "1.23") {
+		t.Error("HTML should contain cost in footer")
 	}
 }

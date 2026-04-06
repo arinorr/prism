@@ -942,3 +942,35 @@ func TestRunReview_InvalidFormatFailsFast(t *testing.T) {
 		t.Errorf("expected 'invalid format' error, got: %v", err)
 	}
 }
+
+func TestParseReviewArgs_EstimateFlag(t *testing.T) {
+	opts, err := parseReviewArgs([]string{"42", "--estimate"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.estimate {
+		t.Error("expected estimate=true")
+	}
+}
+
+func TestRunReview_EstimateExitsEarly(t *testing.T) {
+	withMockClient(t, &gh.PR{
+		Number: "42",
+		Title:  "Test PR",
+		Diff:   "some diff content here",
+		Files:  []gh.FileChange{{Path: "main.go"}},
+	}, nil)
+
+	// --estimate should exit before calling any agents.
+	err := runReview([]string{"42", "--estimate", "--yes"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPrintEstimate(t *testing.T) {
+	// Just verify it doesn't panic with reasonable inputs.
+	printEstimate(10000, 7)
+	printEstimate(0, 1)
+	printEstimate(500000, 3)
+}
