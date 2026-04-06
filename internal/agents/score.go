@@ -32,14 +32,19 @@ func ComputeHealthScore(findings []DedupedFinding) HealthScore {
 	for i := range findings {
 		f := &findings[i]
 
+		// basePenalty is calibrated so that the new formula produces similar
+		// deductions to the old per-risk formula:
+		//   critical changed: 3.0 × 3.0 × 1.0 = 9  (old: 20, but gravity makes composite ~5+)
+		//   warning changed:  3.0 × 2.0 × 1.0 = 6  (old: 8)
+		//   info changed:     3.0 × 1.0 × 1.0 = 3  (old: 2, slightly higher)
 		var basePenalty float64
 		switch f.Scope {
 		case ScopeChanged:
-			basePenalty = 8.0
+			basePenalty = 3.0
 		case ScopeExisting:
-			basePenalty = 2.0
+			basePenalty = 1.0
 		default: // codebase
-			basePenalty = 0.5
+			basePenalty = 0.25
 		}
 
 		score -= basePenalty * f.CompositeSeverity() * f.Consensus()

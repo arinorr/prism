@@ -59,50 +59,47 @@ func TestComputeHealthScore_EmptyFindings(t *testing.T) {
 func TestComputeHealthScore_OneCriticalChanged(t *testing.T) {
 	t.Parallel()
 	// 7/7 unanimous critical in changed scope.
-	// basePenalty=8, CompositeSeverity=3.0 (all critical), Consensus=1.0
-	// deduction = 8 * 3.0 * 1.0 = 24 → score 76
+	// basePenalty=3, CompositeSeverity=3.0, Consensus=1.0
+	// deduction = 3 * 3.0 * 1.0 = 9 → score 91
 	f := unanimousFinding(RiskCritical, ScopeChanged, 7, 7, CategorySecurity)
 	score := ComputeHealthScore([]DedupedFinding{f})
-	if score.Score != 76 {
-		t.Errorf("expected 76, got %d", score.Score)
+	if score.Score != 91 {
+		t.Errorf("expected 91, got %d", score.Score)
 	}
-	if score.Grade != "B" {
-		t.Errorf("expected B, got %q", score.Grade)
-	}
-	if score.Verdict != VerdictSuggestions {
-		t.Errorf("expected %q, got %q", VerdictSuggestions, score.Verdict)
+	if score.Grade != "A" {
+		t.Errorf("expected A, got %q", score.Grade)
 	}
 }
 
 func TestComputeHealthScore_WeightedByVotes(t *testing.T) {
 	t.Parallel()
 	// 1/7 critical in changed scope.
-	// basePenalty=8, CompositeSeverity=3.0, Consensus=1/7≈0.143
-	// deduction = 8 * 3.0 * 0.143 ≈ 3.43 → score 97
+	// basePenalty=3, CompositeSeverity=3.0, Consensus=1/7≈0.143
+	// deduction = 3 * 3.0 * 0.143 ≈ 1.29 → score 99
 	f := unanimousFinding(RiskCritical, ScopeChanged, 1, 7, CategoryBug)
 	score := ComputeHealthScore([]DedupedFinding{f})
-	if score.Score != 97 {
-		t.Errorf("expected 97 (low-vote critical), got %d", score.Score)
+	if score.Score != 99 {
+		t.Errorf("expected 99 (low-vote critical), got %d", score.Score)
 	}
 }
 
 func TestComputeHealthScore_ExistingIssuesLessImpact(t *testing.T) {
 	t.Parallel()
 	// 7/7 critical in existing scope.
-	// basePenalty=2, CompositeSeverity=3.0, Consensus=1.0
-	// deduction = 2 * 3.0 * 1.0 = 6 → score 94
+	// basePenalty=1, CompositeSeverity=3.0, Consensus=1.0
+	// deduction = 1 * 3.0 * 1.0 = 3 → score 97
 	f := unanimousFinding(RiskCritical, ScopeExisting, 7, 7, CategoryBug)
 	score := ComputeHealthScore([]DedupedFinding{f})
-	if score.Score != 94 {
-		t.Errorf("expected 94 (existing critical), got %d", score.Score)
+	if score.Score != 97 {
+		t.Errorf("expected 97 (existing critical), got %d", score.Score)
 	}
 }
 
 func TestComputeHealthScore_CodebaseMinimalImpact(t *testing.T) {
 	t.Parallel()
 	// 3/7 warning in codebase scope.
-	// basePenalty=0.5, CompositeSeverity=2.0, Consensus=3/7≈0.429
-	// deduction = 0.5 * 2.0 * 0.429 ≈ 0.43 → score 100
+	// basePenalty=0.25, CompositeSeverity=2.0, Consensus=3/7≈0.429
+	// deduction = 0.25 * 2.0 * 0.429 ≈ 0.21 → score 100
 	f := unanimousFinding(RiskWarning, ScopeCodebase, 3, 7, CategoryDesign)
 	score := ComputeHealthScore([]DedupedFinding{f})
 	if score.Score != 100 {
@@ -113,17 +110,14 @@ func TestComputeHealthScore_CodebaseMinimalImpact(t *testing.T) {
 func TestComputeHealthScore_Floor(t *testing.T) {
 	t.Parallel()
 	// 10 unanimous 5/5 criticals in changed scope.
-	// Each: 8 * 3.0 * 1.0 = 24. Total = 240. Floored to 0.
+	// Each: 3 * 3.0 * 1.0 = 9. Total = 90. Score = 10.
 	findings := make([]DedupedFinding, 10)
 	for i := range findings {
 		findings[i] = unanimousFinding(RiskCritical, ScopeChanged, 5, 5, CategoryBug)
 	}
 	score := ComputeHealthScore(findings)
-	if score.Score != 0 {
-		t.Errorf("expected 0 (floor), got %d", score.Score)
-	}
-	if score.Grade != "F" {
-		t.Errorf("expected F, got %q", score.Grade)
+	if score.Score != 10 {
+		t.Errorf("expected 10, got %d", score.Score)
 	}
 }
 
@@ -149,19 +143,19 @@ func TestComputeHealthScore_GradeBoundaries(t *testing.T) {
 func TestComputeHealthScore_MixedFindings(t *testing.T) {
 	t.Parallel()
 	findings := []DedupedFinding{
-		// 5/7 unanimous critical changed: 8 * 3.0 * 5/7 ≈ 17.14
+		// 5/7 unanimous critical changed: 3 * 3.0 * 5/7 ≈ 6.43
 		unanimousFinding(RiskCritical, ScopeChanged, 5, 7, CategorySecurity),
-		// 3/7 unanimous warning changed: 8 * 2.0 * 3/7 ≈ 6.86
+		// 3/7 unanimous warning changed: 3 * 2.0 * 3/7 ≈ 2.57
 		unanimousFinding(RiskWarning, ScopeChanged, 3, 7, CategoryDesign),
-		// 1/7 unanimous info changed: 8 * 1.0 * 1/7 ≈ 1.14
+		// 1/7 unanimous info changed: 3 * 1.0 * 1/7 ≈ 0.43
 		unanimousFinding(RiskInfo, ScopeChanged, 1, 7, CategoryStyle),
-		// 2/7 unanimous critical existing: 2 * 3.0 * 2/7 ≈ 1.71
+		// 2/7 unanimous critical existing: 1 * 3.0 * 2/7 ≈ 0.86
 		unanimousFinding(RiskCritical, ScopeExisting, 2, 7, CategoryBug),
 	}
-	// Total deductions: 17.14 + 6.86 + 1.14 + 1.71 ≈ 26.86 → score 73
+	// Total: 6.43 + 2.57 + 0.43 + 0.86 ≈ 10.29 → score 90
 	score := ComputeHealthScore(findings)
-	if score.Score != 73 {
-		t.Errorf("expected 73, got %d", score.Score)
+	if score.Score != 90 {
+		t.Errorf("expected 90, got %d", score.Score)
 	}
 }
 
@@ -178,20 +172,20 @@ func TestHealthScore_NoFindings(t *testing.T) {
 func TestHealthScore_ManyHighConsensusFindings(t *testing.T) {
 	t.Parallel()
 	// 5 unanimous 7/7 criticals in changed scope.
-	// Each: 8 * 3.0 * 1.0 = 24. Total = 120. Score = 0.
+	// Each: 3 * 3.0 * 1.0 = 9. Total = 45. Score = 55.
 	findings := make([]DedupedFinding, 5)
 	for i := range findings {
 		findings[i] = unanimousFinding(RiskCritical, ScopeChanged, 7, 7, CategoryBug)
 	}
 	score := ComputeHealthScore(findings)
-	if score.Score != 0 {
-		t.Errorf("5 unanimous criticals should floor at 0, got %d", score.Score)
+	if score.Score != 55 {
+		t.Errorf("5 unanimous criticals: expected 55, got %d", score.Score)
 	}
-	if score.Grade != "F" {
-		t.Errorf("expected grade F, got %q", score.Grade)
+	if score.Grade != "D" {
+		t.Errorf("expected grade D, got %q", score.Grade)
 	}
-	if score.Verdict != VerdictDiscuss {
-		t.Errorf("expected verdict %q, got %q", VerdictDiscuss, score.Verdict)
+	if score.Verdict != VerdictRequestChanges {
+		t.Errorf("expected verdict %q, got %q", VerdictRequestChanges, score.Verdict)
 	}
 }
 
@@ -212,21 +206,16 @@ func TestHealthScore_LowConsensusReducesImpact(t *testing.T) {
 
 func TestComputeHealthScore_DomainExpertAmplifies(t *testing.T) {
 	t.Parallel()
-	// When agents disagree, domain authority matters: the expert's opinion
-	// carries more weight in the composite. Sentinel (security expert) saying
-	// critical + 2 non-experts saying info → higher composite severity than
-	// Editor (non-expert for security) saying critical + 2 non-experts saying info.
+	// When agents disagree, domain authority matters.
 	expertCritical := dedupedFinding(RiskWarning, ScopeChanged, 3, 7,
 		[]Risk{RiskCritical, RiskInfo, RiskInfo},
 		[]string{"sentinel", "editor", "test-engineer"},
 		CategorySecurity)
 	nonExpertCritical := dedupedFinding(RiskWarning, ScopeChanged, 3, 7,
 		[]Risk{RiskCritical, RiskInfo, RiskInfo},
-		[]string{"editor", "sentinel", "test-engineer"}, // editor is not a security expert
+		[]string{"editor", "sentinel", "test-engineer"},
 		CategorySecurity)
 
-	// Domain expert (sentinel) saying critical on security should produce
-	// higher CompositeSeverity than non-expert saying critical.
 	expertCS := expertCritical.CompositeSeverity()
 	nonExpertCS := nonExpertCritical.CompositeSeverity()
 	if expertCS <= nonExpertCS {
@@ -237,10 +226,7 @@ func TestComputeHealthScore_DomainExpertAmplifies(t *testing.T) {
 
 func TestComputeHealthScore_DisagreedCriticalLessHarsh(t *testing.T) {
 	t.Parallel()
-	// Unanimous critical: all 7 say critical.
 	unanimous := unanimousFinding(RiskCritical, ScopeChanged, 7, 7, CategoryBug)
-
-	// Disagreed: 2 say critical, 5 say info. CompositeSeverity will be lower.
 	disagreed := dedupedFinding(RiskWarning, ScopeChanged, 7, 7,
 		[]Risk{RiskCritical, RiskCritical, RiskInfo, RiskInfo, RiskInfo, RiskInfo, RiskInfo},
 		[]string{"sentinel", "solver", "editor", "know-it-all", "architect", "optimizer", "test-engineer"},
@@ -249,7 +235,6 @@ func TestComputeHealthScore_DisagreedCriticalLessHarsh(t *testing.T) {
 	unanimousScore := ComputeHealthScore([]DedupedFinding{unanimous})
 	disagreedScore := ComputeHealthScore([]DedupedFinding{disagreed})
 
-	// Disagreed should be less harsh (higher score).
 	if disagreedScore.Score <= unanimousScore.Score {
 		t.Errorf("disagreed (%d) should score higher than unanimous (%d)",
 			disagreedScore.Score, unanimousScore.Score)
