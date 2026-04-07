@@ -10,9 +10,10 @@ type Role struct {
 	Name        string
 	Slug        string
 	Description string
-	SkillFile   string   // path to the Claude skill file
-	Model       string   // preferred model for this role (empty = use global default)
-	Specialties []string // finding categories this role is a domain authority on
+	SkillFile   string       // path to the Claude skill file
+	Model       string       // preferred model for this role (empty = use global default)
+	Specialties []string     // finding categories this role is a domain authority on
+	Relevance   []PRCategory // PR categories this role is relevant for; nil = all
 }
 
 // Model tier constants for per-role defaults.
@@ -31,6 +32,7 @@ var (
 		SkillFile:   "skills/know-it-all.md",
 		Model:       ModelTierStandard,
 		Specialties: []string{CategoryStyle, CategoryDesign},
+		// Relevance: nil — relevant for all PR categories.
 	}
 	RoleArchitect = Role{
 		Name:        "Architect",
@@ -39,6 +41,7 @@ var (
 		SkillFile:   "skills/architect.md",
 		Model:       ModelTierDeep,
 		Specialties: []string{CategoryDesign},
+		Relevance:   []PRCategory{PRCategoryCode},
 	}
 	RoleSolver = Role{
 		Name:        "Solver",
@@ -47,6 +50,7 @@ var (
 		SkillFile:   "skills/solver.md",
 		Model:       ModelTierStandard,
 		Specialties: []string{CategoryBug},
+		Relevance:   []PRCategory{PRCategoryCode, PRCategoryTests},
 	}
 	RoleEditor = Role{
 		Name:        "Editor",
@@ -55,6 +59,7 @@ var (
 		SkillFile:   "skills/editor.md",
 		Model:       ModelTierFast,
 		Specialties: []string{CategoryStyle},
+		Relevance:   []PRCategory{PRCategoryCode, PRCategoryDocs},
 	}
 	RoleOptimizer = Role{
 		Name:        "Optimizer",
@@ -63,6 +68,7 @@ var (
 		SkillFile:   "skills/optimizer.md",
 		Model:       ModelTierStandard,
 		Specialties: []string{CategoryPerformance},
+		Relevance:   []PRCategory{PRCategoryCode},
 	}
 	RoleSentinel = Role{
 		Name:        "Sentinel",
@@ -71,6 +77,7 @@ var (
 		SkillFile:   "skills/sentinel.md",
 		Model:       ModelTierDeep,
 		Specialties: []string{CategorySecurity},
+		Relevance:   []PRCategory{PRCategoryCode, PRCategoryConfig},
 	}
 	RoleTestEngineer = Role{
 		Name:        "Test Engineer",
@@ -79,6 +86,7 @@ var (
 		SkillFile:   "skills/test-engineer.md",
 		Model:       ModelTierFast,
 		Specialties: []string{CategoryTesting},
+		Relevance:   []PRCategory{PRCategoryCode, PRCategoryTests},
 	}
 
 	AllRoles = []Role{

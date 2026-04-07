@@ -237,6 +237,30 @@ func runReview(args []string) error {
 		return err
 	}
 
+	// Route agents based on PR content (unless --roles was explicitly set).
+	if opts.rolesFlag == "" {
+		paths := make([]string, len(pr.Files))
+		for i, f := range pr.Files {
+			paths[i] = f.Path
+		}
+		category := agents.ClassifyPR(paths)
+		routed := agents.RouteAgents(roles, category)
+		if len(routed) < len(roles) {
+			names := make([]string, len(routed))
+			for i, r := range routed {
+				names[i] = r.Name
+			}
+			fmt.Printf("   📋 %s PR detected — running %d/%d agents: %s (use --roles to override)\n",
+				category, len(routed), len(roles), strings.Join(names, ", "))
+			if opts.verbose {
+				for _, p := range paths {
+					fmt.Printf("      %s → %s\n", p, agents.ClassifyFile(p))
+				}
+			}
+		}
+		roles = routed
+	}
+
 	// Detect languages for skill module loading.
 	languages := agents.DetectLanguages(pr.Files)
 
