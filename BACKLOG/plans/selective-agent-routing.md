@@ -370,10 +370,10 @@ func BuildChangeMap(files []ClassifiedFile, idx *index.Index) *ChangeMap
 **The diff itself tells us.** A declaration line with a `+` prefix means the declaration is new. A declaration on a context line (space prefix) with changed body lines means the function was modified.
 
 Algorithm:
-1. For each classified file, parse the diff and classify each line as added (`+`), removed (`-`), or context (space)
-2. For `+` lines, run `lex.ExtractCandidates` looking for **declaration patterns** (`RefDeclaration`). If the declaration line itself is a `+` line → mark the symbol as **added** (the entire declaration is new in this PR)
-3. For context-line symbols (via `idx.EnclosingScope(file, line)`) that contain `+`/`-` lines in their body → mark as **modified** (existed before, body changed)
-4. Step 2 runs before step 3. If a symbol is already marked as added, step 3 skips it
+1. For each classified file, parse the diff and classify each line as added (`+`), removed (`-`), or context (space). Collect changed line ranges (line numbers with `+`/`-`).
+2. For `+` lines, run `lex.ExtractCandidates` looking for **declaration patterns** (`RefDeclaration`). If the declaration line itself is a `+` line → mark the symbol as **added** (the entire declaration is new in this PR).
+3. Iterate `idx.SymbolsInFile(file)` and check if each symbol's `[StartLine, EndLine]` range overlaps any changed line range → mark as **modified**. This is more efficient than per-line `EnclosingScope` lookups, and the intent is clearer: "which symbols were touched?" not "what scope is this line in?"
+4. Step 2 runs before step 3. If a symbol is already marked as added, step 3 skips it.
 
 ## Scope Hints in Agent Prompts
 
@@ -499,6 +499,15 @@ With `--verbose`, per-file classification + cross-ref resolution details.
 {"go code", "main.go", PRCategoryCode},
 ```
 
+**Lexer: diff prefix stripping edge cases** (table-driven):
+```go
+{"hunk header skipped", "@@ -10,5 +10,7 @@ func Foo()", wantRefs: []},
+{"no-newline marker", `\ No newline at end of file`, wantRefs: []},
+{"diff header", "--- a/handler.go", wantRefs: []},
+{"empty + line", "+", wantRefs: []},
+{"tab-indented call", "+\tresult := Process(x)", wantRefs: [{Name:"Process", Kind:RefCall}]},
+```
+
 **Lexer tokenization** (table-driven):
 ```go
 {"function call", "result := ProcessBatch(data)", tokens: [IDENT, OTHER, IDENT, LPAREN, ...]},
@@ -529,7 +538,11 @@ With `--verbose`, per-file classification + cross-ref resolution details.
 {"config refs consumer", configFiles, wantRefNames: ["LoadConfig"]},
 {"code-only: no refs", codeFiles, wantRefs: empty},
 {"index nil: no refs", nilIndex, wantRefs: empty},
+{"dedup across files", testFileA refs HandleRequest (context) + testFileB refs HandleRequest (+ line),
+    wantRefs: [{Symbol: HandleRequest, ReferencedFrom: testFileB}]},  // prefer changed-line ref
 ```
+
+**Cross-reference selection**: sort all candidates by `(InChange desc, Kind=RefCall first)`, then take top 5. Not "take 5 changed-line refs, fill remaining with context" — strict sort-then-cap.
 
 **Change map** (structured assertions):
 ```go
@@ -537,12 +550,28 @@ With `--verbose`, per-file classification + cross-ref resolution details.
 {"new function", diff with +func NewHelper, wantAdded: [{helper.go, NewHelper}]},
 {"unchanged function", context-only lines, wantModified: empty},
 {"same name different files", Init in two files, both modified independently},
+{"nested declaration", diff where +func innerHelper is inside modified HandleRequest,
+    wantAdded: [{handler.go, innerHelper}], wantModified: [{handler.go, HandleRequest}]},
+{"new file all added", diff with only + lines containing two func declarations,
+    wantAdded: [{new.go, FuncA}, {new.go, FuncB}], wantModified: empty},
 ```
 
 **Pipeline integration test** (ExtractCandidates → FilterByIndex → resolveCrossReferences with realistic diff):
 - Multi-hunk diff with test file importing code functions
 - Verify candidates extracted, filtered, resolved end-to-end
 - Assert on structured CrossReference output, not strings
+
+**End-to-end prompt assembly** (verifies sections snap together correctly):
+```go
+{"sentinel on mixed PR", role=Sentinel, files=[code+config], index available,
+    wantPromptContains: ["<pr-diff>", "<cross-references>", "<scope-context>"]},
+{"optimizer on code-only PR", role=Optimizer, files=[code], index available,
+    wantPromptContains: ["<pr-diff>"],
+    wantPromptNotContains: ["<cross-references>"]},
+{"editor with nil index", role=Editor, files=[code+docs], index=nil,
+    wantPromptContains: ["<pr-diff>"],
+    wantPromptNotContains: ["<cross-references>", "<scope-context>"]},
+```
 
 **Integration:**
 - Mixed PR → agents get correct subsets + cross-refs + scope hints
@@ -562,6 +591,8 @@ With `--verbose`, per-file classification + cross-ref resolution details.
 - **Renamed symbol**: old name "deleted" + new name "added" in change map.
 - **Zero-value Role**: `SeeAll: false`, `Relevance: nil` → skipped. Safe.
 - **`_test.go` suffix**: handled in pass 3 (suffix), not pass 4 (extension).
+- **Deleted file**: not in working tree → not in index → cross-references to deleted code resolve to nothing. Correct: the code no longer exists.
+- **`--roles` override + scope hints**: scope hints are derived from the ChangeMap, which is built from all files (not the agent's filtered subset). So `--roles sentinel` on a docs PR still gets scope hints from the full diff. Data flow: `buildReviewContext` builds ChangeMap from all files, scope hints are pulled from ChangeMap in `buildAgentPrompt`, independent of which files the agent sees.
 - **Generated file stripped from diff but in index**: correct — index is from working tree.
 - **Symbol name collision**: `Init` in two files keyed as `{cmd/server.go, Init}` vs `{internal/db/db.go, Init}`.
 - **Unparseable diff section**: logged and skipped by `SplitToMap`, not silently dropped.
