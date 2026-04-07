@@ -88,7 +88,7 @@ func (c *Client) GetPRDiff(prRef string) (*PR, error) {
 
 func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 	// Get PR metadata and files in a single call.
-	out, err := c.run("gh", "pr", "view", prRef, "--json", "number,title,body,headRefOid,files")
+	out, err := c.run("gh", "pr", "view", prRef, "--json", "number,title,body,headRefOid,files,headRepository")
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view failed: %w", err)
 	}
@@ -103,6 +103,9 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 			Additions int    `json:"additions"`
 			Deletions int    `json:"deletions"`
 		} `json:"files"`
+		HeadRepository struct {
+			Name string `json:"name"`
+		} `json:"headRepository"`
 	}
 	if err := json.Unmarshal(out, &meta); err != nil {
 		return nil, fmt.Errorf("failed to parse PR metadata: %w", err)
@@ -122,9 +125,14 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 		}
 	}
 
+	repo := meta.HeadRepository.Name
+	if repo == "" {
+		repo = c.detectRepoName() // fallback for older gh versions
+	}
+
 	return &PR{
 		Number:  fmt.Sprintf("%d", meta.Number),
-		Repo:    c.detectRepoName(),
+		Repo:    repo,
 		Title:   meta.Title,
 		Body:    meta.Body,
 		Diff:    string(diff),
