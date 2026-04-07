@@ -70,9 +70,7 @@ func receiverTypeName(expr ast.Expr) string {
 	case *ast.Ident:
 		return t.Name
 	case *ast.StarExpr:
-		if ident, ok := t.X.(*ast.Ident); ok {
-			return ident.Name
-		}
+		return receiverTypeName(t.X) // recurse: *T, *T[P], *T[P, Q]
 	case *ast.IndexExpr: // generic receiver T[P]
 		if ident, ok := t.X.(*ast.Ident); ok {
 			return ident.Name
