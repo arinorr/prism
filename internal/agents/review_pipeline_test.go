@@ -299,7 +299,7 @@ func TestIntegration_FullReviewPipeline(t *testing.T) {
 	roles := testRoles()
 	orch := &Orchestrator{
 		roles:  roles,
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    perRoleMock(),
 	}
@@ -392,7 +392,7 @@ func TestIntegration_ScopeDistribution(t *testing.T) {
 	t.Parallel()
 	orch := &Orchestrator{
 		roles:  testRoles(),
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    perRoleMock(),
 	}
@@ -455,7 +455,7 @@ func TestIntegration_PartialFailureProducesResults(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles(),
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
@@ -482,7 +482,7 @@ func TestIntegration_CleanPR(t *testing.T) {
 	t.Parallel()
 	orch := &Orchestrator{
 		roles:  testRoles(),
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    &llmtest.Mock{Response: `{"findings": []}`},
 	}
@@ -517,7 +517,7 @@ func TestIntegration_LowConfidenceFindingsFiltered(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles()[:1], // Just one agent to keep it simple.
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
@@ -542,7 +542,7 @@ func TestIntegration_VerboseTracksPerAgentUsage(t *testing.T) {
 	roles := testRoles()[:3] // Sentinel, Know-It-All, Architect
 	orch := &Orchestrator{
 		roles:  roles,
-		opts:   &Options{Verbose: true, Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Verbose: true, Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    perRoleMock(),
 	}
@@ -604,7 +604,7 @@ func TestIntegration_UnanimousConsensus(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles(),
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
@@ -648,7 +648,7 @@ func TestIntegration_FindingsForFilesNotInPR(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles()[:1],
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
@@ -687,7 +687,7 @@ func TestIntegration_EmptyDiff(t *testing.T) {
 	mock := &llmtest.Mock{Response: `{"findings":[]}`}
 	orch := &Orchestrator{
 		roles:  testRoles()[:1],
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
@@ -708,7 +708,7 @@ func TestIntegration_AllAgentsTimeout(t *testing.T) {
 	mock := &llmtest.Mock{Err: context.DeadlineExceeded}
 	orch := &Orchestrator{
 		roles:  testRoles()[:2],
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
@@ -780,7 +780,7 @@ func TestIntegration_MalformedLLMResponses(t *testing.T) {
 			mock := &llmtest.Mock{Response: tt.response}
 			orch := &Orchestrator{
 				roles:  testRoles()[:1],
-				opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+				opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 				skills: testSkills(),
 				llm:    mock,
 			}
@@ -821,7 +821,7 @@ func TestIntegration_SuggestionsOnlyForWarningPlusWithLine(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles()[:1],
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}

@@ -88,11 +88,12 @@ func Process(data string) error {
 	orch := &Orchestrator{
 		roles:  roles,
 		opts: &Options{
-			Out:       io.Discard,
-			ErrOut:    io.Discard,
-			Verify:    true,
-			RepoRoot:  repoDir,
-			Languages: []string{"go"},
+			Out:           io.Discard,
+			ErrOut:        io.Discard,
+			Verify:        true,
+			RepoRoot:      repoDir,
+			Languages:     []string{"go"},
+			ExplicitRoles: true,
 		},
 		skills: testSkills(),
 		llm:    mock,
@@ -153,7 +154,7 @@ func TestIntegration_ReviewWithoutVerification(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles(),
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, Verify: false},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, Verify: false, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
@@ -205,11 +206,12 @@ func TestIntegration_VerificationLLMFailureGraceful(t *testing.T) {
 	orch := &Orchestrator{
 		roles: testRoles(),
 		opts: &Options{
-			Out:       io.Discard,
-			ErrOut:    io.Discard,
-			Verify:    true,
-			RepoRoot:  repoDir,
-			Languages: []string{"go"},
+			Out:           io.Discard,
+			ErrOut:        io.Discard,
+			Verify:        true,
+			RepoRoot:      repoDir,
+			Languages:     []string{"go"},
+			ExplicitRoles: true,
 		},
 		skills: testSkills(),
 		llm:    mock,

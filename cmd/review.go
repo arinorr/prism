@@ -318,13 +318,12 @@ func runReview(args []string) error {
 		shouldVerify = false
 	}
 
+	// Always detect repo root — needed for symbol index (routing + verification).
 	repoRoot := ""
-	if shouldVerify {
-		if out, gitErr := exec.Command("git", "rev-parse", "--show-toplevel").Output(); gitErr == nil {
-			repoRoot = strings.TrimSpace(string(out))
-		} else {
-			repoRoot = "."
-		}
+	if out, gitErr := exec.Command("git", "rev-parse", "--show-toplevel").Output(); gitErr == nil {
+		repoRoot = strings.TrimSpace(string(out))
+	} else {
+		repoRoot = "."
 	}
 
 	// Dispatch agents.
@@ -342,6 +341,7 @@ func runReview(args []string) error {
 		VerifierBudgetUSD: merged.VerifierBudgetUSD,
 		RepoRoot:          repoRoot,
 		Languages:         languages,
+		ExplicitRoles:     opts.rolesFlag != "",
 	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
