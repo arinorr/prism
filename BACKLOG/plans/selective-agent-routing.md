@@ -82,27 +82,46 @@ type ReviewContext struct {
     Resolver  *resolve.Resolver  // nil if build failed
     ChangeMap *ChangeMap         // nil if build failed
 }
+
+// SymbolStatus returns the change status of a symbol, nil-safe.
+// Returns SymbolExisting when ChangeMap is nil (graceful degradation).
+func (rc *ReviewContext) SymbolStatus(file, name string) SymbolStatus {
+    if rc.ChangeMap == nil {
+        return SymbolExisting
+    }
+    return rc.ChangeMap.Status(file, name)
+}
 ```
 
-Passed explicitly through function arguments. Not stored as mutable Orchestrator state.
+Passed explicitly through function arguments. Not stored as mutable Orchestrator state. Nil-safe helper eliminates nil-check ceremonies at call sites.
 
 ### ChangeMap
 
+Keyed by `file:name` to avoid collision when the same symbol name exists in multiple files (e.g., `Init()` in `cmd/server.go` and `internal/db/db.go`).
+
 ```go
-// ChangeMap tracks which symbols were introduced, modified, or pre-existed.
-type ChangeMap struct {
-    // Modified: symbols that exist in the index AND have +/- lines at their location.
-    Modified map[string]bool
-    // Added: symbols that appear in + lines but NOT in the index (new in this PR).
-    Added map[string]bool
-    // The index itself represents pre-existing symbols.
+type SymbolStatus string
+const (
+    SymbolAdded    SymbolStatus = "new in this PR"
+    SymbolModified SymbolStatus = "modified in this PR"
+    SymbolExisting SymbolStatus = "pre-existing"
+)
+
+type SymbolKey struct {
+    File string
+    Name string
 }
 
-// Status returns the change status of a symbol.
-func (cm *ChangeMap) Status(name string) string {
-    if cm.Added[name]   { return "new in this PR" }
-    if cm.Modified[name] { return "modified in this PR" }
-    return "pre-existing"
+type ChangeMap struct {
+    Modified map[SymbolKey]bool
+    Added    map[SymbolKey]bool
+}
+
+func (cm *ChangeMap) Status(file, name string) SymbolStatus {
+    key := SymbolKey{File: file, Name: name}
+    if cm.Added[key]    { return SymbolAdded }
+    if cm.Modified[key] { return SymbolModified }
+    return SymbolExisting
 }
 ```
 
@@ -116,18 +135,36 @@ Built by cross-referencing the diff's changed line ranges against the index's sy
 func classifyFile(path string) PRCategory
 ```
 
-Four-pass precedence:
-1. **Directory prefix**: `test/`, `docs/`, `.github/`, `ci/` → `strings.HasPrefix`
-2. **Basename**: `Dockerfile`, `README`, `.gitignore` → exact/prefix match
-3. **Suffix convention**: `_test.go`, `.test.ts`, `.spec.js` → `strings.HasSuffix`
-4. **Extension**: `.md`, `.yml`, `.json`, `.go`, `.ts` → direct comparison
+Classification implemented as a `[]classifier` loop — adding a new pass is adding a slice element, not editing control flow:
+
+```go
+type classifier func(path, base, ext string) (PRCategory, bool)
+
+var classifiers = []classifier{
+    classifyByDirectory,  // pass 1: test/, docs/, .github/
+    classifyByBasename,   // pass 2: Dockerfile, README
+    classifyBySuffix,     // pass 3: _test.go, .test.ts, .spec.js
+    classifyByExtension,  // pass 4: .md, .yml, .json
+}
+
+func classifyFile(path string) PRCategory {
+    base := filepath.Base(path)
+    ext := strings.ToLower(filepath.Ext(path))
+    for _, c := range classifiers {
+        if cat, ok := c(path, base, ext); ok {
+            return cat
+        }
+    }
+    return PRCategoryCode
+}
+```
 
 ### Role Relevance
 
 ```go
 type Role struct {
     // ...existing fields...
-    Relevance []PRCategory // PR categories this role sees; nil checked with SeeAll
+    Relevance []PRCategory // PR categories this role sees; checked with SeeAll
     SeeAll    bool         // if true, sees all files regardless of Relevance
 }
 ```
@@ -151,31 +188,34 @@ func FilterFilesForRole(role *Role, files []ClassifiedFile) []ClassifiedFile
 func AssembleDiff(files []ClassifiedFile) string
 ```
 
-### Cross-Category Context: Symbol Extraction via Lexer
+### Diff Splitting
 
-Regex-based identifier extraction is brittle — it matches every identifier-shaped string (locals, keywords, string contents, comments). A lightweight lexer approach is more precise.
-
-#### Scoped Lexer (Monkey-style)
-
-Based on Thorsten Ball's lexer design. We don't need expression parsing or AST nodes — just enough tokenization to answer: "given a line of source code, what symbols does it reference?"
-
-Token types needed:
-- `IDENT` — identifier (function name, type name, variable)
-- `LPAREN` — `(`
-- `COLON` — `:`
-- `STRING` — skip string literal contents
-- `COMMENT` — skip comment contents
-
-Pattern matching on token sequences:
-- `IDENT LPAREN` → function call (the IDENT is a symbol reference)
-- `COLON IDENT` → type annotation in TypeScript (`: SomeType`)
-- `IDENT DOT IDENT LPAREN` → qualified call (`pkg.Func(`)
-- `new IDENT` → constructor (TypeScript)
-
-Everything else (local variables, keywords, operators) is ignored.
+Single clean export from `internal/diff/`:
 
 ```go
-// internal/agents/lexer.go
+// SplitToMap splits a unified diff into per-file sections, keyed by file path.
+// Sections whose path cannot be extracted are logged and skipped.
+func SplitToMap(rawDiff string) map[string]string
+```
+
+Combines the existing `splitDiffByFile` + `extractFilePath` into one export instead of exposing two building blocks the caller must assemble.
+
+## Symbol Extraction: Monkey-Style Lexer
+
+### Why a lexer, not regex
+
+Regex (`\b[A-Za-z_]\w+\b`) matches every identifier-shaped string — locals, keywords, string contents, comments. The index filter helps but doesn't eliminate false matches on common names (`Error`, `Config`, `New`). A lexer is:
+
+1. **More correct** — matches `ProcessBatch(` as a call, ignores `cfg` as a local
+2. **More scalable** — adding new patterns (imports, generics) is extending token handling, not debugging regex edge cases
+3. **More fun** — building a Thorsten Ball-style lexer in a real production tool is a great learning opportunity
+
+### Package: `internal/lex/`
+
+The lexer is a standalone, testable package with no dependencies on the index or agents. It tokenizes source lines and extracts symbol candidates.
+
+```go
+// internal/lex/token.go
 
 type Token struct {
     Type    TokenType
@@ -185,49 +225,107 @@ type Token struct {
 type TokenType int
 const (
     TokenIdent TokenType = iota
-    TokenLParen
-    TokenColon
-    TokenDot
-    TokenString  // entire string literal (skipped content)
-    TokenComment // entire comment (skipped content)
-    TokenOther   // everything else
+    TokenLParen          // (
+    TokenColon           // :
+    TokenDot             // .
+    TokenString          // entire string literal (contents skipped)
+    TokenComment         // entire comment (contents skipped)
+    TokenKeyword         // func, type, class, etc.
+    TokenOther
     TokenEOL
 )
+```
 
-// Tokenize scans a single clean source line (diff prefix already stripped)
-// and returns tokens. Skips string literal contents and comment contents.
-func Tokenize(line string) []Token
+```go
+// internal/lex/lexer.go
 
-// ExtractSymbolRefs finds symbol references in tokenized diff lines.
-// Looks for IDENT+LPAREN (calls), COLON+IDENT (types), etc.
-// Only returns names that exist in the index.
-func ExtractSymbolRefs(diffText string, idx *index.Index) []SymbolReference
+// Lexer tokenizes a single line of source code (diff prefix already stripped).
+// Skips string literal contents and comment contents.
+// Based on Thorsten Ball's lexer design from "Writing an Interpreter in Go."
+type Lexer struct {
+    input   string
+    pos     int
+    readPos int
+    ch      byte
+}
 
+func New(input string) *Lexer
+func (l *Lexer) NextToken() Token
+```
+
+```go
+// internal/lex/extract.go
+
+// SymbolReference represents a symbol found in source text.
 type SymbolReference struct {
     Name     string
-    Kind     RefKind  // call, type
-    InChange bool     // from +/- line (not context)
+    Kind     RefKind
+    InChange bool // from a +/- line (not context)
 }
 
 type RefKind string
 const (
-    RefCall RefKind = "call"
-    RefType RefKind = "type"
+    RefCall        RefKind = "call"        // Name( or pkg.Name(
+    RefType        RefKind = "type"        // : Name, as Name
+    RefDeclaration RefKind = "declaration" // func Name, type Name, class Name
 )
+
+// ExtractCandidates scans diff text for symbol references.
+// Strips diff prefixes (+/-/space), skips hunk headers, tokenizes each line,
+// and matches token patterns for calls, types, and declarations.
+// Returns candidates WITHOUT index filtering — caller filters separately.
+func ExtractCandidates(diffText string) []SymbolReference
 ```
 
-**Why not a full parser:** We're scanning diff lines, not complete files. Diffs have partial context, jump between hunks, and mix added/removed/context lines. A full AST parser needs complete source. A line-level lexer handles the fragmented nature of diffs.
+**Token patterns for reference detection:**
+- `IDENT LPAREN` → function call (`ProcessBatch(`)
+- `IDENT DOT IDENT LPAREN` → qualified call (`config.Load(`)
+- `COLON IDENT` → type annotation in TS (`: SomeType`)
+- `KEYWORD_NEW IDENT` → constructor (`new Router(`)
 
-**Why not regex:** `\b[A-Za-z_]\w+\b` matches `cfg`, `err`, `nil`, `string`, `for` — all noise. The lexer matches `ProcessBatch(` and knows it's a call, not a local variable. Precision matters because every false positive is wasted context tokens.
+**Token patterns for declaration detection:**
+- `KEYWORD_FUNC IDENT` → Go function declaration
+- `KEYWORD_TYPE IDENT` → Go type declaration
+- `KEYWORD_FUNCTION IDENT` → TS/JS function declaration
+- `KEYWORD_CLASS IDENT` → TS/JS class declaration
+- `KEYWORD_INTERFACE IDENT` → TS interface declaration
 
-### Cross-Reference Resolution
+### Filtering (separate concern)
+
+```go
+// internal/agents/crossref.go
+
+// FilterByIndex keeps only candidates whose names exist in the index.
+func FilterByIndex(candidates []lex.SymbolReference, idx *index.Index) []lex.SymbolReference
+```
+
+Clean separation: the lexer knows nothing about the index. The crossref package does the filtering. Each is independently testable.
+
+## Cross-Category Context Injection
+
+### When to inject
+
+- Agent does NOT have `SeeAll` (Know-It-All doesn't need injection)
+- Agent's filtered files include non-code categories (tests, config)
+- Index is available
+
+### What gets injected
+
+| Agent sees | Context from | What |
+|-----------|-------------|------|
+| Test files | Code files | Function signatures being tested |
+| Config files | Code files | Functions that read/consume the config |
+| Doc files | — | Nothing |
+| Code files | — | Nothing (self-contained) |
+
+### Resolution
 
 ```go
 // CrossReference is a resolved symbol for context injection.
 type CrossReference struct {
-    Symbol index.Symbol
-    Text   string // definition source text (just signature + key lines)
-    Source string // which diff file referenced this
+    Symbol       index.Symbol
+    Text         string // definition source text (signature + key lines)
+    ReferencedFrom string // which diff file referenced this symbol
 }
 
 // resolveCrossReferences resolves symbol references from non-code files
@@ -238,75 +336,72 @@ func resolveCrossReferences(
 ) []CrossReference
 ```
 
-**Caps:** max 5 cross-references per agent, max 30 lines per definition. Ranking prefers symbols from changed lines (`InChange: true`).
+**Returns structured `[]CrossReference`, not formatted strings.** Formatting is a separate thin layer. Tests assert on structured fields, not string matching.
 
-**When to skip:** Agent has `SeeAll` (already sees everything), or agent only has code files (self-contained), or Index is nil.
+**Caps:** max 5 cross-references per agent, max 30 lines per definition. **Ranking:** prefer symbols from changed lines (`InChange: true`) over context lines. Among changed-line references, prefer calls over types (calls are more likely to have behavioral relevance).
 
-### Change Map Construction
-
-```go
-// BuildChangeMap cross-references diff changed-line ranges against the index.
-func BuildChangeMap(files []ClassifiedFile, idx *index.Index) *ChangeMap
-```
-
-Algorithm:
-1. For each classified file, parse the diff to find changed line ranges (lines with `+`/`-`)
-2. For each changed line range, check `idx.EnclosingScope(file, line)` — if a symbol contains changed lines, it's **modified**
-3. For `+` lines that don't fall inside any indexed symbol, extract identifiers via the lexer — if they look like declarations and aren't in the index, they're **added** (new in this PR)
-
-### Scope Hints in Agent Prompts
-
-When the change map is available, include scope context:
-
-```
-<scope-context>
-Symbols modified in this PR: HandleRequest, ProcessBatch
-Symbols new in this PR: ValidateInput
-All other symbols in the codebase are pre-existing.
-
-When reporting findings, use this to determine scope:
-- "changed": issue is in code that was added or modified in this PR
-- "existing": issue is in code that existed before this PR
-- "codebase": broader architectural concern
-</scope-context>
-```
-
-**Tradeoffs of scope hints (Option A):**
-- **Cost:** ~100-200 tokens per agent for the hint block. Net savings if it prevents even one false positive that would otherwise need verification.
-- **Accuracy edge case:** Renamed symbols appear as old name "deleted" + new name "added." Technically correct but could confuse an agent. Acceptable for v1.
-- **Benefit:** Agents make fewer scope classification mistakes → fewer false positives → less verifier work → net token savings.
-
-### Prompt Structure
+### Formatting (separate from resolution)
 
 ```go
-func buildAgentPrompt(role *Role, pr *gh.PR, agentDiff, crossRefContext, scopeHints string) string
+func formatCrossReferences(refs []CrossReference) string
 ```
 
+Produces:
 ```
-<pr-title>...</pr-title>
-<pr-description>...</pr-description>
-
-<pr-diff>
-[per-agent filtered diff]
-</pr-diff>
-
-[if cross-references exist:]
 <cross-references>
 Referenced from test files:
   handler.go:HandleRequest() (lines 10-25):
     func HandleRequest(w http.ResponseWriter, r *http.Request) { ... }
 </cross-references>
-
-[if scope hints available:]
-<scope-context>
-Symbols modified in this PR: HandleRequest, ProcessBatch
-Symbols new in this PR: ValidateInput
-</scope-context>
-
-Respond with a JSON object containing an array of findings...
 ```
 
-### Index Lifecycle in Review()
+## Change Map Construction
+
+```go
+func BuildChangeMap(files []ClassifiedFile, idx *index.Index) *ChangeMap
+```
+
+Algorithm:
+1. For each classified file, parse the diff to find changed line ranges (lines with `+`/`-`)
+2. For changed line ranges, check `idx.EnclosingScope(file, line)` — if a symbol contains changed lines, it's **modified**
+3. For `+` lines, run `lex.ExtractCandidates` looking for **declaration patterns** (`RefDeclaration`). If the declared name isn't in the index, it's **added** (new in this PR)
+
+## Scope Hints in Agent Prompts
+
+File-qualified to avoid ambiguity when the same name exists in multiple files:
+
+```
+<scope-context>
+Symbols modified in this PR: HandleRequest (handler.go), ProcessBatch (worker.go)
+Symbols new in this PR: ValidateInput (validator.go)
+All other symbols in the codebase are pre-existing.
+
+When reporting findings, use this to determine scope:
+- "changed": issue is in code added or modified in this PR
+- "existing": issue is in pre-existing code
+- "codebase": broader architectural concern
+</scope-context>
+```
+
+**Tradeoffs:**
+- **Cost:** ~100-200 tokens per agent. Net savings if it prevents even one false positive.
+- **Renamed symbols:** Old name "deleted" + new name "added." Technically correct.
+
+## Prompt Structure
+
+```go
+// AgentPromptContext groups prompt-specific pieces to avoid
+// 5 undifferentiated string parameters (misorder bug risk).
+type AgentPromptContext struct {
+    Diff       string
+    CrossRefs  string
+    ScopeHints string
+}
+
+func buildAgentPrompt(role *Role, pr *gh.PR, pctx AgentPromptContext) string
+```
+
+## Index Lifecycle in Review()
 
 ```go
 func (o *Orchestrator) Review(ctx context.Context, pr *gh.PR) (*ReviewResult, error) {
@@ -317,7 +412,7 @@ func (o *Orchestrator) Review(ctx context.Context, pr *gh.PR) (*ReviewResult, er
         var err error
         idx, err = index.Build(ctx, o.opts.RepoRoot, o.opts.Languages)
         if err != nil {
-            o.errLogf("Symbol index failed: %v (routing without cross-refs)\n", err)
+            o.errLogf("Symbol index failed: %v (routing without cross-refs/scope)\n", err)
         } else {
             resolver = resolve.NewResolver(idx, o.opts.RepoRoot)
         }
@@ -339,17 +434,15 @@ func (o *Orchestrator) Review(ctx context.Context, pr *gh.PR) (*ReviewResult, er
 }
 ```
 
-### Skipping Agents
+**Index failure degrades gracefully:** classification + diff splitting + routing still work (pure Go, no index needed). Only cross-references, scope hints, and verification are skipped. Token savings from routing are preserved.
 
-- `FilterFilesForRole` returns 0 files AND `--roles` NOT set → skip, return empty Feedback
-- `FilterFilesForRole` returns 0 files AND `--roles` set → use full diff, log warning
-- Agent skipped → logged: `"⏭️ Skipping Optimizer (no relevant files)"`
+## Skipping Agents
 
-### `--roles` Override Policy
+- `FilterFilesForRole` returns 0 files AND `--roles` NOT set → skip, empty Feedback
+- `FilterFilesForRole` returns 0 files AND `--roles` set → full diff (respect user's choice), log warning
+- Logged: `"⏭️ Skipping Optimizer (no relevant files)"`
 
-`--roles` controls which agents run, not what they see. Specified agents still get routed diffs when files match. When no files match, they get the full diff (user explicitly asked for this agent).
-
-### User Feedback
+## User Feedback
 
 ```
 📋 File routing:
@@ -359,35 +452,29 @@ func (o *Orchestrator) Review(ctx context.Context, pr *gh.PR) (*ReviewResult, er
    ⏭️  Skipping Optimizer (no relevant files)
 ```
 
-With `--verbose`, per-file classification and cross-ref resolution details.
-
-## Diff Splitting
-
-Export from `internal/diff/compress.go`:
-
-```go
-func SplitByFile(rawDiff string) []string
-func ExtractFilePath(section string) string
-```
+With `--verbose`, per-file classification + cross-ref resolution details.
 
 ## Files to Create
 
 | File | Purpose |
 |------|---------|
-| `internal/agents/routing.go` | `PRCategory`, `ClassifiedFile`, `ReviewContext`, `classifyFile`, `FilterFilesForRole`, `AssembleDiff`, `buildReviewContext` |
-| `internal/agents/crossref.go` | `CrossReference`, `SymbolReference`, `resolveCrossReferences`, `formatCrossReferences`, `BuildChangeMap`, `ChangeMap` |
-| `internal/agents/lexer.go` | `Token`, `Tokenize`, `ExtractSymbolRefs` — Monkey-style lexer for diff line scanning |
+| `internal/lex/token.go` | `Token`, `TokenType` constants |
+| `internal/lex/lexer.go` | `Lexer` — Monkey-style tokenizer, comment/string skipping |
+| `internal/lex/extract.go` | `ExtractCandidates` — pattern matching on token sequences |
+| `internal/lex/lexer_test.go` | Tokenization tests |
+| `internal/lex/extract_test.go` | Symbol extraction tests (including golden file multi-hunk diff) |
+| `internal/agents/routing.go` | `PRCategory`, `ClassifiedFile`, `ReviewContext`, `classifyFile` (classifier chain), `FilterFilesForRole`, `AssembleDiff`, `buildReviewContext` |
+| `internal/agents/crossref.go` | `CrossReference`, `FilterByIndex`, `resolveCrossReferences`, `formatCrossReferences`, `BuildChangeMap`, `ChangeMap`, `SymbolStatus` |
 | `internal/agents/routing_test.go` | Classification, filtering, assembly tests |
-| `internal/agents/crossref_test.go` | Cross-reference resolution, change map tests |
-| `internal/agents/lexer_test.go` | Tokenization, symbol extraction tests |
+| `internal/agents/crossref_test.go` | Cross-ref resolution, change map, FilterByIndex tests |
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
 | `internal/agents/roles.go` | Add `Relevance []PRCategory` + `SeeAll bool` to Role, populate all 7 |
-| `internal/agents/orchestrator.go` | Update `Review()` to build index once, create `ReviewContext`, pass to `dispatchAgents`. Update `runAgent()` to accept `ReviewContext`. Update `buildAgentPrompt` signature. Wire verifier to use same index/resolver from `ReviewContext`. |
-| `internal/diff/compress.go` | Export `SplitByFile()` and `ExtractFilePath()` |
+| `internal/agents/orchestrator.go` | Update `Review()` to build index once, create `ReviewContext`, pass to `dispatchAgents`. Update `runAgent()` to accept `ReviewContext`. Update `buildAgentPrompt` to use `AgentPromptContext`. Wire verifier to use `ReviewContext.Resolver`. |
+| `internal/diff/compress.go` | Add `SplitToMap()` export (combines split + path extraction) |
 | `cmd/review.go` | Always detect repo root. Print routing summary. |
 
 ## Testing
@@ -401,14 +488,28 @@ func ExtractFilePath(section string) string
 {"go code", "main.go", PRCategoryCode},
 ```
 
-**Lexer** (table-driven):
+**Lexer tokenization** (table-driven):
 ```go
-{"function call", "result := ProcessBatch(data)", wantRefs: [{Name:"ProcessBatch", Kind:RefCall}]},
-{"qualified call", "cfg := config.Load()", wantRefs: [{Name:"Load", Kind:RefCall}]},
-{"type annotation", "var x SomeType", wantRefs: [{Name:"SomeType", Kind:RefType}]},
-{"string contents ignored", `name := "ProcessBatch"`, wantRefs: []},
-{"comment ignored", "// calls ProcessBatch", wantRefs: []},
-{"keyword ignored", "if err != nil {", wantRefs: []},
+{"function call", "result := ProcessBatch(data)", tokens: [IDENT, OTHER, IDENT, LPAREN, ...]},
+{"string skipped", `name := "hello"`, tokens: [IDENT, OTHER, STRING]},
+{"comment skipped", "// call ProcessBatch", tokens: [COMMENT]},
+```
+
+**Symbol extraction** (table-driven, no index dependency):
+```go
+{"call", "+\tresult := ProcessBatch(data)", wantRefs: [{Name:"ProcessBatch", Kind:RefCall, InChange:true}]},
+{"qualified call", " \tcfg := config.Load()", wantRefs: [{Name:"Load", Kind:RefCall, InChange:false}]},
+{"declaration", "+func NewHelper() {", wantRefs: [{Name:"NewHelper", Kind:RefDeclaration, InChange:true}]},
+{"string ignored", `+name := "ProcessBatch"`, wantRefs: []},
+{"keyword ignored", "+\tif err != nil {", wantRefs: []},
+```
+
+**Golden file test** for lexer: realistic multi-hunk diff with added/removed/context lines, comments, strings, multiple function calls. Asserts on full extraction output.
+
+**FilterByIndex** (table-driven, no lexer dependency):
+```go
+{"keeps indexed symbol", candidates: ["ProcessBatch"], idx has ProcessBatch, want: ["ProcessBatch"]},
+{"drops unknown symbol", candidates: ["localVar"], idx empty, want: []},
 ```
 
 **Cross-references** (structured assertions):
@@ -419,11 +520,12 @@ func ExtractFilePath(section string) string
 {"index nil: no refs", nilIndex, wantRefs: empty},
 ```
 
-**Change map:**
+**Change map** (structured assertions):
 ```go
-{"modified function", diffWithChangedLines, idx, wantModified: ["HandleRequest"]},
-{"new function", diffWithAddedFunc, idx, wantAdded: ["NewHelper"]},
-{"unchanged function", contextOnlyDiff, idx, wantModified: empty},
+{"modified function", diff with changed lines inside HandleRequest, wantModified: [{handler.go, HandleRequest}]},
+{"new function", diff with +func NewHelper, wantAdded: [{helper.go, NewHelper}]},
+{"unchanged function", context-only lines, wantModified: empty},
+{"same name different files", Init in two files, both modified independently},
 ```
 
 **Integration:**
@@ -432,28 +534,34 @@ func ExtractFilePath(section string) string
 - Agent with 0 files + --roles → full diff
 - Index fails → routing works, cross-refs and scope hints empty
 - Full pipeline: routing → dispatch → dedup → verify (shares index)
+- ChangeMap key collision: Init in cmd/server.go and internal/db/db.go tracked separately
 
 ## Edge Cases
 
-- **Index build fails**: routing + diff splitting still work. Cross-refs and scope hints empty. Token savings from routing preserved.
-- **No cross-references found**: agent sees its files, no extra blocks. Strictly better than current.
+- **Index build fails**: routing + diff splitting still work. Cross-refs, scope hints, and verification empty. Token savings from routing preserved.
+- **No cross-references found**: agent sees its files, no extra blocks.
 - **Agent gets 0 files (no --roles)**: skip entirely.
 - **Agent gets 0 files (--roles set)**: full diff, log warning.
 - **All files are code**: every agent gets full diff, no cross-refs. Same as current.
-- **Renamed symbol**: appears as "added" (new name) in change map. Technically correct.
+- **Renamed symbol**: old name "deleted" + new name "added" in change map.
 - **Zero-value Role**: `SeeAll: false`, `Relevance: nil` → skipped. Safe.
 - **`_test.go` suffix**: handled in pass 3 (suffix), not pass 4 (extension).
-- **Generated file stripped from diff but in index**: correct — index is from working tree, not compressed diff.
+- **Generated file stripped from diff but in index**: correct — index is from working tree.
+- **Symbol name collision**: `Init` in two files keyed as `{cmd/server.go, Init}` vs `{internal/db/db.go, Init}`.
+- **Unparseable diff section**: logged and skipped by `SplitToMap`, not silently dropped.
 
 ## Future Enhancements
 
-- **Targeted indexing**: `--index-mode=targeted` — parse diff imports, resolve dependency graph, index only reachable files. For large monorepos where full index is slow (>10s).
-- **Deeper lexer patterns**: `import { Name }`, `IDENT.IDENT` field access, generic type parameters.
-- **Change map for scope correction**: use change map post-review to correct agent scope classifications in dedup, not just as prompt hints.
+- **Targeted indexing**: `--index-mode=targeted` — parse diff imports, resolve dependency graph, index only reachable files. For large monorepos.
+- **Deeper lexer patterns**: `import { Name }`, `IDENT.IDENT` field access, generic type params.
+- **Change map scope correction**: use change map post-review to correct agent scope classifications in dedup.
 
 ## Estimation
 
-- ~400-500 lines new code (routing.go + crossref.go + lexer.go)
-- ~300 lines tests
+- ~200 lines lexer package (`internal/lex/`)
+- ~300 lines routing + crossref (`internal/agents/`)
+- ~50 lines diff export + orchestrator wiring
+- ~350 lines tests
+- Total: ~900 lines new + modified
 - Modifies 4 existing files
-- Reuses index + resolver from verifier (no new packages)
+- Creates 1 new package (`internal/lex/`), 4 new files in `internal/agents/`
