@@ -17,11 +17,14 @@ const (
 
 // Data holds everything needed to generate a report.
 type Data struct {
-	PR       *gh.PR
-	Result   *agents.ReviewResult
-	Roles    []string
-	Duration string
-	Usage    llm.Usage
+	PR              *gh.PR
+	Result          *agents.ReviewResult
+	Roles           []string
+	Duration        string
+	Usage           llm.Usage
+	DismissedCount  int
+	DowngradedCount int
+	VerifierError   string
 }
 
 const generalFile = "(general)"

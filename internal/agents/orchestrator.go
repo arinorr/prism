@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/arinorr/prism/internal/gh"
+	"github.com/arinorr/prism/internal/index"
 	"github.com/arinorr/prism/internal/llm"
+	"github.com/arinorr/prism/internal/resolve"
 )
 
 const previewMaxBytes = 500
@@ -93,6 +95,11 @@ type ReviewResult struct {
 	FailedAgents    []string
 	Usage           llm.Usage    // aggregated token usage across all LLM calls
 	AgentUsages     []AgentUsage // per-agent breakdown
+	// Verification results (populated when opts.Verify is true).
+	VerifierUsage   llm.Usage `json:"verifier_usage"`
+	VerifierError   string    `json:"verifier_error,omitempty"`
+	DismissedCount  int       `json:"dismissed_count"`
+	DowngradedCount int       `json:"downgraded_count"`
 }
 
 // Options controls orchestrator behavior.
@@ -104,6 +111,12 @@ type Options struct {
 	AgentTimeout time.Duration
 	MaxRetries   int
 	MaxBudgetUSD float64 // per-agent budget cap in USD (0 = no limit)
+	// Verification options.
+	Verify            bool     // enable post-dedup verification phase
+	VerifierModel     string   // model override for Opus verification tier (default: opus)
+	VerifierBudgetUSD float64  // max USD for verification (0 = auto: 20% of agent cost)
+	RepoRoot          string   // working tree root for symbol index
+	Languages         []string // detected languages for index building
 	// Out receives progress messages (agent status, timing). Defaults to os.Stdout.
 	Out io.Writer
 	// ErrOut receives error/warning messages. Defaults to os.Stderr.
@@ -200,7 +213,7 @@ func readSkillFile(path, exeDir string) ([]byte, error) {
 // Review runs all agents in parallel and synthesizes their feedback.
 // The caller must compress pr.Diff before calling Review (see diff.Compress).
 // The orchestrator does not perform compression itself.
-func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
+func (o *Orchestrator) Review(ctx context.Context, pr *gh.PR) (*ReviewResult, error) {
 	if o.opts.DryRun {
 		return o.dryRun(pr)
 	}
@@ -220,6 +233,19 @@ func (o *Orchestrator) Review(pr *gh.PR) (*ReviewResult, error) {
 
 	// Phase 2: Collect, deduplicate, and summarize findings (deterministic, no LLM call).
 	result := o.collectAndSummarize(dr.Feedbacks)
+
+	// Phase 3: Verify findings against full codebase context (optional).
+	if o.opts.Verify && o.opts.RepoRoot != "" {
+		o.logln("   🔬 Verifying findings...")
+		verifierUsage, verifyErr := o.runVerification(ctx, result)
+		if verifyErr != nil {
+			result.VerifierError = verifyErr.Error()
+			o.errLogf("   ⚠️  Verification failed: %v (using unverified findings)\n", verifyErr)
+		}
+		result.VerifierUsage = verifierUsage
+		dr.TotalUsage = dr.TotalUsage.Add(verifierUsage)
+	}
+
 	result.FailedAgents = dr.FailedAgents
 	result.Usage = dr.TotalUsage
 	result.AgentUsages = dr.AgentUsages
@@ -251,6 +277,12 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 			o.logf("Agent timeout: %s\n", o.opts.AgentTimeout)
 		}
 		o.logf("Max retries: %d\n", o.opts.MaxRetries)
+		if o.opts.Verify {
+			o.logf("Verification: enabled (haiku pre-filter + opus judgment)\n")
+			if o.opts.VerifierBudgetUSD > 0 {
+				o.logf("Verifier budget: $%.2f\n", o.opts.VerifierBudgetUSD)
+			}
+		}
 	}
 
 	o.logf("\nSample prompt (for %s):\n", o.roles[0].Name)
@@ -444,6 +476,46 @@ func (o *Orchestrator) collectAndSummarize(feedbacks []Feedback) *ReviewResult {
 		HealthScore:     healthScore,
 		Suggestions:     suggestions,
 	}
+}
+
+// runVerification builds a symbol index, resolves context, and runs the
+// two-tier verifier on the deduped findings. It mutates result in place:
+// updating DedupedFindings, HealthScore, Summary, DismissedCount, and
+// DowngradedCount. Returns the verifier's LLM usage.
+func (o *Orchestrator) runVerification(ctx context.Context, result *ReviewResult) (llm.Usage, error) {
+	idx, err := index.Build(ctx, o.opts.RepoRoot, o.opts.Languages)
+	if err != nil {
+		return llm.Usage{}, fmt.Errorf("building symbol index: %w", err)
+	}
+	o.logf("   📚 Symbol index: %d symbols indexed\n", idx.Size())
+
+	resolver := resolve.NewResolver(idx, o.opts.RepoRoot)
+	verifier := NewVerifier(o.llm, resolver, o.opts)
+
+	preDedupCount := len(result.DedupedFindings)
+	verified, vUsage, vErr := verifier.Verify(ctx, result.DedupedFindings)
+	if vErr != nil {
+		return vUsage, vErr
+	}
+
+	dismissed := preDedupCount - len(verified)
+	downgraded := 0
+	for _, f := range verified {
+		if f.VerificationStatus == StatusDowngraded {
+			downgraded++
+		}
+	}
+
+	result.DedupedFindings = verified
+	result.HealthScore = ComputeHealthScore(verified)
+	result.Summary = buildDeterministicSummary(verified, result.HealthScore, len(result.AgentUsages))
+	result.DismissedCount = dismissed
+	result.DowngradedCount = downgraded
+
+	o.logf("   🔬 Verified: %d confirmed, %d dismissed, %d downgraded\n",
+		len(verified)-downgraded, dismissed, downgraded)
+
+	return vUsage, nil
 }
 
 // buildDeterministicSummary creates a markdown summary from findings data

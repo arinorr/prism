@@ -333,7 +333,7 @@ func TestDryRun_EmptyRoles(t *testing.T) {
 	t.Parallel()
 	orch := &Orchestrator{roles: []Role{}, opts: &Options{DryRun: true}, skills: map[string]string{}}
 	pr := &gh.PR{Number: "1", Title: "Test"}
-	_, err := orch.Review(pr)
+	_, err := orch.Review(context.Background(), pr)
 	if err == nil {
 		t.Fatal("expected error for empty roles in dry run")
 	}
@@ -350,7 +350,7 @@ func TestDryRun_ProducesResult(t *testing.T) {
 		skills: map[string]string{"test": "skill content"},
 	}
 	pr := &gh.PR{Number: "42", Title: "Test PR", Diff: "some diff", Files: []gh.FileChange{{Path: "a.go"}}}
-	result, err := orch.Review(pr)
+	result, err := orch.Review(context.Background(), pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestDryRun_Verbose(t *testing.T) {
 		skills: map[string]string{"test": "skill content here"},
 	}
 	pr := &gh.PR{Number: "1", Title: "Test", Diff: "diff"}
-	result, err := orch.Review(pr)
+	result, err := orch.Review(context.Background(), pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestDryRun_VerboseWithModelAndTimeout(t *testing.T) {
 		skills: map[string]string{"test": "skill content here"},
 	}
 	pr := &gh.PR{Number: "1", Title: "Test", Diff: "diff"}
-	result, err := orch.Review(pr)
+	result, err := orch.Review(context.Background(), pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestReview_FullPipeline(t *testing.T) {
 		llm:    mock,
 	}
 	pr := &gh.PR{Number: "1", Title: "Test", Body: "b", Diff: "d"}
-	result, err := orch.Review(pr)
+	result, err := orch.Review(context.Background(), pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -804,7 +804,7 @@ func TestReview_FailedAgentsTracked(t *testing.T) {
 		llm:    mock,
 	}
 	pr := &gh.PR{Number: "1", Title: "Test", Body: "b", Diff: "d"}
-	result, err := orch.Review(pr)
+	result, err := orch.Review(context.Background(), pr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

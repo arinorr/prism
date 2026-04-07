@@ -42,6 +42,10 @@ type htmlTemplateData struct {
 	InputTokensK     int
 	OutputTokensK    int
 	CostUSD          string
+	DismissedCount   int
+	DowngradedCount  int
+	HasVerification  bool
+	VerifierError    string
 }
 
 type htmlFileGroup struct {
@@ -70,9 +74,12 @@ type htmlFinding struct {
 	AgentDetails      []htmlAgentDetail
 	HasMultipleAgents bool
 	FindingIndex      int
-	VoteCount         int
-	TotalAgents       int
-	ConsensusPercent  int
+	VoteCount            int
+	TotalAgents          int
+	ConsensusPercent     int
+	VerificationStatus   string
+	VerificationReason   string
+	HasVerificationInfo  bool
 }
 
 type htmlAgentDetail struct {
@@ -224,6 +231,10 @@ func HTML(d *Data) (string, error) {
 		OutputTokensK:    d.Usage.OutputTokens / 1000,
 		TotalTokensK:     d.Usage.TotalTokens() / 1000,
 		CostUSD:          fmt.Sprintf("%.2f", d.Usage.CostUSD),
+		DismissedCount:   d.DismissedCount,
+		DowngradedCount:  d.DowngradedCount,
+		HasVerification:  d.DismissedCount > 0 || d.DowngradedCount > 0,
+		VerifierError:    d.VerifierError,
 	}
 
 	tmpl, err := htmltemplate.New("report").Parse(htmlReportTemplate)
@@ -294,9 +305,12 @@ func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
 			AgentDetails:      agentDetails,
 			HasMultipleAgents: len(agentDetails) > 1,
 			FindingIndex:      *idx,
-			VoteCount:         f.VoteCount,
-			TotalAgents:       f.TotalAgents,
-			ConsensusPercent:  int(f.Consensus() * 100),
+			VoteCount:            f.VoteCount,
+			TotalAgents:          f.TotalAgents,
+			ConsensusPercent:     int(f.Consensus() * 100),
+			VerificationStatus:   string(f.VerificationStatus),
+			VerificationReason:   f.VerificationReason,
+			HasVerificationInfo:  f.VerificationStatus != "",
 		})
 		*idx++
 	}

@@ -24,12 +24,18 @@ type Config struct {
 	Debate           bool     `yaml:"debate"`
 	NoCompress       bool     `yaml:"no_compress"`
 	StripPatterns    []string `yaml:"strip_patterns"`
-	DiffWarnBytes    int      `yaml:"diff_warn_bytes"`
-	DiffChunkBytes   int      `yaml:"diff_chunk_bytes"`
+	DiffWarnBytes     int      `yaml:"diff_warn_bytes"`
+	DiffChunkBytes    int      `yaml:"diff_chunk_bytes"`
+	Verify            *bool    `yaml:"verify"`               // nil = not set (default false)
+	VerifierModel     string   `yaml:"verifier_model"`       // model for Opus verification tier
+	VerifierBudgetUSD float64  `yaml:"verifier_budget_usd"`  // max USD for verification (0 = auto)
 }
 
 // IntPtr returns a pointer to the given int. Convenience for config construction.
 func IntPtr(n int) *int { return &n }
+
+// BoolPtr returns a pointer to the given bool. Convenience for config construction.
+func BoolPtr(b bool) *bool { return &b }
 
 // Default returns a Config with sensible defaults.
 func Default() Config {
@@ -118,6 +124,21 @@ func mergeInto(dst, src *Config) {
 	if src.DiffChunkBytes > 0 {
 		dst.DiffChunkBytes = src.DiffChunkBytes
 	}
+	if src.Verify != nil {
+		dst.Verify = src.Verify
+	}
+	if src.VerifierModel != "" {
+		dst.VerifierModel = src.VerifierModel
+	}
+	if src.VerifierBudgetUSD > 0 {
+		dst.VerifierBudgetUSD = src.VerifierBudgetUSD
+	}
+}
+
+// VerifyEnabled returns whether verification is enabled.
+// Returns false if Verify is nil (not set) — opt-in for v1.
+func (c *Config) VerifyEnabled() bool {
+	return c.Verify != nil && *c.Verify
 }
 
 // MaxRetriesVal returns the MaxRetries value, defaulting to 0 if nil.

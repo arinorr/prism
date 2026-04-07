@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -37,22 +39,25 @@ var newGHClient = func() (prClient, error) {
 
 // reviewOptions holds parsed CLI flags for the review command.
 type reviewOptions struct {
-	prRef       string
-	comment     bool
-	verbose     bool
-	dryRun      bool
-	estimate    bool
-	debate      bool
-	toStdout    bool
-	yes         bool
-	rolesFlag   string
-	formatFlag  string
-	modelFlag   string
-	timeoutFlag string
-	retriesFlag int
-	budgetFlag  float64
-	noCompress  bool
-	configPath  string
+	prRef              string
+	comment            bool
+	verbose            bool
+	dryRun             bool
+	estimate           bool
+	debate             bool
+	verify             bool // --verify: enable verification
+	noVerify           bool // --no-verify: explicitly disable
+	toStdout           bool
+	yes                bool
+	rolesFlag          string
+	formatFlag         string
+	modelFlag          string
+	timeoutFlag        string
+	retriesFlag        int
+	budgetFlag         float64
+	verifierBudgetFlag float64
+	noCompress         bool
+	configPath         string
 }
 
 // parseStringFlag checks whether args[*i] matches --flag or --flag=value.
@@ -92,6 +97,10 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.debate = true
 		case "--yes", "-y":
 			opts.yes = true
+		case "--verify":
+			opts.verify = true
+		case "--no-verify":
+			opts.noVerify = true
 		case "--no-compress":
 			opts.noCompress = true
 		case "--stdout":
@@ -114,6 +123,11 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 				var f float64
 				if _, scanErr := fmt.Sscanf(v, "%f", &f); scanErr == nil {
 					opts.budgetFlag = f
+				}
+			} else if v, ok := parseStringFlag(args, &i, "--verifier-budget"); ok {
+				var f float64
+				if _, scanErr := fmt.Sscanf(v, "%f", &f); scanErr == nil {
+					opts.verifierBudgetFlag = f
 				}
 			} else if v, ok := parseStringFlag(args, &i, "--config"); ok {
 				opts.configPath = v
@@ -139,10 +153,17 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 		return config.Config{}, fmt.Errorf("failed to load config: %w", cfgErr)
 	}
 	cliCfg := config.Config{
-		Model:        opts.modelFlag,
-		Format:       opts.formatFlag,
-		AgentTimeout: opts.timeoutFlag,
-		MaxBudgetUSD: opts.budgetFlag,
+		Model:             opts.modelFlag,
+		Format:            opts.formatFlag,
+		AgentTimeout:      opts.timeoutFlag,
+		MaxBudgetUSD:      opts.budgetFlag,
+		VerifierBudgetUSD: opts.verifierBudgetFlag,
+	}
+	if opts.verify {
+		cliCfg.Verify = config.BoolPtr(true)
+	}
+	if opts.noVerify {
+		cliCfg.Verify = config.BoolPtr(false)
 	}
 	if opts.retriesFlag >= 0 {
 		cliCfg.MaxRetries = config.IntPtr(opts.retriesFlag)
@@ -291,23 +312,44 @@ func runReview(args []string) error {
 	}
 	fmt.Println()
 
+	// Determine verification settings.
+	shouldVerify := merged.VerifyEnabled() || opts.verify
+	if opts.noVerify {
+		shouldVerify = false
+	}
+
+	repoRoot := ""
+	if shouldVerify {
+		if out, gitErr := exec.Command("git", "rev-parse", "--show-toplevel").Output(); gitErr == nil {
+			repoRoot = strings.TrimSpace(string(out))
+		} else {
+			repoRoot = "."
+		}
+	}
+
 	// Dispatch agents.
 	llmBackend := claude.New()
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
-		Verbose:      opts.verbose,
-		DryRun:       opts.dryRun,
-		Debate:       opts.debate || merged.Debate,
-		Model:        merged.Model,
-		AgentTimeout: merged.TimeoutDuration(),
-		MaxRetries:   merged.MaxRetriesVal(),
-		MaxBudgetUSD: merged.MaxBudgetUSD,
+		Verbose:           opts.verbose,
+		DryRun:            opts.dryRun,
+		Debate:            opts.debate || merged.Debate,
+		Model:             merged.Model,
+		AgentTimeout:      merged.TimeoutDuration(),
+		MaxRetries:        merged.MaxRetriesVal(),
+		MaxBudgetUSD:      merged.MaxBudgetUSD,
+		Verify:            shouldVerify,
+		VerifierModel:     merged.VerifierModel,
+		VerifierBudgetUSD: merged.VerifierBudgetUSD,
+		RepoRoot:          repoRoot,
+		Languages:         languages,
 	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
 	}
 
+	ctx := context.Background()
 	start := time.Now()
-	result, err := orchestrator.Review(&compressedPR)
+	result, err := orchestrator.Review(ctx, &compressedPR)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)
 	}
@@ -327,6 +369,14 @@ func runReview(args []string) error {
 			agentTotal := au.Usage.TotalTokens()
 			fmt.Printf("      %-16s %6dk tokens  $%.2f\n", au.Role, agentTotal/1000, au.Usage.CostUSD)
 		}
+	}
+
+	if result.DismissedCount > 0 || result.DowngradedCount > 0 {
+		fmt.Printf("   🔬 Verifier: %d dismissed, %d downgraded | Cost: $%.2f\n",
+			result.DismissedCount, result.DowngradedCount, result.VerifierUsage.CostUSD)
+	}
+	if result.VerifierError != "" {
+		fmt.Printf("   ⚠️  Verifier error: %s\n", result.VerifierError)
 	}
 	fmt.Println()
 
@@ -368,11 +418,14 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 		roleNames[i] = r.Name
 	}
 	data := &report.Data{
-		PR:       pr,
-		Result:   result,
-		Roles:    roleNames,
-		Duration: elapsed.Round(time.Second).String(),
-		Usage:    result.Usage,
+		PR:              pr,
+		Result:          result,
+		Roles:           roleNames,
+		Duration:        elapsed.Round(time.Second).String(),
+		Usage:           result.Usage,
+		DismissedCount:  result.DismissedCount,
+		DowngradedCount: result.DowngradedCount,
+		VerifierError:   result.VerifierError,
 	}
 
 	var output string
@@ -478,6 +531,7 @@ func printEstimate(diffBytes int, roles []agents.Role) {
 	fmt.Printf("   Est. output:  ~%dk tokens\n", totalOutput/1000)
 	fmt.Printf("   Est. total:   ~%dk tokens\n", total/1000)
 	fmt.Printf("   Est. cost:    ~$%.2f\n", costEstimate)
+	fmt.Printf("   Verifier:     ~$%.2f (20%% of agent cost, configurable via --verifier-budget)\n", costEstimate*0.20)
 	fmt.Println("\n   Note: actual cost varies by caching and response length.")
 }
 

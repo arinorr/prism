@@ -304,7 +304,7 @@ func TestIntegration_FullReviewPipeline(t *testing.T) {
 		llm:    perRoleMock(),
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestIntegration_ScopeDistribution(t *testing.T) {
 		llm:    perRoleMock(),
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestIntegration_PartialFailureProducesResults(t *testing.T) {
 		llm:    mock,
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("partial failure should not error: %v", err)
 	}
@@ -487,7 +487,7 @@ func TestIntegration_CleanPR(t *testing.T) {
 		llm:    &llmtest.Mock{Response: `{"findings": []}`},
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -522,7 +522,7 @@ func TestIntegration_LowConfidenceFindingsFiltered(t *testing.T) {
 		llm:    mock,
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestIntegration_VerboseTracksPerAgentUsage(t *testing.T) {
 		llm:    perRoleMock(),
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestIntegration_UnanimousConsensus(t *testing.T) {
 		llm:    mock,
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -660,7 +660,7 @@ func TestIntegration_FindingsForFilesNotInPR(t *testing.T) {
 		Files:  []gh.FileChange{{Path: "auth.go"}}, // Only auth.go is in the PR.
 	}
 
-	result, err := orch.Review(pr)
+	result, err := orch.Review(context.Background(), pr)
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -693,7 +693,7 @@ func TestIntegration_EmptyDiff(t *testing.T) {
 	}
 
 	pr := &gh.PR{Number: "1", Title: "Empty PR", Diff: "", Files: nil}
-	result, err := orch.Review(pr)
+	result, err := orch.Review(context.Background(), pr)
 	if err != nil {
 		t.Fatalf("empty diff should not error: %v", err)
 	}
@@ -713,7 +713,7 @@ func TestIntegration_AllAgentsTimeout(t *testing.T) {
 		llm:    mock,
 	}
 
-	_, err := orch.Review(realisticPR())
+	_, err := orch.Review(context.Background(), realisticPR())
 	if err == nil {
 		t.Fatal("expected error when all agents fail")
 	}
@@ -785,7 +785,7 @@ func TestIntegration_MalformedLLMResponses(t *testing.T) {
 				llm:    mock,
 			}
 
-			result, err := orch.Review(realisticPR())
+			result, err := orch.Review(context.Background(), realisticPR())
 			if tt.wantErr {
 				// Malformed response should cause agent failure.
 				// With 1 agent and 0 retries, this means all agents failed.
@@ -826,7 +826,7 @@ func TestIntegration_SuggestionsOnlyForWarningPlusWithLine(t *testing.T) {
 		llm:    mock,
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
