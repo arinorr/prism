@@ -214,6 +214,10 @@ Regex (`\b[A-Za-z_]\w+\b`) matches every identifier-shaped string — locals, ke
 
 The lexer is a standalone, testable package with no dependencies on the index or agents. It tokenizes source lines and extracts symbol candidates.
 
+**Language awareness:** The lexer unions Go and TypeScript keywords into one set (`func`, `type`, `var`, `const`, `function`, `class`, `interface`, `export`, `async`, `new`). These don't conflict — `func` doesn't appear in TS, `function`/`class` are valid but rare in Go. Documented as a v1 simplification; if future languages introduce keyword conflicts, add a language parameter.
+
+**Unicode identifiers:** The lexer uses `byte`-level scanning (Monkey-style `ch byte`). This handles all Go identifiers (exported names must start with ASCII uppercase) and nearly all TypeScript identifiers in practice. Unicode identifiers in TS are a known v1 limitation — extremely rare in real code.
+
 ```go
 // internal/lex/token.go
 
@@ -361,10 +365,15 @@ Referenced from test files:
 func BuildChangeMap(files []ClassifiedFile, idx *index.Index) *ChangeMap
 ```
 
+**Critical: the index is built from the working tree, which already includes the PR's changes.** A newly added function like `func NewHelper()` IS in the index — we indexed it when we walked the repo. So "isn't in the index" is never true for symbols in the current PR. We cannot use index presence to distinguish added from modified.
+
+**The diff itself tells us.** A declaration line with a `+` prefix means the declaration is new. A declaration on a context line (space prefix) with changed body lines means the function was modified.
+
 Algorithm:
-1. For each classified file, parse the diff to find changed line ranges (lines with `+`/`-`)
-2. For changed line ranges, check `idx.EnclosingScope(file, line)` — if a symbol contains changed lines, it's **modified**
-3. For `+` lines, run `lex.ExtractCandidates` looking for **declaration patterns** (`RefDeclaration`). If the declared name isn't in the index, it's **added** (new in this PR)
+1. For each classified file, parse the diff and classify each line as added (`+`), removed (`-`), or context (space)
+2. For `+` lines, run `lex.ExtractCandidates` looking for **declaration patterns** (`RefDeclaration`). If the declaration line itself is a `+` line → mark the symbol as **added** (the entire declaration is new in this PR)
+3. For context-line symbols (via `idx.EnclosingScope(file, line)`) that contain `+`/`-` lines in their body → mark as **modified** (existed before, body changed)
+4. Step 2 runs before step 3. If a symbol is already marked as added, step 3 skips it
 
 ## Scope Hints in Agent Prompts
 
@@ -464,9 +473,11 @@ With `--verbose`, per-file classification + cross-ref resolution details.
 | `internal/lex/lexer_test.go` | Tokenization tests |
 | `internal/lex/extract_test.go` | Symbol extraction tests (including golden file multi-hunk diff) |
 | `internal/agents/routing.go` | `PRCategory`, `ClassifiedFile`, `ReviewContext`, `classifyFile` (classifier chain), `FilterFilesForRole`, `AssembleDiff`, `buildReviewContext` |
-| `internal/agents/crossref.go` | `CrossReference`, `FilterByIndex`, `resolveCrossReferences`, `formatCrossReferences`, `BuildChangeMap`, `ChangeMap`, `SymbolStatus` |
+| `internal/agents/crossref.go` | `CrossReference`, `FilterByIndex`, `resolveCrossReferences`, `formatCrossReferences` |
+| `internal/agents/changemap.go` | `ChangeMap`, `SymbolKey`, `SymbolStatus`, `BuildChangeMap` |
 | `internal/agents/routing_test.go` | Classification, filtering, assembly tests |
-| `internal/agents/crossref_test.go` | Cross-ref resolution, change map, FilterByIndex tests |
+| `internal/agents/crossref_test.go` | Cross-ref resolution, FilterByIndex, pipeline integration test |
+| `internal/agents/changemap_test.go` | Change map construction, added vs modified detection |
 
 ## Files to Modify
 
@@ -528,6 +539,11 @@ With `--verbose`, per-file classification + cross-ref resolution details.
 {"same name different files", Init in two files, both modified independently},
 ```
 
+**Pipeline integration test** (ExtractCandidates → FilterByIndex → resolveCrossReferences with realistic diff):
+- Multi-hunk diff with test file importing code functions
+- Verify candidates extracted, filtered, resolved end-to-end
+- Assert on structured CrossReference output, not strings
+
 **Integration:**
 - Mixed PR → agents get correct subsets + cross-refs + scope hints
 - Agent with 0 files skipped (no --roles)
@@ -559,9 +575,9 @@ With `--verbose`, per-file classification + cross-ref resolution details.
 ## Estimation
 
 - ~200 lines lexer package (`internal/lex/`)
-- ~300 lines routing + crossref (`internal/agents/`)
+- ~350 lines routing + crossref + changemap (`internal/agents/`)
 - ~50 lines diff export + orchestrator wiring
-- ~350 lines tests
-- Total: ~900 lines new + modified
+- ~450-500 lines tests (including golden file multi-hunk diff test)
+- Total: ~1050-1100 lines new + modified
 - Modifies 4 existing files
-- Creates 1 new package (`internal/lex/`), 4 new files in `internal/agents/`
+- Creates 1 new package (`internal/lex/`), 5 new files in `internal/agents/`
