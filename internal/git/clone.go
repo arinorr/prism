@@ -7,19 +7,23 @@ import (
 )
 
 // CloneShallow creates a shallow clone (depth=1) of a remote repo at a
-// specific branch/ref. Returns a Repo pointed at the temp directory and
-// a cleanup function that removes the clone.
-func CloneShallow(repoURL, ref string) (*Repo, func(), error) {
+// specific branch/ref. Uses `gh repo clone` which leverages the user's
+// existing GitHub authentication (SSH keys or gh token) — no credential
+// prompts. Returns a Repo pointed at the temp directory and a cleanup
+// function that removes the clone.
+func CloneShallow(ownerRepo, ref string) (*Repo, func(), error) {
 	dir, err := os.MkdirTemp("", "prism-clone-*")
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating temp dir: %w", err)
 	}
 
-	// #nosec G204 -- repoURL comes from GitHub API, ref from gh pr view
-	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", ref, repoURL, dir)
+	// Use gh repo clone which handles auth automatically.
+	// The -- passes git flags: --depth 1 --branch <ref>.
+	// #nosec G204 -- ownerRepo comes from GitHub API, ref from gh pr view
+	cmd := exec.Command("gh", "repo", "clone", ownerRepo, dir, "--", "--depth", "1", "--branch", ref)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(dir)
-		return nil, nil, fmt.Errorf("cloning %s at %s: %w\n%s", repoURL, ref, err, string(out))
+		return nil, nil, fmt.Errorf("cloning %s at %s: %w\n%s", ownerRepo, ref, err, string(out))
 	}
 
 	cleanup := func() { os.RemoveAll(dir) }
@@ -56,8 +60,7 @@ func ResolveRepoForPR(prOwnerRepo, prHeadRef string) (repoRoot string, cleanup f
 		return local.Root(), nil, nil
 	}
 
-	cloneURL := "https://github.com/" + prOwnerRepo + ".git"
-	cloned, cloneCleanup, cloneErr := CloneShallow(cloneURL, prHeadRef)
+	cloned, cloneCleanup, cloneErr := CloneShallow(prOwnerRepo, prHeadRef)
 	if cloneErr != nil {
 		// Clone failed — fall back to local (degraded).
 		return local.Root(), nil, fmt.Errorf("cloning %s: %w", prOwnerRepo, cloneErr)

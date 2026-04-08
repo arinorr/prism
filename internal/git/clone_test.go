@@ -72,7 +72,7 @@ func TestResolveRepoForPR_DifferentRepo(t *testing.T) {
 func TestCloneShallow_InvalidRepo(t *testing.T) {
 	t.Parallel()
 
-	_, cleanup, err := CloneShallow("https://github.com/nonexistent/repo-that-does-not-exist.git", "main")
+	_, cleanup, err := CloneShallow("nonexistent/repo-that-does-not-exist", "main")
 	if err == nil {
 		if cleanup != nil {
 			cleanup()
@@ -82,14 +82,13 @@ func TestCloneShallow_InvalidRepo(t *testing.T) {
 }
 
 func TestCloneShallow_Cleanup(t *testing.T) {
-	// Skip if no network.
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
+	// Skip if no network or no gh CLI.
+	if _, err := exec.LookPath("gh"); err != nil {
+		t.Skip("gh CLI not available")
 	}
 
 	// Clone a real small repo to verify cleanup works.
-	// Use prism itself — it's guaranteed to exist.
-	repo, cleanup, err := CloneShallow("https://github.com/arinorr/prism.git", "main")
+	repo, cleanup, err := CloneShallow("arinorr/prism", "main")
 	if err != nil {
 		t.Skipf("clone failed (network?): %v", err)
 	}
