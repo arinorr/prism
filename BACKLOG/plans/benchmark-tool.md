@@ -27,6 +27,12 @@ go build -o benchmark ./cmd/benchmark
 
 # Generate HTML report from last run:
 ./benchmark report --dir results/benchmark
+
+# Validate config without running anything:
+./benchmark compare --config benchmark.yml --dry-run
+
+# Filter by tag:
+./benchmark compare --config benchmark.yml --tags go,mixed
 ```
 
 ### Config File
@@ -67,157 +73,131 @@ prs:
     description: "Go + tests (20 files)"
     tags: [go, tests]
 
-# Optional: default flags passed to prism
+# Default flags passed to prism review.
 defaults:
-  model: ""          # empty = use prism default
+  model: ""
   verify: false
   timeout: "5m"
 
-# Optional: filter by tags
-# run_tags: [go, mixed]  # only run PRs matching these tags
+# Regression thresholds. These are INITIAL GUESSES — tune after collecting
+# data on natural LLM variance across multiple runs.
+thresholds:
+  score_drop_critical: 10     # health score drop that triggers critical regression
+  cost_increase_warning: 0.50 # 50% cost increase triggers warning
+  finding_match_line_window: 10  # ±lines for fuzzy finding matching
 ```
 
 ### Directory Structure
 
 ```
 cmd/benchmark/
-  main.go          # CLI entry point, subcommands
-  config.go        # YAML config parsing
-  runner.go        # Executes prism binary, captures output
-  compare.go       # Compares current vs golden, computes diffs
-  report.go        # Generates HTML report
-  report.html.tmpl # HTML template (embedded via go:embed)
+  main.go              # CLI entry point, subcommand dispatch
+  config.go            # YAML config parsing
+  runner.go            # Executes prism binary, captures output
+  compare.go           # Compares current vs golden, computes diffs
+  report.go            # Generates HTML report
+  report.html.tmpl     # HTML template (embedded via go:embed)
 
 testdata/benchmark/
-  golden/           # Recorded baseline outputs (committed to git)
-    arinorr-prism-pr-23.json
-    arinorr-ari-cloud-pr-13.json
+  golden/              # Recorded baseline outputs (committed to git)
+    arinorr-prism-pr-23.golden.json
+    arinorr-ari-cloud-pr-13.golden.json
     ...
-  benchmark.yml     # Default config (committed)
+  benchmark.yml        # Default config (committed)
 ```
 
 ### Subcommands
 
 #### `record` — Save Golden Files
 
-Runs prism on each PR in the config, saves the JSON output as golden files. These are committed to git and serve as the expected baseline.
+Runs prism on each PR, saves the JSON output as golden files committed to git.
 
 ```bash
 ./benchmark record --config benchmark.yml [--prism ./prism] [--flags "--model haiku"]
 ```
 
-Flow:
-1. Read config
-2. For each PR: run `prism review <URL> --format json --stdout --yes [extra flags]`
-3. Save JSON to `testdata/benchmark/golden/{slug}.json`
-4. Print summary: N PRs recorded, total cost
+Golden files use a wrapper struct that cleanly separates metadata from prism output:
 
-Golden files include a metadata header (timestamp, prism version, flags used) so you know when they were recorded:
-```json
-{
-  "_benchmark_meta": {
-    "recorded_at": "2026-04-08T10:00:00Z",
-    "prism_flags": "--model haiku --yes",
-    "prism_branch": "main"
-  },
-  "pr": { ... },
-  "summary": "...",
-  "deduped_findings": [ ... ],
-  ...
+```go
+// GoldenFile wraps prism's output with benchmark metadata.
+// Meta and Output are separate concerns — no mutation of prism's format.
+type GoldenFile struct {
+    Meta   BenchmarkMeta `json:"meta"`
+    Output PrismOutput   `json:"output"` // exactly what prism produces
+}
+
+type BenchmarkMeta struct {
+    RecordedAt  time.Time `json:"recorded_at"`
+    PrismFlags  string    `json:"prism_flags"`
+    PrismBranch string    `json:"prism_branch"`
 }
 ```
 
 #### `compare` — Compare Current vs Golden
 
-Runs prism on each PR, then diffs the output against golden files. Reports regressions.
+Runs prism on each PR, diffs against golden files. Reports regressions.
 
 ```bash
 ./benchmark compare --config benchmark.yml [--prism ./prism] [--flags "--verify"]
 ```
 
-Flow:
-1. Read config
-2. For each PR: run prism, save to `testdata/benchmark/current/{slug}.json`
-3. Load golden from `testdata/benchmark/golden/{slug}.json`
-4. Compare: finding count, finding content, cost, score, dismissed/downgraded
-5. Print diff summary + generate HTML report
-
-Comparison logic:
-```go
-type Comparison struct {
-    PR          PRConfig
-    Golden      *PrismOutput   // may be nil if no golden exists
-    Current     *PrismOutput
-    Diff        ComparisonDiff
-}
-
-type ComparisonDiff struct {
-    FindingsAdded    []Finding  // in current but not golden
-    FindingsRemoved  []Finding  // in golden but not current
-    FindingsChanged  []FindingDiff // same file+line, different risk/summary
-    ScoreDelta       int        // current score - golden score
-    CostDelta        float64    // current cost - golden cost
-    DismissedCount   int        // from verifier (current only)
-    DowngradedCount  int
-    AgentsSkipped    []string   // agents that didn't run due to routing
-}
-```
-
-Finding matching for diff: match by `file + line + category`. If a finding exists in both at the same location with the same category, compare risk and summary. If risk changed, it's a `FindingChanged`. If the finding only exists in one side, it's added or removed.
+Exits with code 1 if critical regressions detected (CI-friendly).
 
 #### `run` — Full Before/After
 
-Builds prism from two branches and runs both.
+Builds prism from two branches using **git worktrees** (not checkout) and runs both.
 
 ```bash
 ./benchmark run --config benchmark.yml --baseline main [--flags "--verify"]
 ```
 
-Flow:
-1. Record current branch name
-2. Stash uncommitted changes
-3. Checkout baseline branch, `go build -o /tmp/prism-baseline .`
-4. Run all PRs with baseline binary → save to `results/benchmark/baseline/`
-5. Checkout current branch, `go build -o /tmp/prism-current .`
-6. Run all PRs with current binary → save to `results/benchmark/current/`
-7. Restore branch + unstash
-8. Compare baseline vs current (same logic as `compare` but between two run sets instead of current vs golden)
-9. Generate HTML report
+**Git worktree, not checkout.** The `run` command never touches the user's working directory. It creates temporary worktrees for each branch, builds there, and cleans up after:
 
-Error handling:
-- Build failure → abort that phase, report which branch failed
-- PR run failure → record the error, show "FAILED" in report, continue to next PR
-- Timeout → kill after configurable duration (default 5 min per PR)
+```go
+func buildFromBranch(branch string) (binaryPath string, cleanup func(), err error) {
+    dir, err := os.MkdirTemp("", "benchmark-*")
+    if err != nil {
+        return "", nil, fmt.Errorf("creating temp dir: %w", err)
+    }
+
+    // git worktree add <dir> <branch> — isolated copy, no stash needed
+    cmd := exec.Command("git", "worktree", "add", dir, branch)
+    if err := cmd.Run(); err != nil {
+        os.RemoveAll(dir)
+        return "", nil, fmt.Errorf("creating worktree for %s: %w", branch, err)
+    }
+
+    // Build prism in the worktree.
+    binary := filepath.Join(dir, "prism")
+    buildCmd := exec.Command("go", "build", "-o", binary, ".")
+    buildCmd.Dir = dir
+    if err := buildCmd.Run(); err != nil {
+        exec.Command("git", "worktree", "remove", dir, "--force").Run()
+        return "", nil, fmt.Errorf("building prism from %s: %w", branch, err)
+    }
+
+    cleanup = func() {
+        exec.Command("git", "worktree", "remove", dir, "--force").Run()
+    }
+    return binary, cleanup, nil
+}
+```
+
+No stash, no checkout, no risk to user's working tree. The worktree is a separate directory that git manages. Cleaned up after each phase.
+
+Error handling: build failure → abort that phase, report the error, continue with the other branch if possible.
 
 #### `report` — Generate HTML From Existing Data
 
-Re-generates the HTML report from previously saved JSON files without re-running anything.
+Re-generates the HTML report without re-running.
 
 ```bash
 ./benchmark report --dir results/benchmark --output benchmark.html
 ```
 
-Useful when you want to tweak the report template without re-running $40 of LLM calls.
-
-### HTML Report
-
-Generated with Go's `html/template` (not bash heredocs). Embedded via `go:embed`.
-
-Sections:
-1. **Header** — baseline branch, current branch, timestamp, flags
-2. **Summary table** — all PRs with key metrics and deltas
-3. **Regression alerts** — red banner if any real findings were lost
-4. **Per-PR cards** — expandable, showing:
-   - Metric grid (findings, cost, score, tokens)
-   - Δ indicators (green for improvement, red for regression)
-   - Findings diff (added/removed/changed)
-   - Routing log (from stderr capture)
-   - Agents skipped
-5. **Footer** — total cost, total time
-
 ### PrismOutput Struct
 
-Parsed from the JSON output of `prism review --format json`:
+Parses ALL fields from prism's JSON output. No imports from `internal/agents` — independent types that mirror the JSON structure:
 
 ```go
 type PrismOutput struct {
@@ -226,24 +206,62 @@ type PrismOutput struct {
     HealthScore     HealthScore      `json:"health_score"`
     Findings        []Finding        `json:"findings"`
     DedupedFindings []DedupedFinding `json:"deduped_findings"`
+    Suggestions     []Suggestion     `json:"suggestions"`
+    Roles           []string         `json:"roles"`
+    FailedAgents    []string         `json:"failed_agents"`
     Usage           Usage            `json:"usage"`
+    Duration        string           `json:"duration"`
     DismissedCount  int              `json:"dismissed_count"`
     DowngradedCount int              `json:"downgraded_count"`
-    Duration        string           `json:"duration"`
+    VerifierError   string           `json:"verifier_error"`
+}
+
+type PRSummary struct {
+    Number string `json:"number"`
+    Title  string `json:"title"`
+    Files  int    `json:"files"`
+}
+
+type HealthScore struct {
+    Score       int    `json:"score"`
+    Grade       string `json:"grade"`
+    Verdict     string `json:"verdict"`
+    Description string `json:"description"`
 }
 
 type Finding struct {
-    File     string  `json:"file"`
-    Line     int     `json:"line"`
-    Risk     string  `json:"risk"`
-    Category string  `json:"category"`
-    Summary  string  `json:"summary"`
+    File       string  `json:"file"`
+    Line       int     `json:"line"`
+    Risk       string  `json:"risk"`
+    Category   string  `json:"category"`
+    Scope      string  `json:"scope"`
+    Confidence float64 `json:"confidence"`
+    Summary    string  `json:"summary"`
+    Detail     string  `json:"detail"`
 }
 
-// ... etc — mirrors prism's JSON output, no import dependency
-```
+type DedupedFinding struct {
+    Finding
+    VoteCount          int    `json:"vote_count"`
+    TotalAgents        int    `json:"total_agents"`
+    VerificationStatus string `json:"verification_status"`
+    VerificationReason string `json:"verification_reason"`
+}
 
-These are **independent types** — no import from `internal/agents`. The benchmark tool reads JSON, it doesn't share types with prism. This keeps it truly standalone.
+type Usage struct {
+    InputTokens  int     `json:"input_tokens"`
+    OutputTokens int     `json:"output_tokens"`
+    CostUSD      float64 `json:"cost_usd"`
+    DurationMS   int     `json:"duration_ms"`
+}
+
+type Suggestion struct {
+    File string `json:"file"`
+    Line int    `json:"line"`
+    Body string `json:"body"`
+    Role string `json:"role"`
+}
+```
 
 ### Runner
 
@@ -254,10 +272,26 @@ type Runner struct {
     Timeout     time.Duration
 }
 
+// binary returns the prism binary path, defaulting to "prism" in PATH.
+func (r *Runner) binary() string {
+    if r.PrismBinary == "" {
+        return "prism"
+    }
+    return r.PrismBinary
+}
+
+// timeout returns the per-PR timeout, defaulting to 5 minutes.
+func (r *Runner) timeout() time.Duration {
+    if r.Timeout == 0 {
+        return 5 * time.Minute
+    }
+    return r.Timeout
+}
+
 type RunResult struct {
     PR       PRConfig
     Output   *PrismOutput  // nil if run failed
-    Log      string        // stderr capture
+    Log      string        // stderr capture (progress messages)
     Error    error         // non-nil if run failed
     Duration time.Duration
     ExitCode int
@@ -266,54 +300,131 @@ type RunResult struct {
 func (r *Runner) Run(ctx context.Context, pr PRConfig) RunResult
 ```
 
-The runner:
-1. Builds the command: `prism review https://github.com/{repo}/pull/{number} --format json --stdout --yes {extra flags}`
-2. Sets up stdout and stderr pipes
-3. Runs with context (timeout via `context.WithTimeout`)
-4. Captures stdout (JSON) and stderr (progress log)
-5. Parses JSON into `PrismOutput`
-6. Returns structured `RunResult`
+PRs run **sequentially** by default. LLM rate limits, cost predictability, and deterministic log ordering all favor sequential execution. Parallel execution is a future option (`--parallel N`) for when speed matters more than predictability.
 
-### Tag Filtering
+### Finding Matching — Fuzzy, Not Exact
 
-```bash
-# Run only PRs tagged "go":
-./benchmark compare --config benchmark.yml --tags go
+LLM output is non-deterministic. The same PR might produce a finding at line 42 in one run and line 44 in another. Exact `file + line + category` matching produces phantom regressions.
 
-# Run only mixed PRs:
-./benchmark compare --config benchmark.yml --tags mixed
+**Matching strategy:**
 
-# Run specific PRs by number:
-./benchmark compare --config benchmark.yml --prs 23,14
+```go
+type FindingKey struct {
+    File     string
+    Category string
+}
+
+// MatchFindings pairs golden and current findings using fuzzy matching.
+// Primary key: file + category (exact match).
+// Secondary: nearest line within ±lineWindow.
+// Tiebreaker: summary text similarity (Jaccard on tokens).
+func MatchFindings(golden, current []DedupedFinding, lineWindow int) MatchResult
+
+type MatchResult struct {
+    Matched   []FindingPair  // paired: golden ↔ current
+    Added     []DedupedFinding // in current only (new findings)
+    Removed   []DedupedFinding // in golden only (regressions if critical/warning)
+}
+
+type FindingPair struct {
+    Golden  DedupedFinding
+    Current DedupedFinding
+    Diff    FindingDiff
+}
+
+type FindingDiff struct {
+    RiskChanged    bool   // e.g., warning → info
+    SummaryChanged bool   // content changed
+    LineDelta      int    // line number shift
+}
 ```
+
+Algorithm:
+1. Group all findings by `FindingKey{File, Category}`
+2. Within each group, match golden → current by nearest line (within `lineWindow`, default ±10)
+3. For multiple candidates at similar lines, use summary token Jaccard similarity as tiebreaker
+4. Unmatched golden findings → `Removed` (potential regressions)
+5. Unmatched current findings → `Added` (new findings, may be good or bad)
 
 ### Regression Detection
 
-A regression is defined as:
-- **Critical:** A finding present in golden with risk=critical or risk=warning is MISSING from current output. Real issue was lost.
-- **Warning:** Health score dropped by more than 10 points.
-- **Info:** Cost increased by more than 50%. Finding count changed significantly.
+```go
+type RegressionLevel int
+const (
+    RegressionNone     RegressionLevel = iota
+    RegressionInfo                     // informational change
+    RegressionWarning                  // concerning but not blocking
+    RegressionCritical                 // blocking — real findings lost
+)
 
-The `compare` subcommand exits with code 1 if any critical regressions are detected. This makes it usable in CI:
-
-```yaml
-# .github/workflows/ci.yml
-- name: Benchmark regression check
-  run: |
-    go build -o benchmark ./cmd/benchmark
-    ./benchmark compare --config benchmark.yml
+func ClassifyRegression(diff MatchResult, scoreDelta int, costDelta float64, thresholds Thresholds) RegressionLevel
 ```
+
+**Regression levels:**
+
+| Level | Trigger | Exit Code |
+|-------|---------|-----------|
+| Critical | A finding with risk=critical or risk=warning was REMOVED (present in golden, missing in current) | 1 |
+| Warning | Health score dropped by more than `score_drop_critical` (default 10) OR cost increased by more than `cost_increase_warning` (default 50%) | 0 |
+| Info | Finding count changed, findings added, minor risk changes | 0 |
+| None | Output substantially unchanged | 0 |
+
+**Only critical regressions cause exit code 1.** Everything else is informational. This is deliberate:
+- LLM output varies between runs. Score fluctuations of ±5 points are normal.
+- New findings being added is expected (especially after pipeline improvements).
+- The thing we truly can't tolerate is a **real issue being silently dropped**.
+
+**Thresholds are configurable** in the YAML and explicitly documented as initial guesses to tune after collecting data on natural variance.
+
+### LLM Non-Determinism Strategy
+
+Golden files for LLM output are fundamentally different from golden files for deterministic code. The same input can produce different outputs across runs.
+
+**Approach:** Golden files represent "one known-good output," not "the correct output." The comparison reports **changes**, it doesn't **fail** on changes (except critical regressions). Deviations are expected and reviewed by a human.
+
+**Practical implications:**
+- `compare` shows a human-readable diff, not a pass/fail for every field
+- Score deltas and finding count changes are informational, not failures
+- Only "finding disappeared" is a critical regression (something got worse)
+- Re-record goldens periodically (e.g., after each release) to track current behavior
+- Future enhancement: store multiple golden runs and compare against ranges
+
+### --dry-run
+
+All subcommands support `--dry-run`:
+- `record --dry-run`: parse config, validate PR access (`gh pr view --json number`), print what would run
+- `compare --dry-run`: parse config, check golden files exist, print comparison plan
+- `run --dry-run`: parse config, verify branches exist, print build + run plan
+
+No LLM calls, no cost.
+
+### HTML Report
+
+Generated with Go's `html/template` + `go:embed`. Self-contained HTML file.
+
+Sections:
+1. **Header** — branches, timestamp, flags, regression level badge
+2. **Summary table** — all PRs with metrics + deltas + regression indicators
+3. **Regression banner** — red/yellow/green based on worst regression level
+4. **Per-PR cards** (expandable):
+   - Metric grid: findings, cost, score, tokens (with Δ)
+   - Findings diff: added (green), removed (red), changed (yellow)
+   - Failed agents (if any, explains missing findings)
+   - Routing log (stderr capture)
+   - Agents skipped (from routing)
+5. **Footer** — total cost, total time
 
 ## Files to Create
 
 | File | Purpose |
 |------|---------|
-| `cmd/benchmark/main.go` | CLI entry point, subcommand dispatch |
-| `cmd/benchmark/config.go` | YAML config parsing, PRConfig types |
-| `cmd/benchmark/runner.go` | Execute prism binary, capture output, parse JSON |
-| `cmd/benchmark/compare.go` | Diff current vs golden, regression detection |
-| `cmd/benchmark/report.go` | HTML report generation from comparison data |
+| `cmd/benchmark/main.go` | CLI entry point, subcommand dispatch, --dry-run |
+| `cmd/benchmark/config.go` | YAML config parsing, PRConfig, Thresholds |
+| `cmd/benchmark/runner.go` | Execute prism, capture output, parse JSON, git worktree builds |
+| `cmd/benchmark/compare.go` | Fuzzy finding matching, regression detection |
+| `cmd/benchmark/report.go` | HTML report generation |
 | `cmd/benchmark/report.html.tmpl` | Embedded HTML template |
+| `cmd/benchmark/types.go` | PrismOutput, GoldenFile, all JSON types (independent, no prism imports) |
 | `testdata/benchmark/benchmark.yml` | Default config with 8 PRs |
 
 ## Files to Delete
@@ -324,33 +435,35 @@ The `compare` subcommand exits with code 1 if any critical regressions are detec
 
 ## Dependencies
 
-- `gopkg.in/yaml.v3` — already in go.mod (used by config package)
+- `gopkg.in/yaml.v3` — already in go.mod
 - No other new dependencies
 
 ## Testing
 
-- Unit: config parsing (valid, missing file, bad YAML)
-- Unit: PrismOutput JSON parsing (valid, malformed, empty)
-- Unit: comparison diff logic (added/removed/changed findings, score/cost deltas)
-- Unit: regression detection (critical/warning/info thresholds)
-- Unit: tag filtering
-- Unit: slug generation from repo+number
-- Integration: runner with a mock prism binary (shell script that outputs known JSON)
+- Unit: config parsing (valid, missing file, bad YAML, tag filtering)
+- Unit: PrismOutput JSON parsing (valid, malformed, empty, extra fields)
+- Unit: fuzzy finding matching (exact match, line shift, no match, multiple candidates)
+- Unit: regression detection (critical/warning/info/none thresholds)
+- Unit: GoldenFile wrapper (meta + output separation)
+- Unit: Runner defaults (zero-value binary and timeout)
+- Unit: slug generation
+- Integration: runner with a mock prism binary (script that outputs known JSON)
 - Integration: full record → compare cycle with test fixtures
+- Integration: git worktree build (requires a git repo)
 
 ## Estimation
 
-- ~400 lines: main.go + config.go + runner.go
-- ~300 lines: compare.go + regression detection
-- ~200 lines: report.go + HTML template
-- ~200 lines: tests
-- Total: ~1100 lines
+- ~500 lines: main.go + config.go + runner.go + types.go
+- ~350 lines: compare.go + fuzzy matching + regression detection
+- ~250 lines: report.go + HTML template
+- ~300 lines: tests
+- Total: ~1400-1800 lines
 - Replaces ~300 lines of bash
 
 ## Migration
 
 1. Build the Go tool
 2. Record golden files from current main: `./benchmark record`
-3. Delete `scripts/benchmark.sh`
-4. Update BACKLOG to reference the new tool
-5. Commit golden files to git
+3. Commit golden files to `testdata/benchmark/golden/`
+4. Delete `scripts/benchmark.sh`
+5. Update BACKLOG to reference the new tool
