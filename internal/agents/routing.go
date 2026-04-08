@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/arinorr/prism/internal/diff"
@@ -231,6 +232,13 @@ func BuildReviewContext(pr *gh.PR, idx *index.Index, resolver *resolve.Resolver)
 			})
 		}
 	}
+
+	// Sort files alphabetically for deterministic output and cache-friendly
+	// prefix sharing across agents. Agents that share a subset of files will
+	// have byte-identical diff content at the same positions in their prompts.
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Path < files[j].Path
+	})
 
 	rc := &ReviewContext{
 		Files:    files,

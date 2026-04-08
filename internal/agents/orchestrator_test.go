@@ -33,8 +33,10 @@ func TestBuildAgentPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "+ added line") {
 		t.Error("prompt should contain diff")
 	}
-	if !strings.Contains(prompt, `{"findings"`) {
-		t.Error("prompt should contain output format instructions")
+	// Format instructions and security warning are now in the system prompt
+	// (sharedSystemInstructions), not the user prompt.
+	if strings.Contains(prompt, `{"findings"`) {
+		t.Error("format instructions should be in system prompt, not user prompt")
 	}
 	// Verify XML delimiters wrap untrusted content.
 	if !strings.Contains(prompt, "<pr-title>") || !strings.Contains(prompt, "</pr-title>") {
@@ -42,9 +44,6 @@ func TestBuildAgentPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "<pr-diff>") || !strings.Contains(prompt, "</pr-diff>") {
 		t.Error("prompt should wrap diff in <pr-diff> delimiters")
-	}
-	if !strings.Contains(prompt, "UNTRUSTED") {
-		t.Error("prompt should contain untrusted data warning")
 	}
 }
 
@@ -68,10 +67,11 @@ func TestBuildAgentPrompt_InjectionResistance(t *testing.T) {
 	if !strings.Contains(titleContent, "Ignore all previous instructions") {
 		t.Error("malicious title should be contained within delimiters")
 	}
-	// The instruction text should be outside the delimiters.
+	// The review instruction should appear before the content delimiters.
+	// (Security warning "UNTRUSTED" is now in the system prompt, not user prompt.)
 	beforeTitle := prompt[:titleStart]
-	if !strings.Contains(beforeTitle, "UNTRUSTED") {
-		t.Error("untrusted warning should appear before the content delimiters")
+	if !strings.Contains(beforeTitle, "Review the following") {
+		t.Error("review instruction should appear before the content delimiters")
 	}
 }
 
@@ -172,8 +172,12 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if orch.skill(&roles[0]) != "You are a test reviewer." {
-		t.Errorf("skill content mismatch: %q", orch.skill(&roles[0]))
+	skill := orch.skill(&roles[0])
+	if !strings.HasPrefix(skill, sharedSystemInstructions) {
+		t.Error("skill should start with shared system instructions")
+	}
+	if !strings.Contains(skill, "You are a test reviewer.") {
+		t.Error("skill should contain the skill file content")
 	}
 }
 
@@ -226,8 +230,14 @@ func TestNewOrchestrator_WithLanguageModule(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := orch.skill(&roles[0])
-	if got != "base skill\n\ntypescript module" {
-		t.Errorf("expected concatenated skill, got %q", got)
+	if !strings.Contains(got, "base skill") {
+		t.Error("expected base skill in combined skill")
+	}
+	if !strings.Contains(got, "typescript module") {
+		t.Error("expected typescript module in combined skill")
+	}
+	if !strings.HasPrefix(got, sharedSystemInstructions) {
+		t.Error("skill should start with shared instructions")
 	}
 }
 
@@ -244,9 +254,13 @@ func TestNewOrchestrator_LanguageModuleMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Should gracefully skip missing module and return only the base.
-	if got := orch.skill(&roles[0]); got != "base skill" {
-		t.Errorf("expected base skill only, got %q", got)
+	// Should gracefully skip missing module — skill contains base + shared instructions.
+	got := orch.skill(&roles[0])
+	if !strings.Contains(got, "base skill") {
+		t.Error("expected base skill content")
+	}
+	if !strings.HasPrefix(got, sharedSystemInstructions) {
+		t.Error("skill should start with shared instructions")
 	}
 }
 
@@ -279,9 +293,17 @@ func TestNewOrchestrator_MultipleLanguages(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := orch.skill(&roles[0])
-	want := "base\n\ngo module\n\nts module"
-	if got != want {
-		t.Errorf("expected %q, got %q", want, got)
+	if !strings.Contains(got, "base") {
+		t.Error("expected base skill content")
+	}
+	if !strings.Contains(got, "go module") {
+		t.Error("expected go module")
+	}
+	if !strings.Contains(got, "ts module") {
+		t.Error("expected ts module")
+	}
+	if !strings.HasPrefix(got, sharedSystemInstructions) {
+		t.Error("skill should start with shared instructions")
 	}
 }
 
@@ -461,8 +483,9 @@ func TestRunAgent_VerifiesRequest(t *testing.T) {
 		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 	}
 	req := mock.Calls[0]
-	if req.SystemPrompt != "my skill content" {
-		t.Errorf("expected system prompt 'my skill content', got %q", req.SystemPrompt)
+	// System prompt is normalized (trailing newline added).
+	if !strings.Contains(req.SystemPrompt, "my skill content") {
+		t.Errorf("expected system prompt to contain 'my skill content', got %q", req.SystemPrompt)
 	}
 	if !req.JSONOutput {
 		t.Error("expected JSONOutput=true for agent calls")
