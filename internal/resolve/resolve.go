@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/arinorr/prism/internal/index"
 )
@@ -45,10 +46,12 @@ type ReferenceContext struct {
 
 // Resolver resolves code context for findings using a pre-built symbol index.
 // Call PreloadFiles before Resolve to populate the file cache.
+// Thread-safe: PreloadFiles and Resolve may be called from multiple goroutines.
 type Resolver struct {
 	idx       *index.Index
 	repoRoot  string
-	fileCache map[string][]byte // immutable after PreloadFiles
+	mu        sync.RWMutex
+	fileCache map[string][]byte
 }
 
 // NewResolver creates a Resolver backed by the given index.
@@ -65,6 +68,8 @@ func NewResolver(idx *index.Index, repoRoot string) *Resolver {
 // This method should be called once; after it returns the cache is treated
 // as immutable.
 func (r *Resolver) PreloadFiles(files []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, f := range files {
 		if _, ok := r.fileCache[f]; ok {
 			continue
@@ -115,6 +120,9 @@ var identRe = regexp.MustCompile(`\b([A-Za-z_]\w+)\b`)
 // the cache, an error is returned. References whose files are not in the cache
 // are silently skipped (less context, not a failure).
 func (r *Resolver) Resolve(file string, line int) (*ResolvedContext, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	src, ok := r.fileCache[file]
 	if !ok {
 		return nil, fmt.Errorf("file %s not preloaded", file)
@@ -188,6 +196,9 @@ func (r *Resolver) Resolve(file string, line int) (*ResolvedContext, error) {
 // preloading: first preload finding files, then call this to discover
 // reference files, then preload those too.
 func (r *Resolver) CollectReferenceFiles(findingFiles []string) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	fileSet := make(map[string]bool)
 
 	for _, file := range findingFiles {
