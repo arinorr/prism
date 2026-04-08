@@ -63,8 +63,8 @@ run_pr() {
 
     log "  [$label] ${repo}#${pr}..."
 
+    # stdout = JSON report only (progress goes to stderr → log file).
     if [[ -n "$DRY_RUN" ]]; then
-        # Dry run: just check routing classification.
         "$binary" review "https://github.com/${repo}/pull/${pr}" \
             --dry-run --verbose --format json --stdout \
             $MODEL_FLAG $extra $EXTRA_FLAGS \

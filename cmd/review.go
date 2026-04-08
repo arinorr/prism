@@ -233,6 +233,17 @@ func fetchPR(opts *reviewOptions) (*gh.PR, prClient, error) {
 	return pr, client, nil
 }
 
+// progress writes a message to stderr. All progress/diagnostic output
+// goes to stderr so stdout is reserved for the report (Unix convention).
+func progress(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
+}
+
+// progressln writes a line to stderr.
+func progressln(args ...any) {
+	fmt.Fprintln(os.Stderr, args...)
+}
+
 func runReview(args []string) error {
 	opts, err := parseReviewArgs(args)
 	if err != nil {
@@ -261,12 +272,15 @@ func runReview(args []string) error {
 	// Detect languages for skill module loading.
 	languages := agents.DetectLanguages(pr.Files)
 
-	fmt.Printf("🔍 Reviewing PR #%s: %s\n", pr.Number, pr.Title)
-	fmt.Printf("   %d files changed\n", len(pr.Files))
-	if len(languages) > 0 {
-		fmt.Printf("   Languages: %s\n", strings.Join(languages, ", "))
+	// Default progress: summary only.
+	progress("🔍 Reviewing PR #%s: %s (%d files)\n", pr.Number, pr.Title, len(pr.Files))
+
+	// Verbose: show languages and detailed info.
+	if opts.verbose {
+		if len(languages) > 0 {
+			progress("   Languages: %s\n", strings.Join(languages, ", "))
+		}
 	}
-	fmt.Println()
 
 	// Compress diff before passing to orchestrator — the orchestrator
 	// doesn't need to know about compression, just receives a clean diff.
@@ -280,15 +294,17 @@ func runReview(args []string) error {
 	compressed, compSummary := diff.Compress(pr.Diff, diffOpts)
 	if opts.verbose && compSummary.OriginalBytes > 0 {
 		savings := 100 - (compSummary.CompressedBytes*100)/compSummary.OriginalBytes
-		fmt.Printf("   📦 Diff compressed: %dKB → %dKB (-%d%%, %d files stripped)\n",
+		progress("   📦 Diff compressed: %dKB → %dKB (-%d%%, %d files stripped)\n",
 			compSummary.OriginalBytes/1024, compSummary.CompressedBytes/1024,
 			savings, len(compSummary.FilesRemoved))
 	}
 	compressedPR := *pr
 	compressedPR.Diff = compressed
 
-	// Show estimate. In --estimate mode, print and exit.
-	printEstimate(len(compressed), roles)
+	// Show estimate (always to stderr). In --estimate mode, print and exit.
+	if opts.verbose || opts.estimate {
+		printEstimate(len(compressed), roles)
+	}
 	if opts.estimate {
 		return nil
 	}
@@ -302,7 +318,7 @@ func runReview(args []string) error {
 	}
 
 	if !opts.yes && !opts.dryRun && isInteractive() {
-		fmt.Print("Continue? [Y/n] ")
+		fmt.Fprint(os.Stderr, "Continue? [Y/n] ")
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Scan()
 		answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
@@ -310,7 +326,6 @@ func runReview(args []string) error {
 			return fmt.Errorf("review canceled")
 		}
 	}
-	fmt.Println()
 
 	// Determine verification settings.
 	shouldVerify := merged.VerifyEnabled() || opts.verify
@@ -326,7 +341,7 @@ func runReview(args []string) error {
 		repoRoot = "."
 	}
 
-	// Dispatch agents.
+	// Dispatch agents. Orchestrator progress goes to stderr.
 	llmBackend := claude.New()
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
 		Verbose:           opts.verbose,
@@ -342,6 +357,8 @@ func runReview(args []string) error {
 		RepoRoot:          repoRoot,
 		Languages:         languages,
 		ExplicitRoles:     opts.rolesFlag != "",
+		Out:               os.Stderr,
+		ErrOut:            os.Stderr,
 	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
@@ -355,30 +372,36 @@ func runReview(args []string) error {
 	}
 	elapsed := time.Since(start)
 
-	// Print usage summary. Input tokens include cache hits/misses since the
-	// Claude CLI reports cached tokens separately from uncached ones.
+	// Default progress: one-line summary.
 	u := result.Usage
 	totalInput := u.TotalInputTokens()
-	totalTokens := totalInput + u.OutputTokens
-	fmt.Printf("   📊 Tokens: %dk input, %dk output (%dk total) | Cost: $%.2f | Time: %s\n",
-		totalInput/1000, u.OutputTokens/1000, totalTokens/1000, u.CostUSD, elapsed.Round(time.Second))
+	findingCount := len(result.DedupedFindings)
+	if findingCount == 0 {
+		findingCount = len(result.Findings)
+	}
+	progress("✅ %d findings | $%.2f | %s\n", findingCount, u.CostUSD, elapsed.Round(time.Second))
 
-	if opts.verbose && len(result.AgentUsages) > 0 {
-		fmt.Println()
-		for _, au := range result.AgentUsages {
-			agentTotal := au.Usage.TotalTokens()
-			fmt.Printf("      %-16s %6dk tokens  $%.2f\n", au.Role, agentTotal/1000, au.Usage.CostUSD)
+	// Verbose: detailed token breakdown.
+	if opts.verbose {
+		totalTokens := totalInput + u.OutputTokens
+		progress("   📊 Tokens: %dk input, %dk output (%dk total)\n",
+			totalInput/1000, u.OutputTokens/1000, totalTokens/1000)
+
+		if len(result.AgentUsages) > 0 {
+			for _, au := range result.AgentUsages {
+				agentTotal := au.Usage.TotalTokens()
+				progress("      %-16s %6dk tokens  $%.2f\n", au.Role, agentTotal/1000, au.Usage.CostUSD)
+			}
 		}
 	}
 
 	if result.DismissedCount > 0 || result.DowngradedCount > 0 {
-		fmt.Printf("   🔬 Verifier: %d dismissed, %d downgraded | Cost: $%.2f\n",
+		progress("   🔬 Verifier: %d dismissed, %d downgraded | Cost: $%.2f\n",
 			result.DismissedCount, result.DowngradedCount, result.VerifierUsage.CostUSD)
 	}
 	if result.VerifierError != "" {
-		fmt.Printf("   ⚠️  Verifier error: %s\n", result.VerifierError)
+		progress("   ⚠️  Verifier error: %s\n", result.VerifierError)
 	}
-	fmt.Println()
 
 	// Resolve format: CLI flag > config file > none.
 	formatFlag := opts.formatFlag
@@ -386,7 +409,8 @@ func runReview(args []string) error {
 		formatFlag = merged.Format
 	}
 
-	// Output the results.
+	// Output the results. This is the ONLY thing that goes to stdout
+	// (when --stdout is set) or to a file.
 	if err := outputResults(opts, pr, result, roles, elapsed, formatFlag); err != nil {
 		return err
 	}
@@ -394,12 +418,12 @@ func runReview(args []string) error {
 	// Optionally post comments.
 	if opts.comment {
 		if len(result.Suggestions) == 0 {
-			fmt.Println("\nNo inline suggestions to post.")
+			progress("\nNo inline suggestions to post.\n")
 		} else {
 			if err := client.PostComments(pr, result.Suggestions); err != nil {
 				return fmt.Errorf("failed to post comments: %w", err)
 			}
-			fmt.Printf("\n✅ Posted %d inline comments to PR #%s\n", len(result.Suggestions), pr.Number)
+			progress("\n✅ Posted %d inline comments to PR #%s\n", len(result.Suggestions), pr.Number)
 		}
 	}
 
@@ -504,9 +528,9 @@ func printEstimate(diffBytes int, roles []agents.Role) {
 		costEstimate += pricing.EstimateCost(tokensPerAgent*count, expectedOutputTokens*count)
 	}
 
-	fmt.Println("📏 Token estimate (approximate):")
-	fmt.Printf("   Diff size:    %d bytes (~%dk tokens per agent)\n", diffBytes, tokensPerAgent/1000)
-	fmt.Printf("   Agents:       %d\n", len(roles))
+	progressln("📏 Token estimate (approximate):")
+	progress("   Diff size:    %d bytes (~%dk tokens per agent)\n", diffBytes, tokensPerAgent/1000)
+	progress("   Agents:       %d\n", len(roles))
 
 	// Show model breakdown so users understand cost drivers.
 	for _, model := range []string{agents.ModelTierDeep, agents.ModelTierStandard, agents.ModelTierFast} {
@@ -524,15 +548,15 @@ func printEstimate(diffBytes int, roles []agents.Role) {
 				names = append(names, r.Name)
 			}
 		}
-		fmt.Printf("     %-6s ×%d    %s\n", model, count, strings.Join(names, ", "))
+		progress("     %-6s ×%d    %s\n", model, count, strings.Join(names, ", "))
 	}
 
-	fmt.Printf("   Est. input:   ~%dk tokens\n", totalInput/1000)
-	fmt.Printf("   Est. output:  ~%dk tokens\n", totalOutput/1000)
-	fmt.Printf("   Est. total:   ~%dk tokens\n", total/1000)
-	fmt.Printf("   Est. cost:    ~$%.2f\n", costEstimate)
-	fmt.Printf("   Verifier:     ~$%.2f (20%% of agent cost, configurable via --verifier-budget)\n", costEstimate*0.20)
-	fmt.Println("\n   Note: actual cost varies by caching and response length.")
+	progress("   Est. input:   ~%dk tokens\n", totalInput/1000)
+	progress("   Est. output:  ~%dk tokens\n", totalOutput/1000)
+	progress("   Est. total:   ~%dk tokens\n", total/1000)
+	progress("   Est. cost:    ~$%.2f\n", costEstimate)
+	progress("   Verifier:     ~$%.2f (20%% of agent cost, configurable via --verifier-budget)\n", costEstimate*0.20)
+	progressln("\n   Note: actual cost varies by caching and response length.")
 }
 
 var filenameAllowlist = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
@@ -571,6 +595,6 @@ func writeToFile(content, path string) error {
 	if err := os.WriteFile(filepath.Clean(path), []byte(content), 0o600); err != nil { // #nosec G703 -- same as above
 		return fmt.Errorf("failed to write output to %s: %w", path, err)
 	}
-	fmt.Printf("📄 Report written to %s\n", path)
+	progress("📄 Report written to %s\n", path)
 	return nil
 }
