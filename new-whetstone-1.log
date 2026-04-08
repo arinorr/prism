@@ -1,0 +1,54 @@
+🔍 Reviewing PR #1: Add CI pipeline, test suite, and Makefile (12 files)
+   📚 Symbol index: 882 symbols indexed
+📋 File routing:
+   4 code file(s) → Know-It-All, Architect, Solver, Editor, Optimizer, Sentinel, Test Engineer
+   2 docs file(s) → Know-It-All, Editor
+   4 tests file(s) → Know-It-All, Solver, Test Engineer
+   2 config file(s) → Know-It-All, Architect, Sentinel
+   🔍 [Optimizer] reviewing (4 files)...
+2026/04/08 07:14:08 resolve: skipping internal/scorer/scorer_test.go: open /Users/arinorthage-orr/Workspace/prism/internal/scorer/scorer_test.go: no such file or directory
+2026/04/08 07:14:08 resolve: skipping internal/scorer/scorer_test.go: open /Users/arinorthage-orr/Workspace/prism/internal/scorer/scorer_test.go: no such file or directory
+2026/04/08 07:14:08 resolve: skipping internal/scorer/scorer_test.go: open /Users/arinorthage-orr/Workspace/prism/internal/scorer/scorer_test.go: no such file or directory
+2026/04/08 07:14:08 resolve: skipping cmd/root_test.go: open /Users/arinorthage-orr/Workspace/prism/cmd/root_test.go: no such file or directory
+2026/04/08 07:14:08 resolve: skipping internal/parser/parser_test.go: open /Users/arinorthage-orr/Workspace/prism/internal/parser/parser_test.go: no such file or directory
+2026/04/08 07:14:08 resolve: skipping cmd/root_test.go: open /Users/arinorthage-orr/Workspace/prism/cmd/root_test.go: no such file or directory
+2026/04/08 07:14:08 resolve: skipping cmd/root_test.go: open /Users/arinorthage-orr/Workspace/prism/cmd/root_test.go: no such file or directory
+2026/04/08 07:14:08 resolve: skipping internal/parser/parser_test.go: open /Users/arinorthage-orr/Workspace/prism/internal/parser/parser_test.go: no such file or directory
+2026/04/08 07:14:08 resolve: skipping internal/parser/parser_test.go: open /Users/arinorthage-orr/Workspace/prism/internal/parser/parser_test.go: no such file or directory
+2026/04/08 07:14:08 resolve: reference Index in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference LanguageScanner in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference GoScanner in internal/index/go_scanner.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference TSScanner in internal/index/ts_scanner.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference NewIndex in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Check in internal/sizecheck/sizecheck.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Index in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Size in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference LanguageScanner in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference GoScanner in internal/index/go_scanner.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference TSScanner in internal/index/ts_scanner.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference NewIndex in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Check in internal/sizecheck/sizecheck.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Scan in internal/index/go_scanner.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Size in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Add in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Scan in internal/index/go_scanner.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Add in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Freeze in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Freeze in internal/index/index.go not in cache, skipping
+2026/04/08 07:14:08 resolve: reference Role in internal/agents/roles.go not in cache, skipping
+   🔍 [Architect] reviewing (6 files)...
+   🔍 [Sentinel] reviewing (6 files)...
+   🔍 [Editor] reviewing (6 files)...
+fatal error: concurrent map writes
+
+goroutine 55 [running]:
+internal/runtime/maps.fatal({0x61d7670?, 0x231695b5c0d0?})
+	/usr/local/Cellar/go/1.26.0/libexec/src/runtime/panic.go:1181 +0x18
+github.com/arinorr/prism/internal/resolve.(*Resolver).PreloadFiles(0x2316959d10c0, {0x231695aec000?, 0x231695be0d77?, 0xd?})
+	/Users/arinorthage-orr/Workspace/prism/internal/resolve/resolve.go:78 +0x1e6
+github.com/arinorr/prism/internal/agents.ResolveCrossReferences({0x231695a0e008?, 0x0?, 0xc?}, 0x2316959ea1e0)
+	/Users/arinorthage-orr/Workspace/prism/internal/agents/crossref.go:130 +0xaaa
+github.com/arinorr/prism/internal/agents.(*Orchestrator).dispatchAgents.func1(0x64e1a10)
+	/Users/arinorthage-orr/Workspace/prism/internal/agents/orchestrator.go:372 +0x6fd
+created by github.com/arinorr/prism/internal/agents.(*Orchestrator).dispatchAgents in goroutine 1
+	/Users/arinorthage-orr/Workspace/prism/internal/agents/orchestrator.go:346 +0x165

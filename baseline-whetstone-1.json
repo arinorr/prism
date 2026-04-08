@@ -1,0 +1,1374 @@
+🔍 Reviewing PR #1: Add CI pipeline, test suite, and Makefile
+   12 files changed
+   Languages: go
+
+📏 Token estimate (approximate):
+   Diff size:    47143 bytes (~13k tokens per agent)
+   Agents:       7
+     opus   ×2    Architect, Sentinel
+     sonnet ×3    Know-It-All, Solver, Optimizer
+     haiku  ×2    Editor, Test Engineer
+   Est. input:   ~96k tokens
+   Est. output:  ~7k tokens
+   Est. total:   ~103k tokens
+   Est. cost:    ~$0.74
+
+   Note: actual cost varies by caching and response length.
+
+   🔍 [Test Engineer] reviewing...
+   🔍 [Architect] reviewing...
+   🔍 [Solver] reviewing...
+   🔍 [Optimizer] reviewing...
+   🔍 [Editor] reviewing...
+   🔍 [Know-It-All] reviewing...
+   🔍 [Sentinel] reviewing...
+   ✅ [Solver] 0 findings (1/7 done)
+   ✅ [Editor] 3 findings (2/7 done)
+   ✅ [Optimizer] 5 findings (3/7 done)
+   ✅ [Test Engineer] 11 findings (4/7 done)
+   ✅ [Know-It-All] 5 findings (5/7 done)
+   ✅ [Architect] 9 findings (6/7 done)
+   ✅ [Sentinel] 6 findings (7/7 done)
+
+   📊 Building summary...
+   📊 Tokens: 573k input, 12k output (585k total) | Cost: $2.76 | Time: 3m26s
+
+{
+  "pr": {
+    "number": "1",
+    "title": "Add CI pipeline, test suite, and Makefile",
+    "files": 12
+  },
+  "summary": "## Overall Assessment\n\n**B** — 7 agents reviewed this PR and found 29 unique issues.\n\n## Findings Breakdown\n\n- 🟡 **4 warning** — should address\n- 🔵 **25 info** — suggestions for improvement\n\n## Scope\n\n- **29** in this PR's changes\n\n## Categories\n\n- **testing**: 10\n- **security**: 7\n- **design**: 5\n- **style**: 4\n- **performance**: 2\n- **bug**: 1\n\n## Agent Consensus\n\n2 finding(s) flagged by 3+ agents:\n\n- **warning** (consensus: 57%, 4/7 agents): Uninitialized Profile variable will cause nil pointer dereference\n- **info** (consensus: 43%, 3/7 agents): Test job runs without caching Go modules, slowing CI builds\n\n## Verdict: approve with suggestions\n",
+  "health_score": {
+    "score": 79,
+    "grade": "B",
+    "verdict": "approve with suggestions",
+    "description": "79/100 — Acceptable, several issues to fix"
+  },
+  "findings": [
+    {
+      "file": "cmd/root.go",
+      "line": 87,
+      "risk": "warning",
+      "category": "bug",
+      "scope": "changed",
+      "confidence": 0.9,
+      "summary": "Uninitialized Profile variable will cause nil pointer dereference",
+      "detail": "Line 87 declares `var profile scorer.Profile` without initialization. In Go, the zero value for a string is an empty string. When this empty string is later used (likely in a switch or comparison), it won't match any of the expected profile values like 'skill' or 'prompt', causing the code to potentially hit an unhandled case or panic. The original code initialized it to `scorer.ProfileAuto`, which should be restored or the variable should be given a sensible default.",
+      "code_example": "// Before (broken):\nvar profile scorer.Profile\n\n// After (fixed):\nprofile := scorer.ProfileAuto",
+      "role": "editor"
+    },
+    {
+      "file": "Makefile",
+      "line": 18,
+      "risk": "info",
+      "category": "style",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "Help text comment placement is slightly awkward",
+      "detail": "The `@echo` command that prints the 'go tool cover' command appears after the actual coverage command runs. This is fine functionally, but users might expect the help text earlier in the output. Consider printing it before running the coverage command for better UX, or moving it to a separate help target. This is a minor readability issue, not a functional problem.",
+      "role": "editor"
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 76,
+      "risk": "info",
+      "category": "style",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "Gosec directive could be more specific about the security justification",
+      "detail": "The `#nosec G304` comment correctly identifies that `os.ReadFile` is safe here since the path comes from CLI input, not untrusted web sources. However, the comment could be slightly clearer by noting that `filepath.Clean` already mitigates directory traversal attacks. The current justification is sound but could be more explicit.",
+      "code_example": "// Current:\ndata, err := os.ReadFile(cleanPath) // #nosec G304 -- path is user-provided CLI input, not untrusted web input\n\n// More explicit:\ndata, err := os.ReadFile(cleanPath) // #nosec G304 -- user-provided CLI input after filepath.Clean; no directory traversal risk",
+      "role": "editor"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 55,
+      "risk": "warning",
+      "category": "performance",
+      "scope": "changed",
+      "confidence": 0.85,
+      "summary": "Test job runs without caching Go modules, slowing CI builds",
+      "detail": "The test job downloads all dependencies from scratch on every run. Go modules are fetched repeatedly even when go.mod/go.sum haven't changed. This adds 10-30 seconds per CI run unnecessarily. GitHub Actions provides built-in Go caching via actions/setup-go that should be enabled.",
+      "code_example": "# Add cache: true to actions/setup-go:\n- uses: actions/setup-go@v5\n  with:\n    go-version: \"1.26\"\n    cache: true  # \u003c-- enables automatic Go module caching",
+      "role": "optimizer"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 21,
+      "risk": "warning",
+      "category": "performance",
+      "scope": "changed",
+      "confidence": 0.85,
+      "summary": "Lint job runs without caching Go modules, slowing CI builds",
+      "detail": "Similar to the test job, the lint job downloads all dependencies from scratch. golangci-lint also benefits from Go module caching. This compounds the CI time waste since all 4 jobs run in parallel and each re-fetches the same dependencies.",
+      "code_example": "# Add cache: true to actions/setup-go:\n- uses: actions/setup-go@v5\n  with:\n    go-version: \"1.26\"\n    cache: true",
+      "role": "optimizer"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 36,
+      "risk": "info",
+      "category": "performance",
+      "scope": "changed",
+      "confidence": 0.75,
+      "summary": "Typecheck and security jobs also lack Go module caching",
+      "detail": "For completeness, the typecheck and security jobs should also enable caching. While these jobs are less cache-sensitive than lint/test, enabling caching consistently across all jobs is a CI best practice and ensures faster builds as the project grows.",
+      "code_example": "# Add to all setup-go steps:\ncache: true",
+      "role": "optimizer"
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 13,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "Test files created with 0o600 permissions unnecessarily restrictive",
+      "detail": "Test helper writeTestSkill creates files with 0o600 (owner read/write only). For test files in temporary directories that are automatically cleaned up, this is overly cautious. Standard 0o644 is conventional for test fixtures and makes debugging easier (other users/processes can read the temp files if needed). This is very minor since t.TempDir() is already isolated, but worth noting for consistency.",
+      "code_example": "// Before:\nos.WriteFile(path, []byte(content), 0o600)\n\n// After (conventional for tests):\nos.WriteFile(path, []byte(content), 0o644)",
+      "role": "optimizer"
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 77,
+      "risk": "info",
+      "category": "performance",
+      "scope": "changed",
+      "confidence": 0.5,
+      "summary": "filepath.Clean() call adds unnecessary allocation on hot path",
+      "detail": "The added filepath.Clean(path) creates a new string allocation on every ParseFile call. For CLI tools processing dozens of files, this is negligible, but it's unnecessary work since the #nosec comment justifies the G304 warning sufficiently without the Clean() call. The user-provided CLI path is already validated by the OS when opening the file—if it's malicious, os.ReadFile will fail safely. That said, the performance cost is tiny (~50ns per call), so this is a very low-priority observation.",
+      "code_example": "// The Clean() doesn't add security value since:\n// 1. This is CLI input, not web input\n// 2. os.ReadFile will fail safely on invalid paths\n// 3. The #nosec comment already documents the safety\n\n// Current (adds allocation):\ncleanPath := filepath.Clean(path)\ndata, err := os.ReadFile(cleanPath)\n\n// Alternative (no allocation):\ndata, err := os.ReadFile(path) // #nosec G304 -- CLI input, not web",
+      "role": "optimizer"
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 151,
+      "risk": "warning",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.75,
+      "summary": "TestRunRate_TextOutput and TestRunRate_JSONStdout do not verify output content",
+      "detail": "These tests execute runRate but don't assert anything about the output. They only check for nil errors. This means they would pass even if the output were completely wrong, malformed, or empty. They should at minimum verify that stdout/stderr contains expected markers (skill name, score, grade) or validate the output format matches expectations.",
+      "code_example": "// Before: just checking for error\nerr := runRate([]string{\"--dir\", dir, \"--format\", \"text\"})\nif err != nil {\n\tt.Fatalf(\"runRate text: %v\", err)\n}\n\n// After: capture and verify output\nold := os.Stdout\nr, w, _ := os.Pipe()\nos.Stdout = w\nerr := runRate([]string{\"--dir\", dir, \"--format\", \"text\"})\nw.Close()\nos.Stdout = old\noutput, _ := ioutil.ReadAll(r)\nif !strings.Contains(string(output), \"test\") || !strings.Contains(string(output), \"Whetstone Report\") {\n\tt.Error(\"output missing expected text content\")\n}",
+      "role": "test-engineer"
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 106,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "TestParseRateArgs tests lack coverage of error cases and edge cases",
+      "detail": "The test only covers happy path argument parsing and one error case (unknown flag). Missing coverage: (1) positional args mixed with flags in various orders, (2) duplicate flags (should last one win or error?), (3) invalid flag values (e.g., --profile with invalid value), (4) multiple positional args when only one expected. While TestParseRateArgs_UnknownFlag exists, the main test should document behavior for common edge cases.",
+      "code_example": "// Add to TestParseRateArgs test cases:\n{\n\tname:    \"duplicate flags last wins\",\n\targs:    []string{\"--format\", \"json\", \"--format\", \"html\"},\n\tcheck: func(o *options) string {\n\t\tif o.format != \"html\" {\n\t\t\treturn \"last format flag should win\"\n\t\t}\n\t\treturn \"\"\n\t},\n}",
+      "role": "test-engineer"
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 198,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.65,
+      "summary": "TestRunRate_HTMLFile and TestRunRate_MDFile only check for basic HTML/MD markers",
+      "detail": "These tests verify that output files contain \u003c!DOCTYPE html\u003e and # Whetstone Report, but don't validate actual report structure or content. A file could contain these strings yet be completely broken (malformed JSON in HTML, invalid Markdown syntax, missing required sections). Consider parsing and validating the actual structure.",
+      "code_example": "// Before: minimal check\nif !strings.Contains(string(data), \"\u003c!DOCTYPE html\u003e\") {\n\tt.Error(\"HTML file should contain DOCTYPE\")\n}\n\n// After: validate structure\nvar doc *html.Node\ndoc, err := html.Parse(strings.NewReader(string(data)))\nif err != nil {\n\tt.Fatalf(\"HTML parse error: %v\", err)\n}\n// Verify required elements exist (e.g., h1, result cards, etc.)",
+      "role": "test-engineer"
+    },
+    {
+      "file": "internal/parser/parser_test.go",
+      "line": 88,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "TestParseFile_Skill doesn't verify Body or frontmatter parsing completeness",
+      "detail": "The test only checks Name and RawTitle but doesn't verify that Body, H2Sections, frontmatter, or feature flags are correctly populated. If ParseFile has a regression that breaks body parsing or frontmatter extraction, this test won't catch it. Should verify at least the presence of expected sections and frontmatter keys.",
+      "code_example": "// Add to TestParseFile_Skill:\nif s.Body == \"\" {\n\tt.Error(\"Body should be populated\")\n}\nif len(s.H2Sections) != 3 {\n\tt.Errorf(\"H2Sections count = %d, want 3\", len(s.H2Sections))\n}\nif s.Frontmatter[\"name\"] != \"deploy\" {\n\tt.Error(\"Frontmatter parsing failed\")\n}",
+      "role": "test-engineer"
+    },
+    {
+      "file": "internal/parser/parser_test.go",
+      "line": 281,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.55,
+      "summary": "TestParseFile_NotFound doesn't distinguish between different error types",
+      "detail": "The test checks that ParseFile returns an error for a nonexistent file, but doesn't verify it's actually a file-not-found error (vs. permission denied, invalid path, etc.). This is a weak assertion—any error passes. Consider checking the error message or type.",
+      "code_example": "// Before:\nif err == nil {\n\tt.Error(\"ParseFile on nonexistent file should return error\")\n}\n\n// After:\nif err == nil {\n\tt.Fatal(\"ParseFile on nonexistent file should return error\")\n}\nif !strings.Contains(err.Error(), \"no such file\") \u0026\u0026 !os.IsNotExist(err) {\n\tt.Errorf(\"wrong error type: %v\", err)\n}",
+      "role": "test-engineer"
+    },
+    {
+      "file": "internal/report/report_test.go",
+      "line": 64,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.65,
+      "summary": "TestText doesn't verify text formatting correctness (order, alignment, spacing)",
+      "detail": "The test only checks that certain strings appear in the output but doesn't verify the order (e.g., header before skills, summary before details), alignment (e.g., score bars are consistent width), or spacing (e.g., no double-newlines). A regression that scrambles output order or breaks formatting would pass this test.",
+      "code_example": "// Add order validation:\ndeployIdx := strings.Index(output, \"/deploy\")\narchitectIdx := strings.Index(output, \"/architect\")\nif deployIdx \u003e architectIdx {\n\tt.Error(\"deploy should appear before architect in output\")\n}\nif deployIdx \u003c strings.Index(output, \"Average score\") {\n\tt.Error(\"skills should appear after summary\")\n}",
+      "role": "test-engineer"
+    },
+    {
+      "file": "internal/scorer/scorer_test.go",
+      "line": 84,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "TestScore_SkillProfile makes weak assertions on grade and score",
+      "detail": "The test only checks that Grade is \"A\" or \"B\" and TotalScore \u003e= 70. This is too loose—a skill could score 70 (D or low C) and still pass. More importantly, the test doesn't verify that specific dimensions are scored correctly or that the weighted scoring logic works. It's a smoke test, not a real validation.",
+      "code_example": "// More specific assertions:\nif r.Grade != \"A\" {\n\tt.Errorf(\"Grade = %q, want A for well-formed skill\", r.Grade)\n}\nif r.TotalScore \u003c 85 {\n\tt.Errorf(\"TotalScore = %.1f, expected \u003e= 85 for well-formed skill\", r.TotalScore)\n}\n// Verify expected dimensions have non-zero scores:\nfor _, d := range r.Dimensions {\n\tif d.Name == \"Purpose\" \u0026\u0026 d.Score == 0 {\n\t\tt.Error(\"Purpose dimension should be scored for a skill with clear intent\")\n\t}\n}",
+      "role": "test-engineer"
+    },
+    {
+      "file": "internal/scorer/scorer_test.go",
+      "line": 113,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.5,
+      "summary": "TestScore_AutoDetect_* tests don't verify the detection logic reasoning",
+      "detail": "These tests only verify that auto-detection picks the right profile type. They don't test that the detection algorithm uses the right signals (e.g., counting feature flags, checking for role definitions). If the detector is changed to use incorrect heuristics but still happens to pick the right profile by accident, these tests won't catch it.",
+      "code_example": "// Consider testing the intermediate detection signals:\nfunc TestAutoDetectSignals(t *testing.T) {\n\ts := makeSkill()\n\tsignals := getAutoDetectSignals(s) // hypothetical helper\n\tif !signals.HasArguments || !signals.HasCommitSection {\n\t\tt.Error(\"skill detector should weight Process and Git commit\")\n\t}\n}",
+      "role": "test-engineer"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 54,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "CI test job doesn't fail on coverage threshold breach",
+      "detail": "The test job runs coverage and prints a summary but doesn't enforce the 85% coverage target mentioned in the PR description. If coverage drops below 85%, the job still passes. CI should gate on coverage targets via `go test -coverprofile` with a validation step (e.g., using `gocover-cobertura` or custom check).",
+      "code_example": "# Add coverage validation:\n- name: Check coverage threshold\n  run: |\n    coverage=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | sed 's/%//')\n    if (( $(echo \"$coverage \u003c 85\" | bc -l) )); then\n      echo \"Coverage ${coverage}% is below 85% threshold\"\n      exit 1\n    fi",
+      "role": "test-engineer"
+    },
+    {
+      "file": "Makefile",
+      "line": 1,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.5,
+      "summary": "Makefile doesn't enforce coverage threshold in `make coverage` target",
+      "detail": "The coverage target builds the report and prints it, but doesn't validate against the 85% threshold. Developers might miss a coverage drop locally. A CI gate is good, but local enforcement helps catch issues earlier.",
+      "code_example": "# Enhance coverage target:\ncoverage:\n\tgo test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1\n\tgo tool cover -func=coverage.out | tail -1\n\t@coverage=$$(go tool cover -func=coverage.out | tail -1 | awk '{print $$NF}' | sed 's/%//'); \\\n\tif [ $$(echo \"$$coverage \u003c 85\" | bc) -eq 1 ]; then \\\n\t  echo \"ERROR: Coverage $$coverage% is below 85% threshold\"; \\\n\t  exit 1; \\\n\tfi\n\t@echo \"Run 'go tool cover -html=coverage.out' to view in browser\"",
+      "role": "test-engineer"
+    },
+    {
+      "file": "internal/parser/parser_test.go",
+      "line": 115,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "TestParseFile_Frontmatter doesn't test invalid or malformed YAML",
+      "detail": "The test uses well-formed frontmatter. No tests cover: (1) YAML syntax errors (unclosed strings, invalid indentation), (2) missing required keys (name, description), (3) unexpected value types (e.g., allowed-tools as array instead of string). If frontmatter parsing is fragile, these tests won't catch regressions.",
+      "code_example": "// Add invalid YAML test:\nfunc TestParseFile_MalformedFrontmatter(t *testing.T) {\n\tdir := t.TempDir()\n\tcontent := `---\nname: test\ndescription: \"unclosed string\n---\n# /test\n`\n\tpath := writeTestFile(t, dir, \"test.md\", content)\n\t_, err := ParseFile(path)\n\tif err == nil {\n\t\tt.Error(\"ParseFile should error on malformed YAML\")\n\t}\n}",
+      "role": "test-engineer"
+    },
+    {
+      "file": "cmd/root.go",
+      "line": 87,
+      "risk": "warning",
+      "category": "bug",
+      "scope": "changed",
+      "confidence": 0.95,
+      "summary": "Zero value Profile may not trigger auto-detection as intended",
+      "detail": "The code changed from `profile := scorer.ProfileAuto` to `var profile scorer.Profile` (zero value). If scorer.Profile is a string type, the zero value is \"\" not scorer.ProfileAuto. The switch statement may not handle the zero value correctly, potentially breaking the auto-detection flow. This depends on how Profile is defined and what ProfileAuto's actual value is. If Profile is a string and ProfileAuto = \"auto\", this change breaks auto-detection for users who don't specify --profile.",
+      "code_example": "// Before (correct if auto-detection is default):\nprofile := scorer.ProfileAuto\n\n// After (may break auto-detection):\nvar profile scorer.Profile\n\n// Fix: either revert or ensure zero value equals ProfileAuto\nprofile := scorer.ProfileAuto  // explicit default",
+      "role": "know-it-all"
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 76,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "filepath.Clean alone doesn't prevent path traversal attacks",
+      "detail": "While filepath.Clean normalizes the path, it doesn't prevent reading arbitrary files via path traversal (e.g., `../../../etc/passwd`). The #nosec comment justifies this as 'user-provided CLI input, not untrusted web input', which is reasonable for a CLI tool. However, if this tool is ever wrapped by a web service or used in an automated system with external input, this becomes a vulnerability. For a CLI tool where the user controls input directly, this is acceptable. Consider documenting this assumption if the tool's threat model changes.",
+      "code_example": "// Current approach (acceptable for CLI):\ncleanPath := filepath.Clean(path)\ndata, err := os.ReadFile(cleanPath) // #nosec G304\n\n// If ever exposed to untrusted input, validate:\nif strings.Contains(cleanPath, \"..\") {\n    return nil, fmt.Errorf(\"path traversal not allowed\")\n}",
+      "role": "know-it-all"
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 13,
+      "risk": "info",
+      "category": "style",
+      "scope": "changed",
+      "confidence": 0.8,
+      "summary": "File permission 0o600 is overly restrictive for test files",
+      "detail": "Test files are written with mode 0o600 (owner read/write only). Since these are temporary test files in t.TempDir(), the restrictive permissions are unnecessary and may cause issues on some systems or when debugging tests. The standard 0o644 (owner read/write, group/others read) is more conventional for test fixtures and makes it easier to inspect test artifacts when debugging.",
+      "code_example": "// Current:\nif err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {\n\n// More conventional for test files:\nif err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {",
+      "role": "know-it-all"
+    },
+    {
+      "file": "internal/report/report.go",
+      "line": 26,
+      "risk": "info",
+      "category": "style",
+      "scope": "changed",
+      "confidence": 0.9,
+      "summary": "Mixed string concatenation and fmt.Fprintf reduces consistency",
+      "detail": "The refactor changes some WriteString(fmt.Sprintf(...)) calls to fmt.Fprintf(\u0026b, ...) which is more idiomatic and efficient. However, the refactor is incomplete — some calls still use b.WriteString() for literal strings while others use fmt.Fprintf. For consistency, either use fmt.Fprintf for all formatted output and b.WriteString for literals, or choose one approach throughout. The current mix is harder to scan visually.",
+      "code_example": "// Inconsistent (current state):\nb.WriteString(\"Whetstone Report\\n\")\nfmt.Fprintf(\u0026b, \"Directory: %s\\n\", d.Dir)\nb.WriteString(strings.Repeat(\"─\", 70) + \"\\n\\n\")\n\n// Consistent option 1 (fmt.Fprintf for all formatted):\nfmt.Fprintf(\u0026b, \"Whetstone Report\\n\")\nfmt.Fprintf(\u0026b, \"Directory: %s\\n\", d.Dir)\nfmt.Fprintf(\u0026b, \"%s\\n\\n\", strings.Repeat(\"─\", 70))\n\n// Consistent option 2 (WriteString + fmt.Sprintf when needed):\nb.WriteString(\"Whetstone Report\\n\")\nb.WriteString(fmt.Sprintf(\"Directory: %s\\n\", d.Dir))",
+      "role": "know-it-all"
+    },
+    {
+      "file": "Makefile",
+      "line": 8,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.85,
+      "summary": "Makefile test target lacks coverage flag while coverage target duplicates test logic",
+      "detail": "The `make test` target runs tests with race detector but no coverage, while `make coverage` duplicates the exact same test command with coverage added. This creates maintenance burden (two places to update test flags) and users may run `make test` expecting it to catch coverage regressions when it doesn't. Consider either: (1) always running coverage in the test target, or (2) having coverage depend on test to avoid duplication, or (3) clearly documenting the difference.",
+      "code_example": "# Current (duplicated logic):\ntest:\n\tgo test ./... -race -count=1\n\ncoverage:\n\tgo test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1\n\n# Option 1 (test always includes coverage):\ntest:\n\tgo test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1\n\n# Option 2 (coverage reuses test):\nTEST_FLAGS := -race -count=1\ntest:\n\tgo test ./... $(TEST_FLAGS)\n\ncoverage:\n\tgo test ./... $(TEST_FLAGS) -coverprofile=coverage.out -covermode=atomic",
+      "role": "know-it-all"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 22,
+      "risk": "warning",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.85,
+      "summary": "Go version pinned to non-existent 1.26 — CI will fail",
+      "detail": "The CI workflow and go.mod both reference Go 1.26, which does not exist as of April 2026 (the latest stable is Go 1.24.x). This will cause all four CI jobs to fail at the `setup-go` step. Additionally, the go.mod originally specified `go 1.23`, which is a real version — this change will break the build. If `go 1.26` is intentional (a pre-release or custom build), this should be documented; otherwise, pin to the actual Go version used for development.",
+      "code_example": "# go.mod — use the actual Go version\n-go 1.26\n+go 1.24\n\n# ci.yml — match go.mod\n-          go-version: \"1.26\"\n+          go-version-file: go.mod",
+      "role": "architect"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 22,
+      "risk": "info",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.8,
+      "summary": "Go version duplicated four times across CI jobs — use go-version-file instead",
+      "detail": "The Go version string `\"1.26\"` is hardcoded in all four CI jobs. When the Go version changes, all four must be updated in lockstep, which is error-prone. The `actions/setup-go@v5` action supports `go-version-file: go.mod`, which reads the version from go.mod automatically. This eliminates the duplication and ensures CI always matches the module's declared version.",
+      "code_example": "# In each job's setup-go step:\n- uses: actions/setup-go@v5\n  with:\n-   go-version: \"1.26\"\n+   go-version-file: go.mod",
+      "role": "architect"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "risk": "info",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.75,
+      "summary": "No dependency caching — CI jobs will re-download modules every run",
+      "detail": "None of the four CI jobs cache Go modules or build artifacts. The `actions/setup-go@v5` action supports automatic caching via `cache: true` (or it auto-detects go.sum). Without caching, each of the four parallel jobs downloads all dependencies from scratch on every run, adding latency and network load. This matters more as the dependency tree grows.",
+      "code_example": "- uses: actions/setup-go@v5\n  with:\n    go-version-file: go.mod\n+   cache: true",
+      "role": "architect"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 73,
+      "risk": "warning",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.8,
+      "summary": "Security tools pinned to @latest — builds are non-reproducible",
+      "detail": "Both `gosec` and `govulncheck` are installed via `go install ...@latest`. This means every CI run can pick up a different version, leading to non-reproducible results — a passing build today may fail tomorrow due to a new rule in gosec, with no code change. Pin to specific versions for reproducibility. The lint job already does this correctly with `version: v2.1.6`.",
+      "code_example": "- name: Install gosec\n- run: go install github.com/securego/gosec/v2/cmd/gosec@latest\n+ run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0\n\n- name: Install govulncheck\n- run: go install golang.org/x/vuln/cmd/govulncheck@latest\n+ run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4",
+      "role": "architect"
+    },
+    {
+      "file": "cmd/root.go",
+      "line": 87,
+      "risk": "warning",
+      "category": "bug",
+      "scope": "changed",
+      "confidence": 0.75,
+      "summary": "Zero-value Profile may silently change auto-detection behavior",
+      "detail": "The original code explicitly set `profile := scorer.ProfileAuto` before the switch statement. The change to `var profile scorer.Profile` relies on the zero value of the `Profile` type being equivalent to `ProfileAuto`. If `Profile` is a `string` type and `ProfileAuto` is a non-empty string constant (e.g., `\"auto\"`), the zero value (`\"\"`) won't match `ProfileAuto`, and the default case in the switch may behave differently. This is safe only if `ProfileAuto == \"\"` or if the switch has a default case that handles the zero value. Without seeing the full switch, this is a latent bug risk.",
+      "code_example": "// Safe: explicit initialization\n-var profile scorer.Profile\n+profile := scorer.ProfileAuto\n switch opts.profile {",
+      "role": "architect"
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 76,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "#nosec annotation masks the finding rather than addressing it",
+      "detail": "The `filepath.Clean(path)` call before `os.ReadFile` does normalize the path, but it doesn't prevent path traversal — `filepath.Clean(\"../../etc/passwd\")` still returns `../../etc/passwd`. The `#nosec G304` annotation suppresses gosec's warning without truly mitigating the risk. For a CLI tool where the user provides the path, this is acceptable (the user already has filesystem access), but the comment should reflect that rationale more precisely. The current comment says 'path is user-provided CLI input, not untrusted web input' which is the correct reasoning — just noting that `filepath.Clean` doesn't add security here, only tidiness.",
+      "role": "architect"
+    },
+    {
+      "file": "BACKLOG.md",
+      "risk": "info",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.65,
+      "summary": "Backlog document committed to mainline — consider using GitHub Issues instead",
+      "detail": "A 178-line BACKLOG.md with detailed feature specs is being committed to the repository. This creates a maintenance burden: the document will drift from reality as features are built, partially built, or re-scoped. GitHub Issues or a project board would provide better tracking (status, assignment, discussion threads, cross-references to PRs). If the team prefers in-repo planning, a lighter `TODO.md` with one-liners linking to issues would age better than detailed specs.",
+      "role": "architect"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 7,
+      "risk": "info",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "CI only triggers on main branch — feature branch PRs won't run checks",
+      "detail": "The workflow triggers on `pull_request: branches: [main]` which means PRs targeting main will run CI. However, if the team uses intermediate branches (e.g., `develop`, release branches), PRs targeting those branches won't get CI checks. This is fine for a simple branching model, but worth noting if the workflow evolves. Also, there's no `workflow_dispatch` trigger for manual runs, which can be handy for debugging CI itself.",
+      "role": "architect"
+    },
+    {
+      "file": "Makefile",
+      "line": 29,
+      "risk": "info",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "clean target uses rm -rf on results/ without confirmation",
+      "detail": "The `make clean` target runs `rm -rf results/`. While this is a standard Makefile pattern, the `results/` directory may contain report output the user hasn't saved elsewhere. Consider adding a comment or making the clean more targeted (e.g., only remove `whetstone` and `coverage.out` by default, with a separate `make distclean` for results).",
+      "role": "architect"
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 76,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "#nosec G304 suppression is reasonable but could be documented better",
+      "detail": "The `#nosec G304` annotation on `os.ReadFile(cleanPath)` is acceptable for a CLI tool where the path comes from command-line arguments (not web input). The `filepath.Clean()` addition is a good hardening step. However, the comment says 'path is user-provided CLI input, not untrusted web input' — this is the correct reasoning, but note that `filepath.Clean` alone does not prevent path traversal (e.g., `filepath.Clean(\"../../etc/passwd\")` still resolves upward). Since this is a local CLI tool that intentionally reads user-specified files, this is fine, but if this function is ever reused in a server context, it would need prefix validation.",
+      "code_example": "// Current (acceptable for CLI):\ncleanPath := filepath.Clean(path)\ndata, err := os.ReadFile(cleanPath)\n\n// If ever used in a server context, add:\nif !strings.HasPrefix(cleanPath, allowedBaseDir) {\n    return nil, fmt.Errorf(\"path outside allowed directory\")\n}",
+      "role": "sentinel"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 73,
+      "risk": "warning",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.85,
+      "summary": "gosec and govulncheck installed with @latest — should pin versions",
+      "detail": "The CI security job installs `gosec@latest` and `govulncheck@latest`. Using `@latest` means every CI run could pull a different version, which introduces two risks: (1) supply chain — a compromised latest version would be automatically pulled; (2) reproducibility — a new version could change behavior, causing false positives/negatives or breaking the build unpredictably. Pin to specific versions for deterministic, auditable builds.",
+      "code_example": "# Before:\n- name: Install gosec\n  run: go install github.com/securego/gosec/v2/cmd/gosec@latest\n\n# After (pin to known-good version):\n- name: Install gosec\n  run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0\n\n- name: Install govulncheck\n  run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4",
+      "role": "sentinel"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 1,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.75,
+      "summary": "CI workflow lacks concurrency control — could waste resources on rapid pushes",
+      "detail": "The CI workflow does not set a `concurrency` group, so pushing multiple commits in quick succession will run all of them in parallel rather than cancelling superseded runs. While not a security vulnerability, this is a CI best practice that also prevents potential race conditions in artifact uploads if the same artifact name is reused across concurrent runs.",
+      "code_example": "# Add after the 'permissions' block:\nconcurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\n  cancel-in-progress: true",
+      "role": "sentinel"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 60,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "Coverage artifact uploaded without retention limit",
+      "detail": "The `actions/upload-artifact@v4` step uploads `coverage.out` without specifying `retention-days`. The default is 90 days. For coverage data this is low-risk, but it's good practice to set explicit retention to avoid accumulating stale artifacts. Not a security issue per se, but aligns with the principle of minimizing stored data.",
+      "code_example": "- name: Upload coverage artifact\n  uses: actions/upload-artifact@v4\n  with:\n    name: coverage\n    path: coverage.out\n    retention-days: 14",
+      "role": "sentinel"
+    },
+    {
+      "file": "Makefile",
+      "line": 29,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.5,
+      "summary": "Makefile clean target uses rm -rf on results/ directory",
+      "detail": "The `clean` target runs `rm -rf results/`. This is a relative path, which is standard for Makefiles, but worth noting that if someone runs `make clean` from an unexpected working directory, it could delete an unrelated `results/` directory. This is extremely low risk for a developer tool, but documenting the expected working directory in a comment is good hygiene.",
+      "code_example": "# Acceptable as-is for a developer tool. Optionally guard:\nclean:\n\trm -f whetstone coverage.out\n\t@[ -d results/ ] \u0026\u0026 rm -rf results/ || true",
+      "role": "sentinel"
+    },
+    {
+      "file": "cmd/root.go",
+      "line": 87,
+      "risk": "info",
+      "category": "bug",
+      "scope": "changed",
+      "confidence": 0.65,
+      "summary": "Zero-value Profile variable may change default behavior vs explicit ProfileAuto",
+      "detail": "The change from `profile := scorer.ProfileAuto` to `var profile scorer.Profile` means `profile` starts as the zero value of the `Profile` type (likely empty string `\"\"` or `0`). If the switch statement below doesn't match any case (e.g., no `--profile` flag provided), the zero value is used. This is only safe if the downstream `Score()` function handles the zero value identically to `ProfileAuto`. If `ProfileAuto` is a non-zero constant, this is a behavior change that could cause auto-detection to stop working when no profile flag is given.",
+      "code_example": "// Verify that the zero value of scorer.Profile == scorer.ProfileAuto\n// If not, this is a bug:\nvar profile scorer.Profile  // zero value — is this == ProfileAuto?\n\n// Safer:\nprofile := scorer.ProfileAuto  // explicit default",
+      "role": "sentinel"
+    }
+  ],
+  "deduped_findings": [
+    {
+      "file": "cmd/root.go",
+      "line": 87,
+      "risk": "warning",
+      "category": "bug",
+      "scope": "changed",
+      "confidence": 0.9,
+      "summary": "Uninitialized Profile variable will cause nil pointer dereference",
+      "detail": "The original code explicitly set `profile := scorer.ProfileAuto` before the switch statement. The change to `var profile scorer.Profile` relies on the zero value of the `Profile` type being equivalent to `ProfileAuto`. If `Profile` is a `string` type and `ProfileAuto` is a non-empty string constant (e.g., `\"auto\"`), the zero value (`\"\"`) won't match `ProfileAuto`, and the default case in the switch may behave differently. This is safe only if `ProfileAuto == \"\"` or if the switch has a default case that handles the zero value. Without seeing the full switch, this is a latent bug risk.",
+      "code_example": "// Before (correct if auto-detection is default):\nprofile := scorer.ProfileAuto\n\n// After (may break auto-detection):\nvar profile scorer.Profile\n\n// Fix: either revert or ensure zero value equals ProfileAuto\nprofile := scorer.ProfileAuto  // explicit default",
+      "role": "editor",
+      "vote_count": 4,
+      "total_agents": 7,
+      "voters": [
+        "editor",
+        "know-it-all",
+        "architect",
+        "sentinel"
+      ],
+      "agent_details": [
+        {
+          "role": "editor",
+          "risk": "warning",
+          "detail": "Line 87 declares `var profile scorer.Profile` without initialization. In Go, the zero value for a string is an empty string. When this empty string is later used (likely in a switch or comparison), it won't match any of the expected profile values like 'skill' or 'prompt', causing the code to potentially hit an unhandled case or panic. The original code initialized it to `scorer.ProfileAuto`, which should be restored or the variable should be given a sensible default.",
+          "code_example": "// Before (broken):\nvar profile scorer.Profile\n\n// After (fixed):\nprofile := scorer.ProfileAuto"
+        },
+        {
+          "role": "know-it-all",
+          "risk": "warning",
+          "detail": "The code changed from `profile := scorer.ProfileAuto` to `var profile scorer.Profile` (zero value). If scorer.Profile is a string type, the zero value is \"\" not scorer.ProfileAuto. The switch statement may not handle the zero value correctly, potentially breaking the auto-detection flow. This depends on how Profile is defined and what ProfileAuto's actual value is. If Profile is a string and ProfileAuto = \"auto\", this change breaks auto-detection for users who don't specify --profile.",
+          "code_example": "// Before (correct if auto-detection is default):\nprofile := scorer.ProfileAuto\n\n// After (may break auto-detection):\nvar profile scorer.Profile\n\n// Fix: either revert or ensure zero value equals ProfileAuto\nprofile := scorer.ProfileAuto  // explicit default"
+        },
+        {
+          "role": "architect",
+          "risk": "warning",
+          "detail": "The original code explicitly set `profile := scorer.ProfileAuto` before the switch statement. The change to `var profile scorer.Profile` relies on the zero value of the `Profile` type being equivalent to `ProfileAuto`. If `Profile` is a `string` type and `ProfileAuto` is a non-empty string constant (e.g., `\"auto\"`), the zero value (`\"\"`) won't match `ProfileAuto`, and the default case in the switch may behave differently. This is safe only if `ProfileAuto == \"\"` or if the switch has a default case that handles the zero value. Without seeing the full switch, this is a latent bug risk.",
+          "code_example": "// Safe: explicit initialization\n-var profile scorer.Profile\n+profile := scorer.ProfileAuto\n switch opts.profile {"
+        },
+        {
+          "role": "sentinel",
+          "risk": "info",
+          "detail": "The change from `profile := scorer.ProfileAuto` to `var profile scorer.Profile` means `profile` starts as the zero value of the `Profile` type (likely empty string `\"\"` or `0`). If the switch statement below doesn't match any case (e.g., no `--profile` flag provided), the zero value is used. This is only safe if the downstream `Score()` function handles the zero value identically to `ProfileAuto`. If `ProfileAuto` is a non-zero constant, this is a behavior change that could cause auto-detection to stop working when no profile flag is given.",
+          "code_example": "// Verify that the zero value of scorer.Profile == scorer.ProfileAuto\n// If not, this is a bug:\nvar profile scorer.Profile  // zero value — is this == ProfileAuto?\n\n// Safer:\nprofile := scorer.ProfileAuto  // explicit default"
+        }
+      ]
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 55,
+      "risk": "info",
+      "category": "performance",
+      "scope": "changed",
+      "confidence": 0.85,
+      "summary": "Test job runs without caching Go modules, slowing CI builds",
+      "detail": "The test job downloads all dependencies from scratch on every run. Go modules are fetched repeatedly even when go.mod/go.sum haven't changed. This adds 10-30 seconds per CI run unnecessarily. GitHub Actions provides built-in Go caching via actions/setup-go that should be enabled.",
+      "code_example": "# Add cache: true to actions/setup-go:\n- uses: actions/setup-go@v5\n  with:\n    go-version: \"1.26\"\n    cache: true  # \u003c-- enables automatic Go module caching",
+      "role": "optimizer",
+      "vote_count": 3,
+      "total_agents": 7,
+      "voters": [
+        "optimizer",
+        "optimizer",
+        "optimizer"
+      ],
+      "agent_details": [
+        {
+          "role": "optimizer",
+          "risk": "warning",
+          "detail": "The test job downloads all dependencies from scratch on every run. Go modules are fetched repeatedly even when go.mod/go.sum haven't changed. This adds 10-30 seconds per CI run unnecessarily. GitHub Actions provides built-in Go caching via actions/setup-go that should be enabled.",
+          "code_example": "# Add cache: true to actions/setup-go:\n- uses: actions/setup-go@v5\n  with:\n    go-version: \"1.26\"\n    cache: true  # \u003c-- enables automatic Go module caching"
+        },
+        {
+          "role": "optimizer",
+          "risk": "warning",
+          "detail": "Similar to the test job, the lint job downloads all dependencies from scratch. golangci-lint also benefits from Go module caching. This compounds the CI time waste since all 4 jobs run in parallel and each re-fetches the same dependencies.",
+          "code_example": "# Add cache: true to actions/setup-go:\n- uses: actions/setup-go@v5\n  with:\n    go-version: \"1.26\"\n    cache: true"
+        },
+        {
+          "role": "optimizer",
+          "risk": "info",
+          "detail": "For completeness, the typecheck and security jobs should also enable caching. While these jobs are less cache-sensitive than lint/test, enabling caching consistently across all jobs is a CI best practice and ensures faster builds as the project grows.",
+          "code_example": "# Add to all setup-go steps:\ncache: true"
+        }
+      ]
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "risk": "info",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.75,
+      "summary": "No dependency caching — CI jobs will re-download modules every run",
+      "detail": "The workflow triggers on `pull_request: branches: [main]` which means PRs targeting main will run CI. However, if the team uses intermediate branches (e.g., `develop`, release branches), PRs targeting those branches won't get CI checks. This is fine for a simple branching model, but worth noting if the workflow evolves. Also, there's no `workflow_dispatch` trigger for manual runs, which can be handy for debugging CI itself.",
+      "code_example": "- uses: actions/setup-go@v5\n  with:\n    go-version-file: go.mod\n+   cache: true",
+      "role": "architect",
+      "vote_count": 2,
+      "total_agents": 7,
+      "voters": [
+        "architect",
+        "architect"
+      ],
+      "agent_details": [
+        {
+          "role": "architect",
+          "risk": "info",
+          "detail": "None of the four CI jobs cache Go modules or build artifacts. The `actions/setup-go@v5` action supports automatic caching via `cache: true` (or it auto-detects go.sum). Without caching, each of the four parallel jobs downloads all dependencies from scratch on every run, adding latency and network load. This matters more as the dependency tree grows.",
+          "code_example": "- uses: actions/setup-go@v5\n  with:\n    go-version-file: go.mod\n+   cache: true"
+        },
+        {
+          "role": "architect",
+          "risk": "info",
+          "detail": "The workflow triggers on `pull_request: branches: [main]` which means PRs targeting main will run CI. However, if the team uses intermediate branches (e.g., `develop`, release branches), PRs targeting those branches won't get CI checks. This is fine for a simple branching model, but worth noting if the workflow evolves. Also, there's no `workflow_dispatch` trigger for manual runs, which can be handy for debugging CI itself."
+        }
+      ]
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 22,
+      "risk": "info",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.85,
+      "summary": "Go version pinned to non-existent 1.26 — CI will fail",
+      "detail": "The CI workflow and go.mod both reference Go 1.26, which does not exist as of April 2026 (the latest stable is Go 1.24.x). This will cause all four CI jobs to fail at the `setup-go` step. Additionally, the go.mod originally specified `go 1.23`, which is a real version — this change will break the build. If `go 1.26` is intentional (a pre-release or custom build), this should be documented; otherwise, pin to the actual Go version used for development.",
+      "code_example": "# go.mod — use the actual Go version\n-go 1.26\n+go 1.24\n\n# ci.yml — match go.mod\n-          go-version: \"1.26\"\n+          go-version-file: go.mod",
+      "role": "architect",
+      "vote_count": 2,
+      "total_agents": 7,
+      "voters": [
+        "architect",
+        "architect"
+      ],
+      "agent_details": [
+        {
+          "role": "architect",
+          "risk": "warning",
+          "detail": "The CI workflow and go.mod both reference Go 1.26, which does not exist as of April 2026 (the latest stable is Go 1.24.x). This will cause all four CI jobs to fail at the `setup-go` step. Additionally, the go.mod originally specified `go 1.23`, which is a real version — this change will break the build. If `go 1.26` is intentional (a pre-release or custom build), this should be documented; otherwise, pin to the actual Go version used for development.",
+          "code_example": "# go.mod — use the actual Go version\n-go 1.26\n+go 1.24\n\n# ci.yml — match go.mod\n-          go-version: \"1.26\"\n+          go-version-file: go.mod"
+        },
+        {
+          "role": "architect",
+          "risk": "info",
+          "detail": "The Go version string `\"1.26\"` is hardcoded in all four CI jobs. When the Go version changes, all four must be updated in lockstep, which is error-prone. The `actions/setup-go@v5` action supports `go-version-file: go.mod`, which reads the version from go.mod automatically. This eliminates the duplication and ensures CI always matches the module's declared version.",
+          "code_example": "# In each job's setup-go step:\n- uses: actions/setup-go@v5\n  with:\n-   go-version: \"1.26\"\n+   go-version-file: go.mod"
+        }
+      ]
+    },
+    {
+      "file": "Makefile",
+      "line": 1,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.5,
+      "summary": "Makefile doesn't enforce coverage threshold in `make coverage` target",
+      "detail": "The `make test` target runs tests with race detector but no coverage, while `make coverage` duplicates the exact same test command with coverage added. This creates maintenance burden (two places to update test flags) and users may run `make test` expecting it to catch coverage regressions when it doesn't. Consider either: (1) always running coverage in the test target, or (2) having coverage depend on test to avoid duplication, or (3) clearly documenting the difference.",
+      "code_example": "# Current (duplicated logic):\ntest:\n\tgo test ./... -race -count=1\n\ncoverage:\n\tgo test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1\n\n# Option 1 (test always includes coverage):\ntest:\n\tgo test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1\n\n# Option 2 (coverage reuses test):\nTEST_FLAGS := -race -count=1\ntest:\n\tgo test ./... $(TEST_FLAGS)\n\ncoverage:\n\tgo test ./... $(TEST_FLAGS) -coverprofile=coverage.out -covermode=atomic",
+      "role": "test-engineer",
+      "vote_count": 2,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer",
+        "know-it-all"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "The coverage target builds the report and prints it, but doesn't validate against the 85% threshold. Developers might miss a coverage drop locally. A CI gate is good, but local enforcement helps catch issues earlier.",
+          "code_example": "# Enhance coverage target:\ncoverage:\n\tgo test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1\n\tgo tool cover -func=coverage.out | tail -1\n\t@coverage=$$(go tool cover -func=coverage.out | tail -1 | awk '{print $$NF}' | sed 's/%//'); \\\n\tif [ $$(echo \"$$coverage \u003c 85\" | bc) -eq 1 ]; then \\\n\t  echo \"ERROR: Coverage $$coverage% is below 85% threshold\"; \\\n\t  exit 1; \\\n\tfi\n\t@echo \"Run 'go tool cover -html=coverage.out' to view in browser\""
+        },
+        {
+          "role": "know-it-all",
+          "risk": "info",
+          "detail": "The `make test` target runs tests with race detector but no coverage, while `make coverage` duplicates the exact same test command with coverage added. This creates maintenance burden (two places to update test flags) and users may run `make test` expecting it to catch coverage regressions when it doesn't. Consider either: (1) always running coverage in the test target, or (2) having coverage depend on test to avoid duplication, or (3) clearly documenting the difference.",
+          "code_example": "# Current (duplicated logic):\ntest:\n\tgo test ./... -race -count=1\n\ncoverage:\n\tgo test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1\n\n# Option 1 (test always includes coverage):\ntest:\n\tgo test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1\n\n# Option 2 (coverage reuses test):\nTEST_FLAGS := -race -count=1\ntest:\n\tgo test ./... $(TEST_FLAGS)\n\ncoverage:\n\tgo test ./... $(TEST_FLAGS) -coverprofile=coverage.out -covermode=atomic"
+        }
+      ]
+    },
+    {
+      "file": "Makefile",
+      "line": 29,
+      "risk": "info",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "clean target uses rm -rf on results/ without confirmation",
+      "detail": "The `clean` target runs `rm -rf results/`. This is a relative path, which is standard for Makefiles, but worth noting that if someone runs `make clean` from an unexpected working directory, it could delete an unrelated `results/` directory. This is extremely low risk for a developer tool, but documenting the expected working directory in a comment is good hygiene.",
+      "code_example": "# Acceptable as-is for a developer tool. Optionally guard:\nclean:\n\trm -f whetstone coverage.out\n\t@[ -d results/ ] \u0026\u0026 rm -rf results/ || true",
+      "role": "architect",
+      "vote_count": 2,
+      "total_agents": 7,
+      "voters": [
+        "architect",
+        "sentinel"
+      ],
+      "agent_details": [
+        {
+          "role": "architect",
+          "risk": "info",
+          "detail": "The `make clean` target runs `rm -rf results/`. While this is a standard Makefile pattern, the `results/` directory may contain report output the user hasn't saved elsewhere. Consider adding a comment or making the clean more targeted (e.g., only remove `whetstone` and `coverage.out` by default, with a separate `make distclean` for results)."
+        },
+        {
+          "role": "sentinel",
+          "risk": "info",
+          "detail": "The `clean` target runs `rm -rf results/`. This is a relative path, which is standard for Makefiles, but worth noting that if someone runs `make clean` from an unexpected working directory, it could delete an unrelated `results/` directory. This is extremely low risk for a developer tool, but documenting the expected working directory in a comment is good hygiene.",
+          "code_example": "# Acceptable as-is for a developer tool. Optionally guard:\nclean:\n\trm -f whetstone coverage.out\n\t@[ -d results/ ] \u0026\u0026 rm -rf results/ || true"
+        }
+      ]
+    },
+    {
+      "file": "internal/parser/parser_test.go",
+      "line": 88,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "TestParseFile_Skill doesn't verify Body or frontmatter parsing completeness",
+      "detail": "The test only checks Name and RawTitle but doesn't verify that Body, H2Sections, frontmatter, or feature flags are correctly populated. If ParseFile has a regression that breaks body parsing or frontmatter extraction, this test won't catch it. Should verify at least the presence of expected sections and frontmatter keys.",
+      "code_example": "// Add invalid YAML test:\nfunc TestParseFile_MalformedFrontmatter(t *testing.T) {\n\tdir := t.TempDir()\n\tcontent := `---\nname: test\ndescription: \"unclosed string\n---\n# /test\n`\n\tpath := writeTestFile(t, dir, \"test.md\", content)\n\t_, err := ParseFile(path)\n\tif err == nil {\n\t\tt.Error(\"ParseFile should error on malformed YAML\")\n\t}\n}",
+      "role": "test-engineer",
+      "vote_count": 2,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer",
+        "test-engineer"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "The test only checks Name and RawTitle but doesn't verify that Body, H2Sections, frontmatter, or feature flags are correctly populated. If ParseFile has a regression that breaks body parsing or frontmatter extraction, this test won't catch it. Should verify at least the presence of expected sections and frontmatter keys.",
+          "code_example": "// Add to TestParseFile_Skill:\nif s.Body == \"\" {\n\tt.Error(\"Body should be populated\")\n}\nif len(s.H2Sections) != 3 {\n\tt.Errorf(\"H2Sections count = %d, want 3\", len(s.H2Sections))\n}\nif s.Frontmatter[\"name\"] != \"deploy\" {\n\tt.Error(\"Frontmatter parsing failed\")\n}"
+        },
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "The test uses well-formed frontmatter. No tests cover: (1) YAML syntax errors (unclosed strings, invalid indentation), (2) missing required keys (name, description), (3) unexpected value types (e.g., allowed-tools as array instead of string). If frontmatter parsing is fragile, these tests won't catch regressions.",
+          "code_example": "// Add invalid YAML test:\nfunc TestParseFile_MalformedFrontmatter(t *testing.T) {\n\tdir := t.TempDir()\n\tcontent := `---\nname: test\ndescription: \"unclosed string\n---\n# /test\n`\n\tpath := writeTestFile(t, dir, \"test.md\", content)\n\t_, err := ParseFile(path)\n\tif err == nil {\n\t\tt.Error(\"ParseFile should error on malformed YAML\")\n\t}\n}"
+        }
+      ]
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 73,
+      "risk": "warning",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.8,
+      "summary": "Security tools pinned to @latest — builds are non-reproducible",
+      "detail": "Both `gosec` and `govulncheck` are installed via `go install ...@latest`. This means every CI run can pick up a different version, leading to non-reproducible results — a passing build today may fail tomorrow due to a new rule in gosec, with no code change. Pin to specific versions for reproducibility. The lint job already does this correctly with `version: v2.1.6`.",
+      "code_example": "- name: Install gosec\n- run: go install github.com/securego/gosec/v2/cmd/gosec@latest\n+ run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0\n\n- name: Install govulncheck\n- run: go install golang.org/x/vuln/cmd/govulncheck@latest\n+ run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4",
+      "role": "architect",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "architect"
+      ],
+      "agent_details": [
+        {
+          "role": "architect",
+          "risk": "warning",
+          "detail": "Both `gosec` and `govulncheck` are installed via `go install ...@latest`. This means every CI run can pick up a different version, leading to non-reproducible results — a passing build today may fail tomorrow due to a new rule in gosec, with no code change. Pin to specific versions for reproducibility. The lint job already does this correctly with `version: v2.1.6`.",
+          "code_example": "- name: Install gosec\n- run: go install github.com/securego/gosec/v2/cmd/gosec@latest\n+ run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0\n\n- name: Install govulncheck\n- run: go install golang.org/x/vuln/cmd/govulncheck@latest\n+ run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4"
+        }
+      ]
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 73,
+      "risk": "warning",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.85,
+      "summary": "gosec and govulncheck installed with @latest — should pin versions",
+      "detail": "The CI security job installs `gosec@latest` and `govulncheck@latest`. Using `@latest` means every CI run could pull a different version, which introduces two risks: (1) supply chain — a compromised latest version would be automatically pulled; (2) reproducibility — a new version could change behavior, causing false positives/negatives or breaking the build unpredictably. Pin to specific versions for deterministic, auditable builds.",
+      "code_example": "# Before:\n- name: Install gosec\n  run: go install github.com/securego/gosec/v2/cmd/gosec@latest\n\n# After (pin to known-good version):\n- name: Install gosec\n  run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0\n\n- name: Install govulncheck\n  run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4",
+      "role": "sentinel",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "sentinel"
+      ],
+      "agent_details": [
+        {
+          "role": "sentinel",
+          "risk": "warning",
+          "detail": "The CI security job installs `gosec@latest` and `govulncheck@latest`. Using `@latest` means every CI run could pull a different version, which introduces two risks: (1) supply chain — a compromised latest version would be automatically pulled; (2) reproducibility — a new version could change behavior, causing false positives/negatives or breaking the build unpredictably. Pin to specific versions for deterministic, auditable builds.",
+          "code_example": "# Before:\n- name: Install gosec\n  run: go install github.com/securego/gosec/v2/cmd/gosec@latest\n\n# After (pin to known-good version):\n- name: Install gosec\n  run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0\n\n- name: Install govulncheck\n  run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4"
+        }
+      ]
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 151,
+      "risk": "warning",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.75,
+      "summary": "TestRunRate_TextOutput and TestRunRate_JSONStdout do not verify output content",
+      "detail": "These tests execute runRate but don't assert anything about the output. They only check for nil errors. This means they would pass even if the output were completely wrong, malformed, or empty. They should at minimum verify that stdout/stderr contains expected markers (skill name, score, grade) or validate the output format matches expectations.",
+      "code_example": "// Before: just checking for error\nerr := runRate([]string{\"--dir\", dir, \"--format\", \"text\"})\nif err != nil {\n\tt.Fatalf(\"runRate text: %v\", err)\n}\n\n// After: capture and verify output\nold := os.Stdout\nr, w, _ := os.Pipe()\nos.Stdout = w\nerr := runRate([]string{\"--dir\", dir, \"--format\", \"text\"})\nw.Close()\nos.Stdout = old\noutput, _ := ioutil.ReadAll(r)\nif !strings.Contains(string(output), \"test\") || !strings.Contains(string(output), \"Whetstone Report\") {\n\tt.Error(\"output missing expected text content\")\n}",
+      "role": "test-engineer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "warning",
+          "detail": "These tests execute runRate but don't assert anything about the output. They only check for nil errors. This means they would pass even if the output were completely wrong, malformed, or empty. They should at minimum verify that stdout/stderr contains expected markers (skill name, score, grade) or validate the output format matches expectations.",
+          "code_example": "// Before: just checking for error\nerr := runRate([]string{\"--dir\", dir, \"--format\", \"text\"})\nif err != nil {\n\tt.Fatalf(\"runRate text: %v\", err)\n}\n\n// After: capture and verify output\nold := os.Stdout\nr, w, _ := os.Pipe()\nos.Stdout = w\nerr := runRate([]string{\"--dir\", dir, \"--format\", \"text\"})\nw.Close()\nos.Stdout = old\noutput, _ := ioutil.ReadAll(r)\nif !strings.Contains(string(output), \"test\") || !strings.Contains(string(output), \"Whetstone Report\") {\n\tt.Error(\"output missing expected text content\")\n}"
+        }
+      ]
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 1,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.75,
+      "summary": "CI workflow lacks concurrency control — could waste resources on rapid pushes",
+      "detail": "The CI workflow does not set a `concurrency` group, so pushing multiple commits in quick succession will run all of them in parallel rather than cancelling superseded runs. While not a security vulnerability, this is a CI best practice that also prevents potential race conditions in artifact uploads if the same artifact name is reused across concurrent runs.",
+      "code_example": "# Add after the 'permissions' block:\nconcurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\n  cancel-in-progress: true",
+      "role": "sentinel",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "sentinel"
+      ],
+      "agent_details": [
+        {
+          "role": "sentinel",
+          "risk": "info",
+          "detail": "The CI workflow does not set a `concurrency` group, so pushing multiple commits in quick succession will run all of them in parallel rather than cancelling superseded runs. While not a security vulnerability, this is a CI best practice that also prevents potential race conditions in artifact uploads if the same artifact name is reused across concurrent runs.",
+          "code_example": "# Add after the 'permissions' block:\nconcurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\n  cancel-in-progress: true"
+        }
+      ]
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 54,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "CI test job doesn't fail on coverage threshold breach",
+      "detail": "The test job runs coverage and prints a summary but doesn't enforce the 85% coverage target mentioned in the PR description. If coverage drops below 85%, the job still passes. CI should gate on coverage targets via `go test -coverprofile` with a validation step (e.g., using `gocover-cobertura` or custom check).",
+      "code_example": "# Add coverage validation:\n- name: Check coverage threshold\n  run: |\n    coverage=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | sed 's/%//')\n    if (( $(echo \"$coverage \u003c 85\" | bc -l) )); then\n      echo \"Coverage ${coverage}% is below 85% threshold\"\n      exit 1\n    fi",
+      "role": "test-engineer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "The test job runs coverage and prints a summary but doesn't enforce the 85% coverage target mentioned in the PR description. If coverage drops below 85%, the job still passes. CI should gate on coverage targets via `go test -coverprofile` with a validation step (e.g., using `gocover-cobertura` or custom check).",
+          "code_example": "# Add coverage validation:\n- name: Check coverage threshold\n  run: |\n    coverage=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | sed 's/%//')\n    if (( $(echo \"$coverage \u003c 85\" | bc -l) )); then\n      echo \"Coverage ${coverage}% is below 85% threshold\"\n      exit 1\n    fi"
+        }
+      ]
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 60,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "Coverage artifact uploaded without retention limit",
+      "detail": "The `actions/upload-artifact@v4` step uploads `coverage.out` without specifying `retention-days`. The default is 90 days. For coverage data this is low-risk, but it's good practice to set explicit retention to avoid accumulating stale artifacts. Not a security issue per se, but aligns with the principle of minimizing stored data.",
+      "code_example": "- name: Upload coverage artifact\n  uses: actions/upload-artifact@v4\n  with:\n    name: coverage\n    path: coverage.out\n    retention-days: 14",
+      "role": "sentinel",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "sentinel"
+      ],
+      "agent_details": [
+        {
+          "role": "sentinel",
+          "risk": "info",
+          "detail": "The `actions/upload-artifact@v4` step uploads `coverage.out` without specifying `retention-days`. The default is 90 days. For coverage data this is low-risk, but it's good practice to set explicit retention to avoid accumulating stale artifacts. Not a security issue per se, but aligns with the principle of minimizing stored data.",
+          "code_example": "- name: Upload coverage artifact\n  uses: actions/upload-artifact@v4\n  with:\n    name: coverage\n    path: coverage.out\n    retention-days: 14"
+        }
+      ]
+    },
+    {
+      "file": "BACKLOG.md",
+      "risk": "info",
+      "category": "design",
+      "scope": "changed",
+      "confidence": 0.65,
+      "summary": "Backlog document committed to mainline — consider using GitHub Issues instead",
+      "detail": "A 178-line BACKLOG.md with detailed feature specs is being committed to the repository. This creates a maintenance burden: the document will drift from reality as features are built, partially built, or re-scoped. GitHub Issues or a project board would provide better tracking (status, assignment, discussion threads, cross-references to PRs). If the team prefers in-repo planning, a lighter `TODO.md` with one-liners linking to issues would age better than detailed specs.",
+      "role": "architect",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "architect"
+      ],
+      "agent_details": [
+        {
+          "role": "architect",
+          "risk": "info",
+          "detail": "A 178-line BACKLOG.md with detailed feature specs is being committed to the repository. This creates a maintenance burden: the document will drift from reality as features are built, partially built, or re-scoped. GitHub Issues or a project board would provide better tracking (status, assignment, discussion threads, cross-references to PRs). If the team prefers in-repo planning, a lighter `TODO.md` with one-liners linking to issues would age better than detailed specs."
+        }
+      ]
+    },
+    {
+      "file": "Makefile",
+      "line": 18,
+      "risk": "info",
+      "category": "style",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "Help text comment placement is slightly awkward",
+      "detail": "The `@echo` command that prints the 'go tool cover' command appears after the actual coverage command runs. This is fine functionally, but users might expect the help text earlier in the output. Consider printing it before running the coverage command for better UX, or moving it to a separate help target. This is a minor readability issue, not a functional problem.",
+      "role": "editor",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "editor"
+      ],
+      "agent_details": [
+        {
+          "role": "editor",
+          "risk": "info",
+          "detail": "The `@echo` command that prints the 'go tool cover' command appears after the actual coverage command runs. This is fine functionally, but users might expect the help text earlier in the output. Consider printing it before running the coverage command for better UX, or moving it to a separate help target. This is a minor readability issue, not a functional problem."
+        }
+      ]
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 13,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "Test files created with 0o600 permissions unnecessarily restrictive",
+      "detail": "Test helper writeTestSkill creates files with 0o600 (owner read/write only). For test files in temporary directories that are automatically cleaned up, this is overly cautious. Standard 0o644 is conventional for test fixtures and makes debugging easier (other users/processes can read the temp files if needed). This is very minor since t.TempDir() is already isolated, but worth noting for consistency.",
+      "code_example": "// Before:\nos.WriteFile(path, []byte(content), 0o600)\n\n// After (conventional for tests):\nos.WriteFile(path, []byte(content), 0o644)",
+      "role": "optimizer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "optimizer"
+      ],
+      "agent_details": [
+        {
+          "role": "optimizer",
+          "risk": "info",
+          "detail": "Test helper writeTestSkill creates files with 0o600 (owner read/write only). For test files in temporary directories that are automatically cleaned up, this is overly cautious. Standard 0o644 is conventional for test fixtures and makes debugging easier (other users/processes can read the temp files if needed). This is very minor since t.TempDir() is already isolated, but worth noting for consistency.",
+          "code_example": "// Before:\nos.WriteFile(path, []byte(content), 0o600)\n\n// After (conventional for tests):\nos.WriteFile(path, []byte(content), 0o644)"
+        }
+      ]
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 13,
+      "risk": "info",
+      "category": "style",
+      "scope": "changed",
+      "confidence": 0.8,
+      "summary": "File permission 0o600 is overly restrictive for test files",
+      "detail": "Test files are written with mode 0o600 (owner read/write only). Since these are temporary test files in t.TempDir(), the restrictive permissions are unnecessary and may cause issues on some systems or when debugging tests. The standard 0o644 (owner read/write, group/others read) is more conventional for test fixtures and makes it easier to inspect test artifacts when debugging.",
+      "code_example": "// Current:\nif err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {\n\n// More conventional for test files:\nif err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {",
+      "role": "know-it-all",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "know-it-all"
+      ],
+      "agent_details": [
+        {
+          "role": "know-it-all",
+          "risk": "info",
+          "detail": "Test files are written with mode 0o600 (owner read/write only). Since these are temporary test files in t.TempDir(), the restrictive permissions are unnecessary and may cause issues on some systems or when debugging tests. The standard 0o644 (owner read/write, group/others read) is more conventional for test fixtures and makes it easier to inspect test artifacts when debugging.",
+          "code_example": "// Current:\nif err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {\n\n// More conventional for test files:\nif err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {"
+        }
+      ]
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 106,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "TestParseRateArgs tests lack coverage of error cases and edge cases",
+      "detail": "The test only covers happy path argument parsing and one error case (unknown flag). Missing coverage: (1) positional args mixed with flags in various orders, (2) duplicate flags (should last one win or error?), (3) invalid flag values (e.g., --profile with invalid value), (4) multiple positional args when only one expected. While TestParseRateArgs_UnknownFlag exists, the main test should document behavior for common edge cases.",
+      "code_example": "// Add to TestParseRateArgs test cases:\n{\n\tname:    \"duplicate flags last wins\",\n\targs:    []string{\"--format\", \"json\", \"--format\", \"html\"},\n\tcheck: func(o *options) string {\n\t\tif o.format != \"html\" {\n\t\t\treturn \"last format flag should win\"\n\t\t}\n\t\treturn \"\"\n\t},\n}",
+      "role": "test-engineer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "The test only covers happy path argument parsing and one error case (unknown flag). Missing coverage: (1) positional args mixed with flags in various orders, (2) duplicate flags (should last one win or error?), (3) invalid flag values (e.g., --profile with invalid value), (4) multiple positional args when only one expected. While TestParseRateArgs_UnknownFlag exists, the main test should document behavior for common edge cases.",
+          "code_example": "// Add to TestParseRateArgs test cases:\n{\n\tname:    \"duplicate flags last wins\",\n\targs:    []string{\"--format\", \"json\", \"--format\", \"html\"},\n\tcheck: func(o *options) string {\n\t\tif o.format != \"html\" {\n\t\t\treturn \"last format flag should win\"\n\t\t}\n\t\treturn \"\"\n\t},\n}"
+        }
+      ]
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 198,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.65,
+      "summary": "TestRunRate_HTMLFile and TestRunRate_MDFile only check for basic HTML/MD markers",
+      "detail": "These tests verify that output files contain \u003c!DOCTYPE html\u003e and # Whetstone Report, but don't validate actual report structure or content. A file could contain these strings yet be completely broken (malformed JSON in HTML, invalid Markdown syntax, missing required sections). Consider parsing and validating the actual structure.",
+      "code_example": "// Before: minimal check\nif !strings.Contains(string(data), \"\u003c!DOCTYPE html\u003e\") {\n\tt.Error(\"HTML file should contain DOCTYPE\")\n}\n\n// After: validate structure\nvar doc *html.Node\ndoc, err := html.Parse(strings.NewReader(string(data)))\nif err != nil {\n\tt.Fatalf(\"HTML parse error: %v\", err)\n}\n// Verify required elements exist (e.g., h1, result cards, etc.)",
+      "role": "test-engineer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "These tests verify that output files contain \u003c!DOCTYPE html\u003e and # Whetstone Report, but don't validate actual report structure or content. A file could contain these strings yet be completely broken (malformed JSON in HTML, invalid Markdown syntax, missing required sections). Consider parsing and validating the actual structure.",
+          "code_example": "// Before: minimal check\nif !strings.Contains(string(data), \"\u003c!DOCTYPE html\u003e\") {\n\tt.Error(\"HTML file should contain DOCTYPE\")\n}\n\n// After: validate structure\nvar doc *html.Node\ndoc, err := html.Parse(strings.NewReader(string(data)))\nif err != nil {\n\tt.Fatalf(\"HTML parse error: %v\", err)\n}\n// Verify required elements exist (e.g., h1, result cards, etc.)"
+        }
+      ]
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 76,
+      "risk": "info",
+      "category": "style",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "Gosec directive could be more specific about the security justification",
+      "detail": "The `#nosec G304` comment correctly identifies that `os.ReadFile` is safe here since the path comes from CLI input, not untrusted web sources. However, the comment could be slightly clearer by noting that `filepath.Clean` already mitigates directory traversal attacks. The current justification is sound but could be more explicit.",
+      "code_example": "// Current:\ndata, err := os.ReadFile(cleanPath) // #nosec G304 -- path is user-provided CLI input, not untrusted web input\n\n// More explicit:\ndata, err := os.ReadFile(cleanPath) // #nosec G304 -- user-provided CLI input after filepath.Clean; no directory traversal risk",
+      "role": "editor",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "editor"
+      ],
+      "agent_details": [
+        {
+          "role": "editor",
+          "risk": "info",
+          "detail": "The `#nosec G304` comment correctly identifies that `os.ReadFile` is safe here since the path comes from CLI input, not untrusted web sources. However, the comment could be slightly clearer by noting that `filepath.Clean` already mitigates directory traversal attacks. The current justification is sound but could be more explicit.",
+          "code_example": "// Current:\ndata, err := os.ReadFile(cleanPath) // #nosec G304 -- path is user-provided CLI input, not untrusted web input\n\n// More explicit:\ndata, err := os.ReadFile(cleanPath) // #nosec G304 -- user-provided CLI input after filepath.Clean; no directory traversal risk"
+        }
+      ]
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 76,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "filepath.Clean alone doesn't prevent path traversal attacks",
+      "detail": "While filepath.Clean normalizes the path, it doesn't prevent reading arbitrary files via path traversal (e.g., `../../../etc/passwd`). The #nosec comment justifies this as 'user-provided CLI input, not untrusted web input', which is reasonable for a CLI tool. However, if this tool is ever wrapped by a web service or used in an automated system with external input, this becomes a vulnerability. For a CLI tool where the user controls input directly, this is acceptable. Consider documenting this assumption if the tool's threat model changes.",
+      "code_example": "// Current approach (acceptable for CLI):\ncleanPath := filepath.Clean(path)\ndata, err := os.ReadFile(cleanPath) // #nosec G304\n\n// If ever exposed to untrusted input, validate:\nif strings.Contains(cleanPath, \"..\") {\n    return nil, fmt.Errorf(\"path traversal not allowed\")\n}",
+      "role": "know-it-all",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "know-it-all"
+      ],
+      "agent_details": [
+        {
+          "role": "know-it-all",
+          "risk": "info",
+          "detail": "While filepath.Clean normalizes the path, it doesn't prevent reading arbitrary files via path traversal (e.g., `../../../etc/passwd`). The #nosec comment justifies this as 'user-provided CLI input, not untrusted web input', which is reasonable for a CLI tool. However, if this tool is ever wrapped by a web service or used in an automated system with external input, this becomes a vulnerability. For a CLI tool where the user controls input directly, this is acceptable. Consider documenting this assumption if the tool's threat model changes.",
+          "code_example": "// Current approach (acceptable for CLI):\ncleanPath := filepath.Clean(path)\ndata, err := os.ReadFile(cleanPath) // #nosec G304\n\n// If ever exposed to untrusted input, validate:\nif strings.Contains(cleanPath, \"..\") {\n    return nil, fmt.Errorf(\"path traversal not allowed\")\n}"
+        }
+      ]
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 76,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.7,
+      "summary": "#nosec annotation masks the finding rather than addressing it",
+      "detail": "The `filepath.Clean(path)` call before `os.ReadFile` does normalize the path, but it doesn't prevent path traversal — `filepath.Clean(\"../../etc/passwd\")` still returns `../../etc/passwd`. The `#nosec G304` annotation suppresses gosec's warning without truly mitigating the risk. For a CLI tool where the user provides the path, this is acceptable (the user already has filesystem access), but the comment should reflect that rationale more precisely. The current comment says 'path is user-provided CLI input, not untrusted web input' which is the correct reasoning — just noting that `filepath.Clean` doesn't add security here, only tidiness.",
+      "role": "architect",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "architect"
+      ],
+      "agent_details": [
+        {
+          "role": "architect",
+          "risk": "info",
+          "detail": "The `filepath.Clean(path)` call before `os.ReadFile` does normalize the path, but it doesn't prevent path traversal — `filepath.Clean(\"../../etc/passwd\")` still returns `../../etc/passwd`. The `#nosec G304` annotation suppresses gosec's warning without truly mitigating the risk. For a CLI tool where the user provides the path, this is acceptable (the user already has filesystem access), but the comment should reflect that rationale more precisely. The current comment says 'path is user-provided CLI input, not untrusted web input' which is the correct reasoning — just noting that `filepath.Clean` doesn't add security here, only tidiness."
+        }
+      ]
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 76,
+      "risk": "info",
+      "category": "security",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "#nosec G304 suppression is reasonable but could be documented better",
+      "detail": "The `#nosec G304` annotation on `os.ReadFile(cleanPath)` is acceptable for a CLI tool where the path comes from command-line arguments (not web input). The `filepath.Clean()` addition is a good hardening step. However, the comment says 'path is user-provided CLI input, not untrusted web input' — this is the correct reasoning, but note that `filepath.Clean` alone does not prevent path traversal (e.g., `filepath.Clean(\"../../etc/passwd\")` still resolves upward). Since this is a local CLI tool that intentionally reads user-specified files, this is fine, but if this function is ever reused in a server context, it would need prefix validation.",
+      "code_example": "// Current (acceptable for CLI):\ncleanPath := filepath.Clean(path)\ndata, err := os.ReadFile(cleanPath)\n\n// If ever used in a server context, add:\nif !strings.HasPrefix(cleanPath, allowedBaseDir) {\n    return nil, fmt.Errorf(\"path outside allowed directory\")\n}",
+      "role": "sentinel",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "sentinel"
+      ],
+      "agent_details": [
+        {
+          "role": "sentinel",
+          "risk": "info",
+          "detail": "The `#nosec G304` annotation on `os.ReadFile(cleanPath)` is acceptable for a CLI tool where the path comes from command-line arguments (not web input). The `filepath.Clean()` addition is a good hardening step. However, the comment says 'path is user-provided CLI input, not untrusted web input' — this is the correct reasoning, but note that `filepath.Clean` alone does not prevent path traversal (e.g., `filepath.Clean(\"../../etc/passwd\")` still resolves upward). Since this is a local CLI tool that intentionally reads user-specified files, this is fine, but if this function is ever reused in a server context, it would need prefix validation.",
+          "code_example": "// Current (acceptable for CLI):\ncleanPath := filepath.Clean(path)\ndata, err := os.ReadFile(cleanPath)\n\n// If ever used in a server context, add:\nif !strings.HasPrefix(cleanPath, allowedBaseDir) {\n    return nil, fmt.Errorf(\"path outside allowed directory\")\n}"
+        }
+      ]
+    },
+    {
+      "file": "internal/parser/parser.go",
+      "line": 77,
+      "risk": "info",
+      "category": "performance",
+      "scope": "changed",
+      "confidence": 0.5,
+      "summary": "filepath.Clean() call adds unnecessary allocation on hot path",
+      "detail": "The added filepath.Clean(path) creates a new string allocation on every ParseFile call. For CLI tools processing dozens of files, this is negligible, but it's unnecessary work since the #nosec comment justifies the G304 warning sufficiently without the Clean() call. The user-provided CLI path is already validated by the OS when opening the file—if it's malicious, os.ReadFile will fail safely. That said, the performance cost is tiny (~50ns per call), so this is a very low-priority observation.",
+      "code_example": "// The Clean() doesn't add security value since:\n// 1. This is CLI input, not web input\n// 2. os.ReadFile will fail safely on invalid paths\n// 3. The #nosec comment already documents the safety\n\n// Current (adds allocation):\ncleanPath := filepath.Clean(path)\ndata, err := os.ReadFile(cleanPath)\n\n// Alternative (no allocation):\ndata, err := os.ReadFile(path) // #nosec G304 -- CLI input, not web",
+      "role": "optimizer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "optimizer"
+      ],
+      "agent_details": [
+        {
+          "role": "optimizer",
+          "risk": "info",
+          "detail": "The added filepath.Clean(path) creates a new string allocation on every ParseFile call. For CLI tools processing dozens of files, this is negligible, but it's unnecessary work since the #nosec comment justifies the G304 warning sufficiently without the Clean() call. The user-provided CLI path is already validated by the OS when opening the file—if it's malicious, os.ReadFile will fail safely. That said, the performance cost is tiny (~50ns per call), so this is a very low-priority observation.",
+          "code_example": "// The Clean() doesn't add security value since:\n// 1. This is CLI input, not web input\n// 2. os.ReadFile will fail safely on invalid paths\n// 3. The #nosec comment already documents the safety\n\n// Current (adds allocation):\ncleanPath := filepath.Clean(path)\ndata, err := os.ReadFile(cleanPath)\n\n// Alternative (no allocation):\ndata, err := os.ReadFile(path) // #nosec G304 -- CLI input, not web"
+        }
+      ]
+    },
+    {
+      "file": "internal/parser/parser_test.go",
+      "line": 281,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.55,
+      "summary": "TestParseFile_NotFound doesn't distinguish between different error types",
+      "detail": "The test checks that ParseFile returns an error for a nonexistent file, but doesn't verify it's actually a file-not-found error (vs. permission denied, invalid path, etc.). This is a weak assertion—any error passes. Consider checking the error message or type.",
+      "code_example": "// Before:\nif err == nil {\n\tt.Error(\"ParseFile on nonexistent file should return error\")\n}\n\n// After:\nif err == nil {\n\tt.Fatal(\"ParseFile on nonexistent file should return error\")\n}\nif !strings.Contains(err.Error(), \"no such file\") \u0026\u0026 !os.IsNotExist(err) {\n\tt.Errorf(\"wrong error type: %v\", err)\n}",
+      "role": "test-engineer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "The test checks that ParseFile returns an error for a nonexistent file, but doesn't verify it's actually a file-not-found error (vs. permission denied, invalid path, etc.). This is a weak assertion—any error passes. Consider checking the error message or type.",
+          "code_example": "// Before:\nif err == nil {\n\tt.Error(\"ParseFile on nonexistent file should return error\")\n}\n\n// After:\nif err == nil {\n\tt.Fatal(\"ParseFile on nonexistent file should return error\")\n}\nif !strings.Contains(err.Error(), \"no such file\") \u0026\u0026 !os.IsNotExist(err) {\n\tt.Errorf(\"wrong error type: %v\", err)\n}"
+        }
+      ]
+    },
+    {
+      "file": "internal/report/report.go",
+      "line": 26,
+      "risk": "info",
+      "category": "style",
+      "scope": "changed",
+      "confidence": 0.9,
+      "summary": "Mixed string concatenation and fmt.Fprintf reduces consistency",
+      "detail": "The refactor changes some WriteString(fmt.Sprintf(...)) calls to fmt.Fprintf(\u0026b, ...) which is more idiomatic and efficient. However, the refactor is incomplete — some calls still use b.WriteString() for literal strings while others use fmt.Fprintf. For consistency, either use fmt.Fprintf for all formatted output and b.WriteString for literals, or choose one approach throughout. The current mix is harder to scan visually.",
+      "code_example": "// Inconsistent (current state):\nb.WriteString(\"Whetstone Report\\n\")\nfmt.Fprintf(\u0026b, \"Directory: %s\\n\", d.Dir)\nb.WriteString(strings.Repeat(\"─\", 70) + \"\\n\\n\")\n\n// Consistent option 1 (fmt.Fprintf for all formatted):\nfmt.Fprintf(\u0026b, \"Whetstone Report\\n\")\nfmt.Fprintf(\u0026b, \"Directory: %s\\n\", d.Dir)\nfmt.Fprintf(\u0026b, \"%s\\n\\n\", strings.Repeat(\"─\", 70))\n\n// Consistent option 2 (WriteString + fmt.Sprintf when needed):\nb.WriteString(\"Whetstone Report\\n\")\nb.WriteString(fmt.Sprintf(\"Directory: %s\\n\", d.Dir))",
+      "role": "know-it-all",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "know-it-all"
+      ],
+      "agent_details": [
+        {
+          "role": "know-it-all",
+          "risk": "info",
+          "detail": "The refactor changes some WriteString(fmt.Sprintf(...)) calls to fmt.Fprintf(\u0026b, ...) which is more idiomatic and efficient. However, the refactor is incomplete — some calls still use b.WriteString() for literal strings while others use fmt.Fprintf. For consistency, either use fmt.Fprintf for all formatted output and b.WriteString for literals, or choose one approach throughout. The current mix is harder to scan visually.",
+          "code_example": "// Inconsistent (current state):\nb.WriteString(\"Whetstone Report\\n\")\nfmt.Fprintf(\u0026b, \"Directory: %s\\n\", d.Dir)\nb.WriteString(strings.Repeat(\"─\", 70) + \"\\n\\n\")\n\n// Consistent option 1 (fmt.Fprintf for all formatted):\nfmt.Fprintf(\u0026b, \"Whetstone Report\\n\")\nfmt.Fprintf(\u0026b, \"Directory: %s\\n\", d.Dir)\nfmt.Fprintf(\u0026b, \"%s\\n\\n\", strings.Repeat(\"─\", 70))\n\n// Consistent option 2 (WriteString + fmt.Sprintf when needed):\nb.WriteString(\"Whetstone Report\\n\")\nb.WriteString(fmt.Sprintf(\"Directory: %s\\n\", d.Dir))"
+        }
+      ]
+    },
+    {
+      "file": "internal/report/report_test.go",
+      "line": 64,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.65,
+      "summary": "TestText doesn't verify text formatting correctness (order, alignment, spacing)",
+      "detail": "The test only checks that certain strings appear in the output but doesn't verify the order (e.g., header before skills, summary before details), alignment (e.g., score bars are consistent width), or spacing (e.g., no double-newlines). A regression that scrambles output order or breaks formatting would pass this test.",
+      "code_example": "// Add order validation:\ndeployIdx := strings.Index(output, \"/deploy\")\narchitectIdx := strings.Index(output, \"/architect\")\nif deployIdx \u003e architectIdx {\n\tt.Error(\"deploy should appear before architect in output\")\n}\nif deployIdx \u003c strings.Index(output, \"Average score\") {\n\tt.Error(\"skills should appear after summary\")\n}",
+      "role": "test-engineer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "The test only checks that certain strings appear in the output but doesn't verify the order (e.g., header before skills, summary before details), alignment (e.g., score bars are consistent width), or spacing (e.g., no double-newlines). A regression that scrambles output order or breaks formatting would pass this test.",
+          "code_example": "// Add order validation:\ndeployIdx := strings.Index(output, \"/deploy\")\narchitectIdx := strings.Index(output, \"/architect\")\nif deployIdx \u003e architectIdx {\n\tt.Error(\"deploy should appear before architect in output\")\n}\nif deployIdx \u003c strings.Index(output, \"Average score\") {\n\tt.Error(\"skills should appear after summary\")\n}"
+        }
+      ]
+    },
+    {
+      "file": "internal/scorer/scorer_test.go",
+      "line": 84,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.6,
+      "summary": "TestScore_SkillProfile makes weak assertions on grade and score",
+      "detail": "The test only checks that Grade is \"A\" or \"B\" and TotalScore \u003e= 70. This is too loose—a skill could score 70 (D or low C) and still pass. More importantly, the test doesn't verify that specific dimensions are scored correctly or that the weighted scoring logic works. It's a smoke test, not a real validation.",
+      "code_example": "// More specific assertions:\nif r.Grade != \"A\" {\n\tt.Errorf(\"Grade = %q, want A for well-formed skill\", r.Grade)\n}\nif r.TotalScore \u003c 85 {\n\tt.Errorf(\"TotalScore = %.1f, expected \u003e= 85 for well-formed skill\", r.TotalScore)\n}\n// Verify expected dimensions have non-zero scores:\nfor _, d := range r.Dimensions {\n\tif d.Name == \"Purpose\" \u0026\u0026 d.Score == 0 {\n\t\tt.Error(\"Purpose dimension should be scored for a skill with clear intent\")\n\t}\n}",
+      "role": "test-engineer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "The test only checks that Grade is \"A\" or \"B\" and TotalScore \u003e= 70. This is too loose—a skill could score 70 (D or low C) and still pass. More importantly, the test doesn't verify that specific dimensions are scored correctly or that the weighted scoring logic works. It's a smoke test, not a real validation.",
+          "code_example": "// More specific assertions:\nif r.Grade != \"A\" {\n\tt.Errorf(\"Grade = %q, want A for well-formed skill\", r.Grade)\n}\nif r.TotalScore \u003c 85 {\n\tt.Errorf(\"TotalScore = %.1f, expected \u003e= 85 for well-formed skill\", r.TotalScore)\n}\n// Verify expected dimensions have non-zero scores:\nfor _, d := range r.Dimensions {\n\tif d.Name == \"Purpose\" \u0026\u0026 d.Score == 0 {\n\t\tt.Error(\"Purpose dimension should be scored for a skill with clear intent\")\n\t}\n}"
+        }
+      ]
+    },
+    {
+      "file": "internal/scorer/scorer_test.go",
+      "line": 113,
+      "risk": "info",
+      "category": "testing",
+      "scope": "changed",
+      "confidence": 0.5,
+      "summary": "TestScore_AutoDetect_* tests don't verify the detection logic reasoning",
+      "detail": "These tests only verify that auto-detection picks the right profile type. They don't test that the detection algorithm uses the right signals (e.g., counting feature flags, checking for role definitions). If the detector is changed to use incorrect heuristics but still happens to pick the right profile by accident, these tests won't catch it.",
+      "code_example": "// Consider testing the intermediate detection signals:\nfunc TestAutoDetectSignals(t *testing.T) {\n\ts := makeSkill()\n\tsignals := getAutoDetectSignals(s) // hypothetical helper\n\tif !signals.HasArguments || !signals.HasCommitSection {\n\t\tt.Error(\"skill detector should weight Process and Git commit\")\n\t}\n}",
+      "role": "test-engineer",
+      "vote_count": 1,
+      "total_agents": 7,
+      "voters": [
+        "test-engineer"
+      ],
+      "agent_details": [
+        {
+          "role": "test-engineer",
+          "risk": "info",
+          "detail": "These tests only verify that auto-detection picks the right profile type. They don't test that the detection algorithm uses the right signals (e.g., counting feature flags, checking for role definitions). If the detector is changed to use incorrect heuristics but still happens to pick the right profile by accident, these tests won't catch it.",
+          "code_example": "// Consider testing the intermediate detection signals:\nfunc TestAutoDetectSignals(t *testing.T) {\n\ts := makeSkill()\n\tsignals := getAutoDetectSignals(s) // hypothetical helper\n\tif !signals.HasArguments || !signals.HasCommitSection {\n\t\tt.Error(\"skill detector should weight Process and Git commit\")\n\t}\n}"
+        }
+      ]
+    }
+  ],
+  "suggestions": [
+    {
+      "file": "cmd/root.go",
+      "line": 87,
+      "body": "**[warning]** Uninitialized Profile variable will cause nil pointer dereference\n\nLine 87 declares `var profile scorer.Profile` without initialization. In Go, the zero value for a string is an empty string. When this empty string is later used (likely in a switch or comparison), it won't match any of the expected profile values like 'skill' or 'prompt', causing the code to potentially hit an unhandled case or panic. The original code initialized it to `scorer.ProfileAuto`, which should be restored or the variable should be given a sensible default.",
+      "role": "editor"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 55,
+      "body": "**[warning]** Test job runs without caching Go modules, slowing CI builds\n\nThe test job downloads all dependencies from scratch on every run. Go modules are fetched repeatedly even when go.mod/go.sum haven't changed. This adds 10-30 seconds per CI run unnecessarily. GitHub Actions provides built-in Go caching via actions/setup-go that should be enabled.",
+      "role": "optimizer"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 21,
+      "body": "**[warning]** Lint job runs without caching Go modules, slowing CI builds\n\nSimilar to the test job, the lint job downloads all dependencies from scratch. golangci-lint also benefits from Go module caching. This compounds the CI time waste since all 4 jobs run in parallel and each re-fetches the same dependencies.",
+      "role": "optimizer"
+    },
+    {
+      "file": "cmd/root_test.go",
+      "line": 151,
+      "body": "**[warning]** TestRunRate_TextOutput and TestRunRate_JSONStdout do not verify output content\n\nThese tests execute runRate but don't assert anything about the output. They only check for nil errors. This means they would pass even if the output were completely wrong, malformed, or empty. They should at minimum verify that stdout/stderr contains expected markers (skill name, score, grade) or validate the output format matches expectations.",
+      "role": "test-engineer"
+    },
+    {
+      "file": "cmd/root.go",
+      "line": 87,
+      "body": "**[warning]** Zero value Profile may not trigger auto-detection as intended\n\nThe code changed from `profile := scorer.ProfileAuto` to `var profile scorer.Profile` (zero value). If scorer.Profile is a string type, the zero value is \"\" not scorer.ProfileAuto. The switch statement may not handle the zero value correctly, potentially breaking the auto-detection flow. This depends on how Profile is defined and what ProfileAuto's actual value is. If Profile is a string and ProfileAuto = \"auto\", this change breaks auto-detection for users who don't specify --profile.",
+      "role": "know-it-all"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 22,
+      "body": "**[warning]** Go version pinned to non-existent 1.26 — CI will fail\n\nThe CI workflow and go.mod both reference Go 1.26, which does not exist as of April 2026 (the latest stable is Go 1.24.x). This will cause all four CI jobs to fail at the `setup-go` step. Additionally, the go.mod originally specified `go 1.23`, which is a real version — this change will break the build. If `go 1.26` is intentional (a pre-release or custom build), this should be documented; otherwise, pin to the actual Go version used for development.",
+      "role": "architect"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 73,
+      "body": "**[warning]** Security tools pinned to @latest — builds are non-reproducible\n\nBoth `gosec` and `govulncheck` are installed via `go install ...@latest`. This means every CI run can pick up a different version, leading to non-reproducible results — a passing build today may fail tomorrow due to a new rule in gosec, with no code change. Pin to specific versions for reproducibility. The lint job already does this correctly with `version: v2.1.6`.",
+      "role": "architect"
+    },
+    {
+      "file": "cmd/root.go",
+      "line": 87,
+      "body": "**[warning]** Zero-value Profile may silently change auto-detection behavior\n\nThe original code explicitly set `profile := scorer.ProfileAuto` before the switch statement. The change to `var profile scorer.Profile` relies on the zero value of the `Profile` type being equivalent to `ProfileAuto`. If `Profile` is a `string` type and `ProfileAuto` is a non-empty string constant (e.g., `\"auto\"`), the zero value (`\"\"`) won't match `ProfileAuto`, and the default case in the switch may behave differently. This is safe only if `ProfileAuto == \"\"` or if the switch has a default case that handles the zero value. Without seeing the full switch, this is a latent bug risk.",
+      "role": "architect"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 73,
+      "body": "**[warning]** gosec and govulncheck installed with @latest — should pin versions\n\nThe CI security job installs `gosec@latest` and `govulncheck@latest`. Using `@latest` means every CI run could pull a different version, which introduces two risks: (1) supply chain — a compromised latest version would be automatically pulled; (2) reproducibility — a new version could change behavior, causing false positives/negatives or breaking the build unpredictably. Pin to specific versions for deterministic, auditable builds.",
+      "role": "sentinel"
+    }
+  ],
+  "roles": [
+    "Know-It-All",
+    "Architect",
+    "Solver",
+    "Editor",
+    "Optimizer",
+    "Sentinel",
+    "Test Engineer"
+  ],
+  "failed_agents": [],
+  "usage": {
+    "input_tokens": 60,
+    "output_tokens": 12360,
+    "cache_creation_input_tokens": 301516,
+    "cache_read_input_tokens": 272003,
+    "cost_usd": 2.75672005,
+    "duration_ms": 475313
+  },
+  "duration": "3m26s"
+}

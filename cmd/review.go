@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
+	gitpkg "github.com/arinorr/prism/internal/git"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -333,12 +333,15 @@ func runReview(args []string) error {
 		shouldVerify = false
 	}
 
-	// Always detect repo root — needed for symbol index (routing + verification).
-	repoRoot := ""
-	if out, gitErr := exec.Command("git", "rev-parse", "--show-toplevel").Output(); gitErr == nil {
-		repoRoot = strings.TrimSpace(string(out))
-	} else {
-		repoRoot = "."
+	// Resolve repo root for symbol indexing. Handles cross-repo PRs by
+	// shallow-cloning the remote repo if needed.
+	repoRoot, repoCleanup, repoErr := gitpkg.ResolveRepoForPR(pr.OwnerRepo, pr.HeadRef)
+	if repoCleanup != nil {
+		defer repoCleanup()
+		progress("📥 Cloned %s for code analysis\n", pr.OwnerRepo)
+	}
+	if repoErr != nil {
+		progress("   ⚠️  Repo resolution: %v (using local)\n", repoErr)
 	}
 
 	// Dispatch agents. Orchestrator progress goes to stderr.

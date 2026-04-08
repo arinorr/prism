@@ -6,17 +6,21 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/arinorr/prism/internal/git"
 )
 
 // PR holds the metadata and diff for a pull request.
 type PR struct {
-	Number  string
-	Repo    string // repository name (e.g., "prism")
-	Title   string
-	Body    string
-	Diff    string
-	HeadSHA string
-	Files   []FileChange
+	Number    string
+	Repo      string // repository name (e.g., "prism")
+	OwnerRepo string // "owner/repo" (e.g., "arinorr/prism")
+	HeadRef   string // branch name (e.g., "feature/ci-pipeline")
+	Title     string
+	Body      string
+	Diff      string
+	HeadSHA   string
+	Files     []FileChange
 }
 
 // FileChange represents a single file's changes in the PR.
@@ -88,7 +92,7 @@ func (c *Client) GetPRDiff(prRef string) (*PR, error) {
 
 func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 	// Get PR metadata and files in a single call.
-	out, err := c.run("gh", "pr", "view", prRef, "--json", "number,title,body,headRefOid,files,headRepository")
+	out, err := c.run("gh", "pr", "view", prRef, "--json", "number,title,body,headRefOid,headRefName,files,headRepository")
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view failed: %w", err)
 	}
@@ -98,13 +102,15 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 		Title      string `json:"title"`
 		Body       string `json:"body"`
 		HeadRefOid string `json:"headRefOid"`
+		HeadRefName string `json:"headRefName"`
 		Files      []struct {
 			Path      string `json:"path"`
 			Additions int    `json:"additions"`
 			Deletions int    `json:"deletions"`
 		} `json:"files"`
 		HeadRepository struct {
-			Name string `json:"name"`
+			Name          string `json:"name"`
+			NameWithOwner string `json:"nameWithOwner"`
 		} `json:"headRepository"`
 	}
 	if err := json.Unmarshal(out, &meta); err != nil {
@@ -126,18 +132,21 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 	}
 
 	repo := meta.HeadRepository.Name
+	ownerRepo := meta.HeadRepository.NameWithOwner
 	if repo == "" {
-		repo = c.detectRepoName() // fallback for older gh versions
+		repo = c.detectRepoName()
 	}
 
 	return &PR{
-		Number:  fmt.Sprintf("%d", meta.Number),
-		Repo:    repo,
-		Title:   meta.Title,
-		Body:    meta.Body,
-		Diff:    string(diff),
-		HeadSHA: meta.HeadRefOid,
-		Files:   files,
+		Number:    fmt.Sprintf("%d", meta.Number),
+		Repo:      repo,
+		OwnerRepo: ownerRepo,
+		HeadRef:   meta.HeadRefName,
+		Title:     meta.Title,
+		Body:      meta.Body,
+		Diff:      string(diff),
+		HeadSHA:   meta.HeadRefOid,
+		Files:     files,
 	}, nil
 }
 
@@ -219,22 +228,14 @@ func (c *Client) PostComments(pr *PR, suggestions []Suggestion) error {
 }
 
 // detectRepoName returns the repository name from the git remote URL.
-// Falls back to "unknown" if the remote can't be parsed.
+// Delegates URL parsing to git.ParseRemoteURL.
 func (c *Client) detectRepoName() string {
 	out, err := c.run("git", "remote", "get-url", "origin")
 	if err != nil {
 		return "unknown"
 	}
-	url := strings.TrimSpace(string(out))
-	// Handle SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git).
-	url = strings.TrimSuffix(url, ".git")
-	if idx := strings.LastIndex(url, "/"); idx != -1 {
-		return url[idx+1:]
-	}
-	if idx := strings.LastIndex(url, ":"); idx != -1 {
-		return url[idx+1:]
-	}
-	return "unknown"
+	_, name := git.ParseRemoteURL(strings.TrimSpace(string(out)))
+	return name
 }
 
 func (c *Client) detectBaseBranch() string {
