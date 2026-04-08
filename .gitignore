@@ -16,3 +16,9 @@ results/
 # Test/coverage
 coverage.out
 *.test
+prism-current
+prism-new
+baseline-*.json
+baseline-*.log
+new-*.json
+new-*.log
