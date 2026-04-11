@@ -1,6 +1,6 @@
 module github.com/arinorr/prism
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/microcosm-cc/bluemonday v1.0.27
