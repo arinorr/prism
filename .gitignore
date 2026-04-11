@@ -22,3 +22,4 @@ baseline-*.json
 baseline-*.log
 new-*.json
 new-*.log
+*.html
