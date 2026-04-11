@@ -63,20 +63,31 @@ func ComputeHealthScore(findings []DedupedFinding) HealthScore {
 	}
 }
 
+// scoreToGrade uses the standard US university grading scale.
 func scoreToGrade(score int) string {
 	switch {
-	case score >= 95:
-		return "A+"
-	case score >= 90:
+	case score >= 93:
 		return "A"
-	case score >= 80:
+	case score >= 90:
+		return "A-"
+	case score >= 87:
 		return "B+"
-	case score >= 70:
+	case score >= 83:
 		return "B"
-	case score >= 60:
+	case score >= 80:
+		return "B-"
+	case score >= 77:
+		return "C+"
+	case score >= 73:
 		return "C"
-	case score >= 40:
+	case score >= 70:
+		return "C-"
+	case score >= 67:
+		return "D+"
+	case score >= 63:
 		return "D"
+	case score >= 60:
+		return "D-"
 	default:
 		return "F"
 	}
@@ -86,9 +97,9 @@ func scoreToVerdict(score int) string {
 	switch {
 	case score >= 90:
 		return VerdictApprove
-	case score >= 70:
+	case score >= 80:
 		return VerdictSuggestions
-	case score >= 40:
+	case score >= 60:
 		return VerdictRequestChanges
 	default:
 		return VerdictDiscuss
@@ -97,19 +108,19 @@ func scoreToVerdict(score int) string {
 
 func scoreToDescription(score int) string {
 	switch {
-	case score >= 95:
+	case score >= 93:
 		return fmt.Sprintf("%d/100 — Excellent, no significant issues", score)
 	case score >= 90:
 		return fmt.Sprintf("%d/100 — Very good, minor suggestions only", score)
-	case score >= 80:
+	case score >= 83:
 		return fmt.Sprintf("%d/100 — Good, a few things to address", score)
+	case score >= 77:
+		return fmt.Sprintf("%d/100 — Acceptable, some issues to consider", score)
 	case score >= 70:
-		return fmt.Sprintf("%d/100 — Acceptable, several issues to fix", score)
+		return fmt.Sprintf("%d/100 — Below average, several issues to fix", score)
 	case score >= 60:
 		return fmt.Sprintf("%d/100 — Needs work, multiple concerns", score)
-	case score >= 40:
-		return fmt.Sprintf("%d/100 — Significant issues found", score)
 	default:
-		return fmt.Sprintf("%d/100 — Major problems, needs rethinking", score)
+		return fmt.Sprintf("%d/100 — Significant issues, needs rethinking", score)
 	}
 }

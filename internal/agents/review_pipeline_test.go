@@ -498,8 +498,8 @@ func TestIntegration_CleanPR(t *testing.T) {
 	if result.HealthScore.Score != 100 {
 		t.Errorf("expected score 100 for clean PR, got %d", result.HealthScore.Score)
 	}
-	if result.HealthScore.Grade != "A+" {
-		t.Errorf("expected grade A+ for clean PR, got %q", result.HealthScore.Grade)
+	if result.HealthScore.Grade != "A" {
+		t.Errorf("expected grade A for clean PR, got %q", result.HealthScore.Grade)
 	}
 }
 

@@ -133,7 +133,7 @@ func TestBuildDeterministicSummary(t *testing.T) {
 		{Finding: Finding{Risk: "warning", Category: "security", Scope: "changed", Summary: "missing auth"}, VoteCount: 3, TotalAgents: 7},
 		{Finding: Finding{Risk: "info", Category: "style", Scope: "existing", Summary: "naming"}, VoteCount: 1, TotalAgents: 7},
 	}
-	score := HealthScore{Score: 72, Grade: "B", Verdict: "approve with suggestions"}
+	score := HealthScore{Score: 72, Grade: "C-", Verdict: "request changes"}
 	summary := buildDeterministicSummary(findings, score, 7)
 
 	if !strings.Contains(summary, "1 critical") {
@@ -154,7 +154,7 @@ func TestBuildDeterministicSummary(t *testing.T) {
 	if !strings.Contains(summary, "nil pointer") {
 		t.Error("consensus section should list high-vote finding")
 	}
-	if !strings.Contains(summary, "approve with suggestions") {
+	if !strings.Contains(summary, "request changes") {
 		t.Error("summary should contain verdict")
 	}
 }

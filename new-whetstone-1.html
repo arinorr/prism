@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism Review: PR #1</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
+  --surface: #f6f8fa;
+  --red: #cf222e; --red-bg: #ffebe9;
+  --yellow: #9a6700; --yellow-bg: #fff8c5;
+  --blue: #0969da; --blue-bg: #ddf4ff;
+  --green: #1a7f37; --green-bg: #dafbe1;
+  --purple: #8250df; --purple-bg: #fbefff;
+  --teal: #0d9488; --teal-bg: #e6fffa;
+}
+* { box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.6; color: var(--fg); background: var(--bg); }
+h1 { font-size: 1.5rem; margin: 0; }
+h2 { font-size: 1.25rem; margin: 2rem 0 1rem; padding-bottom: 0.4em; border-bottom: 1px solid var(--border); }
+
+ 
+.header { border-bottom: 2px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.5rem; }
+.header .pr-title { color: var(--muted); font-size: 1rem; margin: 0.25rem 0 0.75rem; }
+.meta { display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
+
+ 
+.gauge-container { text-align: center; margin: 1.5rem 0; }
+.gauge-label { font-size: 0.9rem; color: var(--muted); margin-top: 0.25rem; }
+.gauge-verdict { font-weight: 600; font-size: 1rem; margin-top: 0.25rem; }
+
+ 
+.dashboard { margin: 1.5rem 0; }
+.dash-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
+.dash-card-wide { width: 100%; }
+.dash-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
+.dash-risks { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.dash-badge { font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.7rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+.dash-verdict { font-size: 1.15rem; font-weight: 700; color: var(--fg); margin-bottom: 0.25rem; text-transform: capitalize; }
+.dash-sub { font-size: 0.85rem; color: var(--muted); }
+
+ 
+.failed-banner { background: var(--yellow-bg); color: var(--yellow); padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600; }
+
+ 
+.file-group { border: 1px solid var(--border); border-radius: 8px; margin: 1rem 0; overflow: hidden; }
+.file-header { background: var(--surface); padding: 0.6rem 1rem; font-weight: 600; font-family: SFMono-Regular, Consolas, monospace; font-size: 0.9rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.file-header .counts { display: flex; gap: 0.5rem; font-size: 0.75rem; font-weight: normal; font-family: -apple-system, sans-serif; }
+.file-header .counts span { padding: 0.15rem 0.5rem; border-radius: 10px; }
+.badge-critical { background: var(--red-bg); color: var(--red); }
+.badge-warning { background: var(--yellow-bg); color: var(--yellow); }
+.badge-info { background: var(--blue-bg); color: var(--blue); }
+
+ 
+.cat-badge { font-size: 0.65rem; font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+.cat-bug { background: var(--red-bg); color: var(--red); }
+.cat-security { background: #fef2f2; color: #b91c1c; }
+.cat-design { background: var(--blue-bg); color: var(--blue); }
+.cat-perf { background: var(--green-bg); color: var(--green); }
+.cat-style { background: var(--purple-bg); color: var(--purple); }
+.cat-test { background: var(--teal-bg); color: var(--teal); }
+
+ 
+details.finding-card { border-bottom: 1px solid var(--border); }
+details.finding-card:last-child { border-bottom: none; }
+details.finding-card > summary { padding: 0.75rem 1rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; list-style: none; }
+details.finding-card > summary::-webkit-details-marker { display: none; }
+details.finding-card > summary::before { content: "\25b6"; font-size: 0.6rem; color: var(--muted); transition: transform 0.15s; }
+details.finding-card[open] > summary::before { transform: rotate(90deg); }
+details.finding-card > summary:hover { background: var(--surface); }
+details.finding-card > summary .severity { font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.6rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+details.finding-card > summary .line { font-size: 0.8rem; color: var(--muted); font-family: SFMono-Regular, Consolas, monospace; }
+details.finding-card > summary .finding-text { flex: 1; font-weight: 600; }
+.finding-body { padding: 0.5rem 1rem 1rem 2rem; }
+.finding-body .overview { font-size: 0.9rem; color: var(--muted); line-height: 1.5; margin-bottom: 0.75rem; }
+
+ 
+pre.code-example { background: var(--surface); border: 1px solid var(--border); padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; font-family: SFMono-Regular, Consolas, monospace; margin: 0.5rem 0; white-space: pre-wrap; word-wrap: break-word; }
+
+ 
+details.agent-detail { margin: 0.5rem 0; border: 1px solid var(--border); border-radius: 6px; }
+details.agent-detail > summary { padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.85rem; font-weight: 600; background: var(--surface); border-radius: 6px; }
+details.agent-detail[open] > summary { border-radius: 6px 6px 0 0; border-bottom: 1px solid var(--border); }
+details.agent-detail .agent-body { padding: 0.5rem 0.75rem; font-size: 0.85rem; color: var(--muted); }
+
+ 
+.agent-badge { font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 10px; border: 1.5px solid; }
+.agent-purple { background: #f5f0ff; color: #6e40c9; border-color: #d8b9ff; }
+.agent-indigo { background: #eef0ff; color: #4f46e5; border-color: #c7d2fe; }
+.agent-teal { background: #e6fffa; color: #0d9488; border-color: #99f6e4; }
+.agent-orange { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
+.agent-green { background: #ecfdf5; color: #15803d; border-color: #a7f3d0; }
+.agent-red { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.agent-blue { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.agent-default { background: var(--surface); color: var(--muted); border-color: var(--border); }
+
+ 
+.vote-count { font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.6rem; border-radius: 10px; background: var(--green-bg); color: var(--green); border: 1.5px solid var(--green); }
+
+ 
+.scope-section h2 { display: flex; align-items: center; gap: 0.5rem; }
+.scope-section h2 .scope-count { font-size: 0.85rem; font-weight: normal; color: var(--muted); }
+
+ 
+.footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); text-align: center; }
+.footer a { color: var(--blue); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Prism Review: PR #1</h1>
+  <div class="pr-title">Add CI pipeline, test suite, and Makefile</div>
+  <div class="meta">
+    <span>12 files changed</span>
+    <span>7 agents</span>
+    <span>39 findings</span>
+    <span>2m47s</span>
+  </div>
+</div>
+<div class="gauge-container">
+  <svg viewBox="0 0 200 140" width="280" height="196" role="img" aria-label="Health score: 74/100 (B)">
+    
+    <path d="M 20 110 A 80 80 0 0 1 180 110" fill="none" stroke="#e1e4e8" stroke-width="14" stroke-linecap="round"/>
+    
+    <path d="M 20 110 A 80 80 0 0 1 180 110" fill="none" stroke="#d4a72c" stroke-width="14" stroke-linecap="round"
+          stroke-dasharray="251" stroke-dashoffset="66"/>
+    
+    <line x1="100" y1="110" x2="100" y2="40" stroke="var(--fg, #1f2328)" stroke-width="2.5" stroke-linecap="round"
+          transform="rotate(43 100 110)"/>
+    <circle cx="100" cy="110" r="5" fill="var(--fg, #1f2328)"/>
+    
+    <text x="100" y="80" text-anchor="middle" font-size="36" font-weight="800" fill="#1a7f37">B</text>
+    
+    <text x="100" y="102" text-anchor="middle" font-size="18" font-weight="600" fill="var(--muted, #656d76)">74 / 100</text>
+  </svg>
+  <div class="gauge-verdict">approve with suggestions</div>
+</div>
+
+<div class="dashboard">
+  <div class="dash-card dash-card-wide">
+    <div class="dash-header">
+      <div>
+        <div class="dash-verdict">approve with suggestions</div>
+        <div class="dash-sub">39 findings from 7 agents</div>
+      </div>
+      <div class="dash-risks"><span class="dash-badge badge-critical">1 critical</span><span class="dash-badge badge-warning">11 warning</span><span class="dash-badge badge-info">27 info</span>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="scope-section">
+<h2>Issues in this PR <span class="scope-count">(39)</span></h2>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>go.mod</span>
+    <div class="counts"><span class="badge-critical">1 critical</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-critical">critical</span>
+      <span class="cat-badge cat-design">design</span>
+      <span class="finding-text">go.mod shows 1.23→1.26 but actual go.mod is at 1.25.0; version mismatch indicates misaligned branches</span>
+      <span class="line">:3</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The PR diff changes `go 1.23` to `go 1.26`, but the current go.mod on the base branch shows `go 1.25.0`. This strongly suggests the PR was rebased or created against a stale version of `main`, or the diff was generated from a different repository/fork. Merging this could regress the Go version directive or cause unexpected conflicts. Additionally, Go 1.26 is very new — verify that GitHub Actions runners and all CI tools (golangci-lint v2, gosec, govulncheck) fully support it before pinning to it.</div>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>.github/workflows/ci.yml</span>
+    <div class="counts"><span class="badge-warning">3 warning</span><span class="badge-info">3 info</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-bug">bug</span>
+      <span class="finding-text">Go 1.26 does not exist (latest is 1.23 as of Jan 2025)</span>
+      <span class="line">:21</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The CI workflow and go.mod specify Go 1.26, but the latest Go version as of January 2025 is 1.23. Go 1.26 does not exist. This will cause CI failures when actions/setup-go tries to install a nonexistent version. This should be 1.23 (or 1.22 for broader compatibility). The comment in the PR about &#39;Go 1.26 compatibility&#39; suggests a typo or misunderstanding of Go versioning.</div>
+      <pre class="code-example">// go.mod (current):
+go 1.26
+
+// Should be:
+go 1.23</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-security">security</span>
+      <span class="finding-text">Go 1.26 does not exist yet — CI will fail or resolve unexpectedly</span>
+      <span class="line">:22</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The PR sets `go-version: &#34;1.26&#34;` in all CI jobs, but Go 1.26 is not a released version as of April 2026. The current stable Go versions are in the 1.24.x / 1.25.x range. If `actions/setup-go@v5` cannot find this version, CI will either fail entirely or silently install a different version. The `go.mod` is also bumped to `go 1.26` which may cause build failures for contributors on older Go versions. This should be set to an actually released Go version (e.g., `1.24` or `1.25`).</div>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-design">design</span>
+      <span class="finding-text">CI hardcodes Go 1.26 — should derive from go.mod to avoid drift</span>
+      <span class="line">:22</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The Go version `1.26` is hardcoded in 4 separate CI jobs. When the go.mod version is bumped in the future, the CI config must be updated in 4 places. Consider using a matrix strategy or an environment variable at the workflow level, or use `go-version-file: go.mod` in `actions/setup-go` to automatically stay in sync with the repository&#39;s go.mod directive.</div>
+      <pre class="code-example"># Before (repeated 4 times):
+- uses: actions/setup-go@v5
+  with:
+    go-version: &#34;1.26&#34;
+
+# After (auto-syncs with go.mod):
+- uses: actions/setup-go@v5
+  with:
+    go-version-file: go.mod</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-design">design</span>
+      <span class="finding-text">CI has 4 parallel jobs but no dependency between them — consider a final &#39;required&#39; gate job</span>
+      <span class="line">:1</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The 4 CI jobs (lint, typecheck, test, security) run independently with no dependency graph. This is fine for execution but consider adding a lightweight `ci-pass` job that depends on all four (`needs: [lint, typecheck, test, security]`). This gives you a single status check to configure as required in branch protection rules, rather than maintaining four separate required checks. When jobs are added or renamed, only the gate job needs updating.</div>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-security">security</span>
+      <span class="finding-text">golangci-lint version pinned but installed via goinstall bypasses checksum verification</span>
+      <span class="line">:28</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The lint job uses `install-mode: goinstall` which compiles golangci-lint from source via `go install`. While the version is pinned to `v2.1.6`, this mode does not verify pre-built binary checksums. The default `install-mode: binary` downloads a pre-built binary with checksum verification, which is both faster and more secure against source-level supply chain attacks. Consider removing `install-mode: goinstall` to use the default binary mode.</div>
+      <pre class="code-example"># Before
+- name: golangci-lint
+  uses: golangci/golangci-lint-action@v7
+  with:
+    version: v2.1.6
+    install-mode: goinstall
+
+# After
+- name: golangci-lint
+  uses: golangci/golangci-lint-action@v7
+  with:
+    version: v2.1.6</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-security">security</span>
+      <span class="finding-text">gosec and govulncheck pinned to @latest may produce non-reproducible CI results</span>
+      <span class="line">:78</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">Both `gosec` and `govulncheck` are installed with `@latest`, meaning CI results are non-deterministic across runs — a new release of either tool could start failing (or stop catching issues) without any code change. For security tooling in CI, pin to a specific version (e.g., `gosec@v2.22.0`) so that changes in security scan results are deliberate. This also prevents a supply-chain attack vector where a compromised `latest` version gets auto-installed.</div>
+      <pre class="code-example"># Before
+run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+# After
+run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.0</pre>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>cmd/root.go</span>
+    <div class="counts"><span class="badge-warning">2 warning</span><span class="badge-info">2 info</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-design">design</span>
+      <span class="finding-text">runRate function and scorer package don&#39;t exist on main — PR adds an entire new subsystem</span>
+      <span class="line">:84</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The diff modifies a `runRate` function and references `scorer.Profile`/`scorer.ProfileAuto`, but the current `cmd/root.go` only contains `Execute()` and `printUsage()` with no rate subcommand or scorer dependency. The PR appears to introduce a new &#39;whetstone&#39; rating subsystem (separate from the existing &#39;prism review&#39; functionality) with its own parser, scorer, and report packages. This is a significant architectural addition that should be explicitly documented: How does this relate to the existing review pipeline? Will they share infrastructure (LLM clients, config, report generation)? The Makefile builds `whetstone` as the binary name, not `prism`. If this is a separate tool sharing the repo, consider whether a monorepo structure with `cmd/prism/` and `cmd/whetstone/` would be clearer.</div>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-bug">bug</span>
+      <span class="finding-text">Uninitialized profile variable when opts.profile is empty string</span>
+      <span class="line">:87</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The code changed from `profile := scorer.ProfileAuto` to `var profile scorer.Profile`, then uses a switch with cases &#39;skill&#39;, &#39;prompt&#39;, &#39;auto&#39;, and &#39;&#39;. When opts.profile is empty string, it sets profile = ProfileAuto. However, the switch has separate cases for &#39;auto&#39; and &#39;&#39; (empty string), but both do the same thing. The problem is the zero value of scorer.Profile might not equal ProfileAuto. If opts.profile somehow doesn&#39;t match any case (though the default catches this), the profile variable would be uninitialized. The original code was safer by initializing to ProfileAuto. Consider either: (1) merging the &#39;auto&#39; and &#39;&#39; cases explicitly, or (2) initializing the variable like `profile := scorer.ProfileAuto` and only reassigning in the switch.</div>
+      <pre class="code-example">// Before (safer):
+profile := scorer.ProfileAuto
+switch opts.profile {
+case &#34;skill&#34;:
+    profile = scorer.ProfileSkill
+// ...
+}
+
+// After (potential issue):
+var profile scorer.Profile  // zero value might not equal ProfileAuto
+switch opts.profile {
+case &#34;skill&#34;:
+    profile = scorer.ProfileSkill
+case &#34;auto&#34;, &#34;&#34;:  // should merge these cases or initialize above
+    profile = scorer.ProfileAuto
+}</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-style">style</span>
+      <span class="finding-text">Zero value initialization is redundant</span>
+      <span class="line">:87</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The change from `profile := scorer.ProfileAuto` to `var profile scorer.Profile` followed by a switch statement is good defensive programming. However, the zero value approach only works if the switch has a default case or handles all possibilities. Since the switch has a default that returns an error, this is correct. The explicit `var profile scorer.Profile` makes it clear that profile must be assigned in all success paths.</div>
+      <pre class="code-example">// Before:
+profile := scorer.ProfileAuto
+switch opts.profile {
+  case &#34;skill&#34;: profile = scorer.ProfileSkill
+  // ...
+}
+
+// After (correct):
+var profile scorer.Profile
+switch opts.profile {
+  case &#34;skill&#34;: profile = scorer.ProfileSkill
+  case &#34;prompt&#34;: profile = scorer.ProfilePrompt
+  case &#34;auto&#34;, &#34;&#34;: profile = scorer.ProfileAuto
+  default: return fmt.Errorf(...)
+}</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-design">design</span>
+      <span class="finding-text">Profile zero value changes default behavior — verify ProfileAuto was the zero value</span>
+      <span class="line">:87</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">Changing from `profile := scorer.ProfileAuto` to `var profile scorer.Profile` relies on Go&#39;s zero value for the `Profile` type being semantically equivalent to `ProfileAuto`. If `Profile` is an integer type and `ProfileAuto` is `iota` (value 0), this works. If `ProfileAuto` is any non-zero constant, this silently changes the default profile. This is a subtle behavioral change worth verifying with a test case that confirms the zero-value default matches `ProfileAuto`.</div>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>internal/parser/parser_test.go</span>
+    <div class="counts"><span class="badge-warning">2 warning</span><span class="badge-info">2 info</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">TestParseDir doesn&#39;t verify correct file filtering</span>
+      <span class="line">:280</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">TestParseDir creates three files: a.md, b.md, and not-md.txt, then asserts it got 2 skills. However, it doesn&#39;t verify WHICH two files were parsed. If the code incorrectly parsed not-md.txt instead of one of the .md files (highly unlikely but possible with a logic bug), the test would pass. The test should verify the specific skill names or paths to ensure the right files were parsed.</div>
+      <pre class="code-example">// Current: only counts
+if len(skills) != 2 {
+    t.Errorf(&#34;ParseDir returned %d skills, want 2&#34;, len(skills))
+}
+
+// Better: verify which files
+if len(skills) != 2 {
+    t.Fatalf(&#34;got %d skills, want 2&#34;, len(skills))
+}
+names := map[string]bool{skills[0].Name: true, skills[1].Name: true}
+if !names[&#34;a&#34;] || !names[&#34;b&#34;] {
+    t.Errorf(&#34;expected skills a and b, got %v&#34;, names)
+}</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">TestAntiPatterns tests only presence detection, not correctness</span>
+      <span class="line">:361</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The test checks that HasAntiPatterns is set to true when content contains &#34;Do not modify&#34; and &#34;Never skip&#34;, but doesn&#39;t verify that the pattern detection is actually finding the right patterns or that non-matching content correctly sets HasAntiPatterns to false. Test both positive and negative cases.</div>
+      <pre class="code-example">// Current: only tests true case
+if !s.HasAntiPatterns { t.Error(...) }
+
+// Better: test both
+negativeContent := &#34;# /test\n\nJust a normal skill with no antipatterns.\n&#34;
+negPath := writeTestFile(t, dir, &#34;safe.md&#34;, negativeContent)
+negS, _ := ParseFile(negPath)
+if negS.HasAntiPatterns {
+  t.Error(&#34;false positive: should not detect antipatterns&#34;)
+}</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-style">style</span>
+      <span class="finding-text">Same file permission issue as cmd/root_test.go</span>
+      <span class="line">:9</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">Same issue as cmd/root_test.go:13 — 0o600 is overly restrictive for test temp files. Consider 0o644 for consistency with typical test file practices.</div>
+      <pre class="code-example">Same as cmd/root_test.go finding.</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">TestShellInjection tests only for backticks, not other injection patterns</span>
+      <span class="line">:243</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The test checks for `!`git status`` injection pattern, but shell injection can occur through other vectors like $(command), environment variable expansion, or pipes. The test is narrow and may miss real injection risks. Consider testing multiple injection patterns.</div>
+      <pre class="code-example">// Current: single pattern
+content := &#34;# /test\n\nContext: !`git status`\n&#34;
+
+// Better: test multiple patterns
+patterns := []string{
+  &#34;!`git status`&#34;,
+  &#34;$(git status)&#34;,
+  &#34;${HOME}&#34;,
+  &#34;| rm -rf&#34;,
+}
+for _, pattern := range patterns {
+  // test each pattern
+}</pre>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>internal/report/report_test.go</span>
+    <div class="counts"><span class="badge-warning">2 warning</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">TestText_SingleResult doesn&#39;t verify the output format</span>
+      <span class="line">:55</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The test checks that single-result text output doesn&#39;t contain &#39;SUMMARY&#39; section, but doesn&#39;t verify that it still contains expected content like the skill name, score, and dimensions. A passing test should verify both absence (no SUMMARY) and presence (has skill details).</div>
+      <pre class="code-example">// Current: only negative check
+if strings.Contains(output, &#34;SUMMARY&#34;) {
+  t.Error(...)
+}
+
+// Better: positive and negative
+if strings.Contains(output, &#34;SUMMARY&#34;) {
+  t.Error(&#34;single-result should not have SUMMARY&#34;)
+}
+if !strings.Contains(output, &#34;/deploy&#34;) {
+  t.Error(&#34;output should still contain skill name&#34;)
+}
+if !strings.Contains(output, &#34;92&#34;) {
+  t.Error(&#34;output should contain score&#34;)
+}</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">TestJSON_EmptyResults only checks serialization format, not round-trip</span>
+      <span class="line">:160</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The test verifies that empty results serialize as `[]` rather than `null`, which is good. But it doesn&#39;t verify that the resulting JSON can be unmarshaled back correctly or that all fields are present and valid. Should unmarshal and verify structure.</div>
+      <pre class="code-example">// Current: only string check
+if !strings.Contains(output, `&#34;results&#34;: []`) {
+  t.Error(...)
+}
+
+// Better: unmarshal and verify
+var parsed struct {
+  Dir     string          `json:&#34;dir&#34;`
+  Count   int             `json:&#34;count&#34;`
+  Results []*scorer.Result `json:&#34;results&#34;`
+}
+if err := json.Unmarshal([]byte(output), &amp;parsed); err != nil {
+  t.Fatalf(&#34;cannot unmarshal: %v&#34;, err)
+}
+if parsed.Results != nil &amp;&amp; len(parsed.Results) != 0 {
+  t.Error(&#34;results should be empty slice, not nil&#34;)
+}</pre>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>cmd/root_test.go</span>
+    <div class="counts"><span class="badge-warning">1 warning</span><span class="badge-info">5 info</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="vote-count">3/7 (42%)</span>
+      <span class="finding-text">TestRunRate_TextOutput doesn&#39;t verify output was actually written</span>
+      <span class="line">:145</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">TestRunRate_TextOutput runs with --format text and --stdout but doesn&#39;t capture or verify the stdout output. It only checks that the command doesn&#39;t error. Text output goes to stdout (per comment), but the test doesn&#39;t validate the format, content, or presence of expected fields. This means the test would pass even if the text formatter was completely broken, as long as it doesn&#39;t panic. Consider using a technique to capture stdout (like redirecting os.Stdout to a pipe or buffer) and asserting on the content.</div>
+      <pre class="code-example">// Current: no validation of output
+err := runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;json&#34;, &#34;--stdout&#34;})
+if err != nil { t.Fatal(err) }
+
+// Better: capture and validate
+old := os.Stdout
+r, w, _ := os.Pipe()
+os.Stdout = w
+runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;json&#34;, &#34;--stdout&#34;})
+w.Close()
+os.Stdout = old
+output, _ := io.ReadAll(r)
+var result map[string]interface{}
+if err := json.Unmarshal(output, &amp;result); err != nil {
+  t.Fatalf(&#34;invalid JSON: %v&#34;, err)
+}</pre>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-blue">test-engineer</span> says warning</summary>
+        <div class="agent-body">
+          <p>The test calls runRate with --format text but doesn&#39;t capture or assert on the output. Text format goes to stdout, but there&#39;s no verification that the output was generated or contains expected content. This test will pass even if the text output is broken. Add an os.Pipe capture or redirect stdout to verify the output.</p>
+          <pre class="code-example">// Current: no verification
+err := runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;text&#34;})
+if err != nil {
+  t.Fatalf(&#34;runRate text: %v&#34;, err)
+}
+
+// Better: capture stdout
+old := os.Stdout
+r, w, _ := os.Pipe()
+os.Stdout = w
+err := runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;text&#34;})
+w.Close()
+os.Stdout = old
+output, _ := io.ReadAll(r)
+if !strings.Contains(string(output), &#34;Whetstone Report&#34;) {
+  t.Error(&#34;text output missing header&#34;)
+}</pre>
+        </div>
+      </details>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-blue">test-engineer</span> says warning</summary>
+        <div class="agent-body">
+          <p>The test runs runRate with --stdout but doesn&#39;t parse or validate the JSON output. If the JSON is malformed or missing fields, the test will still pass. Should unmarshal the stdout output and verify key fields exist (dir, count, results).</p>
+          <pre class="code-example">// Current: no validation of output
+err := runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;json&#34;, &#34;--stdout&#34;})
+if err != nil { t.Fatal(err) }
+
+// Better: capture and validate
+old := os.Stdout
+r, w, _ := os.Pipe()
+os.Stdout = w
+runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;json&#34;, &#34;--stdout&#34;})
+w.Close()
+os.Stdout = old
+output, _ := io.ReadAll(r)
+var result map[string]interface{}
+if err := json.Unmarshal(output, &amp;result); err != nil {
+  t.Fatalf(&#34;invalid JSON: %v&#34;, err)
+}</pre>
+        </div>
+      </details>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-teal">solver</span> says info</summary>
+        <div class="agent-body">
+          <p>TestRunRate_TextOutput runs with --format text and --stdout but doesn&#39;t capture or verify the stdout output. It only checks that the command doesn&#39;t error. Text output goes to stdout (per comment), but the test doesn&#39;t validate the format, content, or presence of expected fields. This means the test would pass even if the text formatter was completely broken, as long as it doesn&#39;t panic. Consider using a technique to capture stdout (like redirecting os.Stdout to a pipe or buffer) and asserting on the content.</p>
+          <pre class="code-example">// Current: only checks no error
+err := runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;text&#34;})
+if err != nil {
+    t.Fatalf(&#34;runRate text: %v&#34;, err)
+}
+
+// Better: capture and verify output
+// Use test helper to redirect stdout, then:
+output := captureStdout(func() {
+    runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;text&#34;})
+})
+if !strings.Contains(output, &#34;Whetstone Report&#34;) {
+    t.Error(&#34;text output missing header&#34;)
+}</pre>
+        </div>
+      </details>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">Tests capture stdout implicitly but don&#39;t verify output</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">Several tests like TestRunRate_TextOutput and TestRunRate_JSONStdout call runRate with --stdout but don&#39;t capture or verify the output. They only check for errors. If the goal is to test that output is produced without errors, this is fine. However, if the output format or content matters, the tests should capture stdout/stderr using a technique like os.Pipe or testing.TB buffer. The test names suggest output verification, but the implementation doesn&#39;t match.</div>
+      <pre class="code-example">// Current:
+err := runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;text&#34;})
+if err != nil {
+  t.Fatalf(&#34;runRate text: %v&#34;, err)
+}
+
+// If output should be verified:
+old := os.Stdout
+r, w, _ := os.Pipe()
+os.Stdout = w
+err := runRate([]string{&#34;--dir&#34;, dir, &#34;--format&#34;, &#34;text&#34;})
+w.Close()
+os.Stdout = old
+out, _ := io.ReadAll(r)
+if !strings.Contains(string(out), &#34;Whetstone Report&#34;) {
+  t.Error(&#34;missing expected output&#34;)
+}</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-security">security</span>
+      <span class="finding-text">Test files use 0o600 permissions, production code path unknown</span>
+      <span class="line">:13</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">Test helper writeTestSkill uses 0o600 (owner-only read/write) permissions when creating files. While this is secure for test files, verify that production code paths that create files also use appropriate restrictive permissions. If the main application writes files (e.g., output reports), ensure they don&#39;t use overly permissive defaults like 0o666.</div>
+      <pre class="code-example">// Test helper (good):
+os.WriteFile(path, data, 0o600)
+
+// Check production code creates files with similar restrictions:
+// e.g., when writing reports, use 0o644 or 0o600 depending on sensitivity</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-style">style</span>
+      <span class="finding-text">File permissions 0o600 are overly restrictive for test fixtures</span>
+      <span class="line">:13</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The test helper uses 0o600 (owner read/write only) for test files. While secure, this is more restrictive than necessary for temporary test files. The conventional permission for temp files is 0o644 (owner read/write, group/others read) or 0o666 (let umask decide). Using 0o600 is not wrong, but it&#39;s unusual and may cause issues if tests need to read each other&#39;s files or if debugging requires inspecting test output.</div>
+      <pre class="code-example">// Current:
+if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+
+// More conventional for test files:
+if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">TestParseRateArgs uses closure for assertions; consider assert helpers</span>
+      <span class="line">:40</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The test uses nested closures (`check func(*options) string`) for assertions, which is non-standard. Most Go tests use direct assertions or subtests. This pattern is harder to read and makes failure messages less clear. Standard table-driven test assertions would be clearer.</div>
+      <pre class="code-example">// Current: closure returning error string
+{&#34;skill name&#34;, []string{&#34;deploy&#34;}, func(o *options) string {
+  if o.skillName != &#34;deploy&#34; { return &#34;skillName should be deploy&#34; }
+  return &#34;&#34;
+}}
+
+// Better: direct assertion
+if o.skillName != &#34;deploy&#34; {
+  t.Errorf(&#34;skillName = %q, want %q&#34;, o.skillName, &#34;deploy&#34;)
+}</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">Empty directory error not specific enough in test assertion</span>
+      <span class="line">:240</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">TestRunRate_EmptyDir expects an error when the directory is empty, but doesn&#39;t verify the error message or type. If the code fails for a different reason (e.g., directory permissions, unexpected panic recovery), the test would still pass. Consider asserting on the specific error message or error type to ensure it&#39;s failing for the right reason (no .md files found).</div>
+      <pre class="code-example">// Current:
+err := runRate([]string{&#34;--dir&#34;, dir})
+if err == nil {
+    t.Error(&#34;expected error for empty directory&#34;)
+}
+
+// Better:
+err := runRate([]string{&#34;--dir&#34;, dir})
+if err == nil {
+    t.Fatal(&#34;expected error for empty directory&#34;)
+}
+if !strings.Contains(err.Error(), &#34;no skills found&#34;) {
+    t.Errorf(&#34;wrong error: %v&#34;, err)
+}</pre>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>internal/report/report.go</span>
+    <div class="counts"><span class="badge-warning">1 warning</span><span class="badge-info">2 info</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-perf">performance</span>
+      <span class="vote-count">2/7 (28%)</span>
+      <span class="finding-text">fmt.Fprintf(&amp;b, ...) is slower than b.WriteString for simple cases</span>
+      <span class="line">:26</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The change from `b.WriteString(fmt.Sprintf(...))` to `fmt.Fprintf(&amp;b, ...)` reduces allocations by ~1 per call (no intermediate string), but for literal strings without formatting, `b.WriteString()` is still faster. The PR correctly optimized formatted strings, but keep using `b.WriteString()` for literals like the separator line at line 28. This is already done correctly in most places (e.g., line 48 &#34;Grade distribution: &#34;), so this is just validation that the mixed approach is optimal.</div>
+      <pre class="code-example">// Current (after PR):
+fmt.Fprintf(&amp;b, &#34;Directory: %s\n&#34;, d.Dir)
+b.WriteString(&#34;Grade distribution: &#34;)
+
+// More efficient:
+b.WriteString(&#34;Directory: &#34;)
+b.WriteString(d.Dir)
+b.WriteString(&#34;\n&#34;)
+b.WriteString(&#34;Grade distribution: &#34;)
+
+// Or stay consistent with fmt.Fprintf everywhere:
+fmt.Fprintf(&amp;b, &#34;Directory: %s\n&#34;, d.Dir)
+fmt.Fprintf(&amp;b, &#34;Grade distribution: &#34;)</pre>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-green">optimizer</span> says info</summary>
+        <div class="agent-body">
+          <p>The change from `b.WriteString(fmt.Sprintf(...))` to `fmt.Fprintf(&amp;b, ...)` reduces allocations by ~1 per call (no intermediate string), but for literal strings without formatting, `b.WriteString()` is still faster. The PR correctly optimized formatted strings, but keep using `b.WriteString()` for literals like the separator line at line 28. This is already done correctly in most places (e.g., line 48 &#34;Grade distribution: &#34;), so this is just validation that the mixed approach is optimal.</p>
+          <pre class="code-example">// Optimized correctly: no intermediate allocation
+fmt.Fprintf(&amp;b, &#34;Directory: %s\n&#34;, d.Dir)  // Good
+
+// Already optimal: keep as-is
+b.WriteString(strings.Repeat(&#34;─&#34;, 70) &#43; &#34;\n\n&#34;)  // Good
+
+// Avoid: creates intermediate string
+b.WriteString(fmt.Sprintf(&#34;Directory: %s\n&#34;, d.Dir))  // Bad (old code)</pre>
+        </div>
+      </details>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-purple">know-it-all</span> says warning</summary>
+        <div class="agent-body">
+          <p>The changes replace `b.WriteString(fmt.Sprintf(...))` with `fmt.Fprintf(&amp;b, ...)`, which is more idiomatic and efficient (avoids an allocation). However, for literal strings without formatting, `b.WriteString(&#34;Directory: &#34;)` followed by `b.WriteString(d.Dir)` or using `fmt.Fprintf` only when needed would be more efficient. The current change is an improvement, but there&#39;s room for further optimization on lines that don&#39;t need formatting (e.g., line 28 &#34;Grade distribution: &#34;).</p>
+          <pre class="code-example">// Current (after PR):
+fmt.Fprintf(&amp;b, &#34;Directory: %s\n&#34;, d.Dir)
+b.WriteString(&#34;Grade distribution: &#34;)
+
+// More efficient:
+b.WriteString(&#34;Directory: &#34;)
+b.WriteString(d.Dir)
+b.WriteString(&#34;\n&#34;)
+b.WriteString(&#34;Grade distribution: &#34;)
+
+// Or stay consistent with fmt.Fprintf everywhere:
+fmt.Fprintf(&amp;b, &#34;Directory: %s\n&#34;, d.Dir)
+fmt.Fprintf(&amp;b, &#34;Grade distribution: &#34;)</pre>
+        </div>
+      </details>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-warning">warning</span>
+      <span class="cat-badge cat-style">style</span>
+      <span class="finding-text">Inconsistent use of fmt.Fprintf vs WriteString in same function</span>
+      <span class="line">:26</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The Text() function mixes fmt.Fprintf(&amp;b, ...) and b.WriteString(...) for formatting. This inconsistency reduces readability. The pattern should be uniform throughout. Since most of the function now uses fmt.Fprintf after this PR, the remaining WriteString calls should be converted for consistency.</div>
+      <pre class="code-example">// Before (lines 47-48)
+b.WriteString(&#34;Grade distribution: &#34;)
+for _, g := range []string{&#34;A&#34;, &#34;B&#34;, &#34;C&#34;, &#34;D&#34;, &#34;F&#34;} {
+
+// After (consistent with fmt.Fprintf pattern)
+fmt.Fprintf(&amp;b, &#34;Grade distribution: &#34;)
+for _, g := range []string{&#34;A&#34;, &#34;B&#34;, &#34;C&#34;, &#34;D&#34;, &#34;F&#34;} {</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-design">design</span>
+      <span class="finding-text">Consistent migration from WriteString(Sprintf) to Fprintf is clean but consider extracting a builder helper</span>
+      <span class="line">:26</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The migration from `b.WriteString(fmt.Sprintf(...))` to `fmt.Fprintf(b, ...)` throughout report.go is a good cleanup — it eliminates an unnecessary intermediate string allocation. The pattern is applied consistently across Text, Markdown, and their helper functions. For a file with this many formatted writes, you might eventually consider a thin wrapper, but the current approach is idiomatic and fine as-is.</div>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>Makefile</span>
+    <div class="counts"><span class="badge-info">6 info</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-design">design</span>
+      <span class="vote-count">2/7 (28%)</span>
+      <span class="finding-text">Makefile &#39;security&#39; target depends on undefined targets</span>
+      <span class="line">:20</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The Makefile target `build` produces a binary named `whetstone`, but the Go module is `github.com/arinorr/prism`. If this project is a monorepo containing both `prism` (the review tool) and `whetstone` (the rating tool), the Makefile should either build both or clearly indicate which tool it targets. Currently, running `make build` might confuse contributors who expect a `prism` binary.</div>
+      <pre class="code-example">// Current (works but indirect)
+security: gosec govulncheck
+
+// Clearer alternative
+security:
+	gosec ./...
+	govulncheck ./...</pre>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-orange">editor</span> says info</summary>
+        <div class="agent-body">
+          <p>The &#39;security&#39; target lists &#39;gosec&#39; and &#39;govulncheck&#39; as dependencies (line 20: `security: gosec govulncheck`), but these targets are defined later and also run as standalone tasks. The make system will execute them, but this is a bit fragile. It would be clearer to use explicit command execution instead of fake dependencies, or document the intended usage pattern.</p>
+          <pre class="code-example">// Current (works but indirect)
+security: gosec govulncheck
+
+// Clearer alternative
+security:
+	gosec ./...
+	govulncheck ./...</pre>
+        </div>
+      </details>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-indigo">architect</span> says info</summary>
+        <div class="agent-body">
+          <p>The Makefile target `build` produces a binary named `whetstone`, but the Go module is `github.com/arinorr/prism`. If this project is a monorepo containing both `prism` (the review tool) and `whetstone` (the rating tool), the Makefile should either build both or clearly indicate which tool it targets. Currently, running `make build` might confuse contributors who expect a `prism` binary.</p>
+        </div>
+      </details>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-style">style</span>
+      <span class="finding-text">Makefile lacks default target and .PHONY is incomplete</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The Makefile declares `.PHONY` targets at the top but doesn&#39;t include a default target (typically `all` or `help`). Running `make` without arguments will execute the first target (`build`), which may not be the intended behavior. Also, targets like `security` depend on `gosec` and `govulncheck`, but those aren&#39;t in the `.PHONY` declaration. While this works, it&#39;s inconsistent. Add a default target and ensure all non-file targets are in `.PHONY`.</div>
+      <pre class="code-example"># Current:
+.PHONY: build test lint vet coverage security clean
+
+# Better:
+.DEFAULT_GOAL := help
+.PHONY: build test lint vet coverage security gosec govulncheck clean help
+
+help:
+	@echo &#34;Available targets: build, test, lint, coverage, security, clean&#34;</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-perf">performance</span>
+      <span class="finding-text">Race detector adds ~10x overhead; consider separate make target for CI</span>
+      <span class="line">:7</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The `-race` flag in `make test` adds significant overhead (5-10x slowdown, 10x memory usage). While valuable for CI, it makes local iteration slower. Consider splitting into `make test` (fast, for local dev) and `make test-race` (thorough, for CI). The coverage target already includes `-race`, so developers wanting full validation can use that.</div>
+      <pre class="code-example"># Before: always pay race detector cost
+test:
+	go test ./... -race -count=1
+
+# After: fast by default, opt-in for race detection
+test:
+	go test ./... -count=1
+
+test-race:
+	go test ./... -race -count=1</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-perf">performance</span>
+      <span class="finding-text">Coverage runs all tests twice (lint&#43;coverage both run tests)</span>
+      <span class="line">:15</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">Running `make coverage` after `make test` or `make lint` (which may trigger test runs) duplicates test execution. This is acceptable for CI where jobs run in parallel, but locally it&#39;s inefficient. Consider documenting that `make coverage` is comprehensive and includes race detection, so developers can skip `make test` if running coverage.</div>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">Coverage target doesn&#39;t fail on low coverage threshold</span>
+      <span class="line">:16</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The coverage target computes coverage and displays the total, but doesn&#39;t fail the build if coverage drops below a threshold (like the 85% mentioned in the PR description). If maintaining coverage is important, consider adding a check that fails if coverage is below a minimum percentage. Otherwise, coverage could silently degrade over time.</div>
+      <pre class="code-example"># Current: just reports coverage
+coverage:
+	go test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1
+	go tool cover -func=coverage.out | tail -1
+
+# Better: fail if below threshold
+coverage:
+	go test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1
+	@COVERAGE=$$(go tool cover -func=coverage.out | tail -1 | awk &#39;{print $$3}&#39; | sed &#39;s/%//&#39;); \
+	if [ &#34;$${COVERAGE}&#34; -lt 85 ]; then echo &#34;Coverage $${COVERAGE}% below 85%&#34;; exit 1; fi</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-security">security</span>
+      <span class="finding-text">clean target uses rm -rf on a relative path — low risk but worth noting</span>
+      <span class="line">:29</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The `clean` target runs `rm -rf results/`. While this is standard Makefile practice and the path is hardcoded (not user-controlled), `rm -rf` on a relative path depends on the working directory being correct. This is a very minor concern for a Makefile — just noting it for completeness. No action needed.</div>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>README.md</span>
+    <div class="counts"><span class="badge-info">1 info</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-style">style</span>
+      <span class="finding-text">Development section formatting could be improved</span>
+      <span class="line">:159</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The Development section is helpful, but the make targets could mention why someone would use each one. For example, `make test` runs with race detector—that&#39;s good to highlight. Minor: the instruction to run `go tool cover -html=coverage.out` is in Makefile output, not in the README itself, which is fine but could be duplicated here for convenience.</div>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>internal/parser/parser.go</span>
+    <div class="counts"><span class="badge-info">4 info</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-security">security</span>
+      <span class="vote-count">3/7 (42%)</span>
+      <span class="finding-text">#nosec G304 suppression is reasonable but filepath.Clean alone is insufficient for path traversal</span>
+      <span class="line">:76</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The `#nosec G304` comment suppresses the gosec warning for file inclusion via variable. The accompanying `filepath.Clean()` call normalizes the path but does NOT prevent path traversal — `filepath.Clean(&#34;../../../etc/passwd&#34;)` still returns `../../../etc/passwd`. Since this is a CLI tool where the user provides the path directly (not a web application), the risk is low (the user already has shell access). The `#nosec` annotation is acceptable here, but the comment should be clear that the justification is &#39;CLI tool — user already has filesystem access&#39; rather than implying `filepath.Clean` provides security.</div>
+      <pre class="code-example">// Current:
+cleanPath := filepath.Clean(path)
+data, err := os.ReadFile(cleanPath) // #nosec G304 -- path is user-provided CLI input, not untrusted web input
+
+// Better comment:
+cleanPath := filepath.Clean(path)
+// #nosec G304 -- CLI flag validated by cobra, limited to .md files in user-specified directories
+data, err := os.ReadFile(cleanPath)</pre>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-red">sentinel</span> says info</summary>
+        <div class="agent-body">
+          <p>The `#nosec G304` comment suppresses the gosec warning for file inclusion via variable. The accompanying `filepath.Clean()` call normalizes the path but does NOT prevent path traversal — `filepath.Clean(&#34;../../../etc/passwd&#34;)` still returns `../../../etc/passwd`. Since this is a CLI tool where the user provides the path directly (not a web application), the risk is low (the user already has shell access). The `#nosec` annotation is acceptable here, but the comment should be clear that the justification is &#39;CLI tool — user already has filesystem access&#39; rather than implying `filepath.Clean` provides security.</p>
+          <pre class="code-example">// Before
+data, err := os.ReadFile(cleanPath) // #nosec G304 -- path is user-provided CLI input, not untrusted web input
+
+// After (better comment)
+data, err := os.ReadFile(cleanPath) // #nosec G304 -- CLI tool: user already has filesystem access</pre>
+        </div>
+      </details>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-teal">solver</span> says info</summary>
+        <div class="agent-body">
+          <p>The code uses `filepath.Clean(path)` with a nosec comment claiming the path is &#39;user-provided CLI input, not untrusted web input&#39;. However, CLI input can still be malicious (e.g., whetstone rate ../../../etc/passwd). filepath.Clean normalizes paths but doesn&#39;t restrict access to parent directories. If this tool is meant to only read from specific directories (like .claude/commands), you should validate that the cleaned path is within an allowed directory using filepath.Rel or strings.HasPrefix after cleaning. The nosec comment suggests awareness but incomplete mitigation.</p>
+          <pre class="code-example">// Current:
+cleanPath := filepath.Clean(path)
+data, err := os.ReadFile(cleanPath) // #nosec G304
+
+// Safer approach if dir restrictions apply:
+cleanPath := filepath.Clean(path)
+if !strings.HasPrefix(cleanPath, allowedBaseDir) {
+    return nil, fmt.Errorf(&#34;path outside allowed directory&#34;)
+}
+data, err := os.ReadFile(cleanPath)</pre>
+        </div>
+      </details>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-purple">know-it-all</span> says info</summary>
+        <div class="agent-body">
+          <p>Using filepath.Clean before ReadFile is good practice to normalize paths and prevent directory traversal. However, the #nosec G304 comment disables gosec&#39;s file inclusion check. The comment says &#34;path is user-provided CLI input&#34; — this is actually the scenario where G304 is most important. CLI input should be validated (e.g., checking it&#39;s within an expected directory tree). If this is truly safe because the CLI is trusted, the comment should explain *why* CLI input is safe, not just state that it is CLI input.</p>
+          <pre class="code-example">// Current:
+cleanPath := filepath.Clean(path)
+data, err := os.ReadFile(cleanPath) // #nosec G304 -- path is user-provided CLI input, not untrusted web input
+
+// Better comment:
+cleanPath := filepath.Clean(path)
+// #nosec G304 -- CLI flag validated by cobra, limited to .md files in user-specified directories
+data, err := os.ReadFile(cleanPath)</pre>
+        </div>
+      </details>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-style">style</span>
+      <span class="finding-text">filepath.Clean() call may be unnecessary for security</span>
+      <span class="line">:76</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The comment &#39;#nosec G304&#39; correctly suppresses gosec&#39;s path traversal warning, but filepath.Clean() is called before os.ReadFile(). While not harmful, filepath.Clean() doesn&#39;t prevent path traversal attacks—it only normalizes paths. The #nosec comment is the appropriate suppression. The filepath.Clean() call is redundant if the goal is just to satisfy static analysis; if it serves a functional purpose (normalizing the path for display or logging), that should be clarified in a comment.</div>
+      <pre class="code-example">// Current approach
+cleanPath := filepath.Clean(path)
+data, err := os.ReadFile(cleanPath) // #nosec G304
+
+// The #nosec comment is what matters for security. filepath.Clean() is just path normalization.</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-perf">performance</span>
+      <span class="finding-text">filepath.Clean adds syscall overhead for already-clean paths</span>
+      <span class="line">:76</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">`filepath.Clean(path)` performs path normalization (removing .., ., duplicate slashes). For CLI input that&#39;s already clean (e.g., &#34;skills/review.md&#34;), this adds a small allocation and CPU cost. The security benefit is minimal since the #nosec G304 comment acknowledges this is trusted user input. Consider skipping Clean unless you&#39;re specifically hardening against directory traversal (which doesn&#39;t apply to a local CLI tool where the user controls the filesystem anyway).</div>
+      <pre class="code-example">// Current: defensive but unnecessary overhead
+cleanPath := filepath.Clean(path)
+data, err := os.ReadFile(cleanPath) // #nosec G304
+
+// Alternative: trust CLI input is already clean
+data, err := os.ReadFile(path) // #nosec G304 -- user-provided CLI argument</pre>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-design">design</span>
+      <span class="finding-text">filepath.Clean &#43; nosec annotation is reasonable but the comment could be more precise</span>
+      <span class="line">:76</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">Adding `filepath.Clean()` before `os.ReadFile` is a good defensive measure. The `#nosec G304` annotation is appropriate since this is a CLI tool reading user-specified files. However, the comment says &#39;not untrusted web input&#39; which is accurate but could be more specific about the trust boundary: the path comes from CLI arguments which the user controls directly. This is minor — the security posture is correct.</div>
+    </div>
+  </details>
+  
+</div>
+
+<div class="file-group">
+  <div class="file-header">
+    <span>internal/scorer/scorer_test.go</span>
+    <div class="counts"><span class="badge-info">2 info</span>
+    </div>
+  </div>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="vote-count">2/7 (28%)</span>
+      <span class="finding-text">Test fixtures are hardcoded; consider data-driven approach for edge cases</span>
+      <span class="line">:76</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">makeSkill() and makePrompt() are good fixtures, but they hardcode many values inline, making them brittle. If the parser.Skill struct changes, these will need updates. Consider a builder pattern or at minimum, comment why each field is set to specific values (e.g., &#34;HasArguments: true // Required for dimension scoring&#34;). The tests rely on these specific values to trigger scoring thresholds, so documenting the rationale would help future maintainers.</div>
+      <pre class="code-example">// Current: static fixture
+func makeSkill() *parser.Skill { ... }
+
+// Better: parameterized builder
+func makeSkill(opts ...skillOption) *parser.Skill {
+  s := &amp;parser.Skill{ /* defaults */ }
+  for _, opt := range opts {
+    opt(s)
+  }
+  return s
+}
+
+type skillOption func(*parser.Skill)
+
+func withoutCommitSection(s *parser.Skill) {
+  s.HasCommitSection = false
+}</pre>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-blue">test-engineer</span> says info</summary>
+        <div class="agent-body">
+          <p>makeSkill() and makePrompt() are fixed test fixtures. This makes it hard to test edge cases (e.g., zero features, missing sections, partial frontmatter). Consider parameterizing the builders or adding helper methods to create variations. Current approach only tests happy path for well-formed content.</p>
+          <pre class="code-example">// Current: static fixture
+func makeSkill() *parser.Skill { ... }
+
+// Better: parameterized builder
+func makeSkill(opts ...skillOption) *parser.Skill {
+  s := &amp;parser.Skill{ /* defaults */ }
+  for _, opt := range opts {
+    opt(s)
+  }
+  return s
+}
+
+type skillOption func(*parser.Skill)
+
+func withoutCommitSection(s *parser.Skill) {
+  s.HasCommitSection = false
+}</pre>
+        </div>
+      </details>
+      <details class="agent-detail">
+        <summary><span class="agent-badge agent-purple">know-it-all</span> says info</summary>
+        <div class="agent-body">
+          <p>makeSkill() and makePrompt() are good fixtures, but they hardcode many values inline, making them brittle. If the parser.Skill struct changes, these will need updates. Consider a builder pattern or at minimum, comment why each field is set to specific values (e.g., &#34;HasArguments: true // Required for dimension scoring&#34;). The tests rely on these specific values to trigger scoring thresholds, so documenting the rationale would help future maintainers.</p>
+          <pre class="code-example">// Current:
+HasArguments: true,
+HasContextSetting: true,
+// ... (many more fields)
+
+// Better (with comments):
+HasArguments: true, // Triggers &#43;2 in &#34;Execution&#34; dimension
+HasContextSetting: true, // Triggers &#43;1 in &#34;Purpose&#34; dimension</pre>
+        </div>
+      </details>
+    </div>
+  </details>
+  
+  <details class="finding-card">
+    <summary>
+      <span class="severity badge-info">info</span>
+      <span class="cat-badge cat-test">testing</span>
+      <span class="finding-text">makeSkill and makePrompt fixtures create invalid line counts</span>
+      <span class="line">:13</span>
+    </summary>
+    <div class="finding-body">
+      <div class="overview">The test fixtures create Skills with `Lines: make([]string, 50)` (or 30 for prompts), which creates a slice of 50 empty strings. However, parser.LineCount() skips empty/whitespace-only lines. This means the line count in the fixture is 0, not 50. If any scoring logic depends on accurate line counts, these test fixtures might not exercise realistic scenarios. Consider populating Lines with actual content or using a more representative fixture.</div>
+      <pre class="code-example">// Current creates 50 empty strings:
+Lines: make([]string, 50)
+// LineCount() will return 0 since all are empty
+
+// Better:
+Lines: []string{
+    &#34;line 1&#34;, &#34;line 2&#34;, ..., // representative content
+}
+// Or don&#39;t set Lines if it&#39;s not relevant to scorer tests</pre>
+    </div>
+  </details>
+  
+</div>
+
+</div>
+
+<div class="footer" style="margin-bottom: 0.5rem;">753k input + 17k output = 770k tokens | $1.61 | 2m47s</div>
+<div class="footer">Generated by <a href="https://github.com/arinorr/prism">Prism</a></div>
+
+</body>
+</html>
