@@ -434,7 +434,7 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR, rctx *ReviewContext) (*dispatch
 			if err != nil {
 				errs = append(errs, fmt.Errorf("[%s] %w", r.Name, err))
 				failedAgents = append(failedAgents, r.Name)
-				o.logf("   ⚠️  [%s] failed (%d/%d done)\n", r.Name, done, total)
+				o.logf("   ⚠️  [%s] failed (%d/%d done): %v\n", r.Name, done, total, err)
 			} else {
 				feedbacks = append(feedbacks, *fb)
 				o.logf("   ✅ [%s] %d findings (%d/%d done)\n", r.Name, len(fb.Findings), done, total)
@@ -521,9 +521,7 @@ func (o *Orchestrator) runAgent(role *Role, pr *gh.PR, pctx AgentPromptContext) 
 	elapsed := time.Since(start)
 
 	if err != nil {
-		if o.opts.Verbose {
-			o.errLogf("   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
-		}
+		o.errLogf("   ❌ [%s] failed in %s: %v\n", role.Name, elapsed.Round(time.Millisecond), err)
 		return nil, usage, err
 	}
 

@@ -14,7 +14,10 @@ import (
 type commandRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
 func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).Output() // #nosec G204 -- binary is hardcoded "claude"
+	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204 -- binary is hardcoded "claude"
+	// CombinedOutput captures both stdout and stderr so error messages
+	// from the Claude CLI (rate limits, auth failures, etc.) are preserved.
+	return cmd.CombinedOutput()
 }
 
 // Adapter implements llm.LLM using the Claude CLI (`claude --print`).
@@ -67,6 +70,11 @@ func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, llm.Us
 
 	out, err := a.run(ctx, "claude", args...)
 	if err != nil {
+		// If the command produced output before failing, it may contain
+		// an error message from the Claude CLI. Include it in the error.
+		if len(out) > 0 {
+			return "", llm.Usage{}, fmt.Errorf("claude command failed: %w\nOutput: %s", err, truncate(out, 500))
+		}
 		return "", llm.Usage{}, fmt.Errorf("claude command failed: %w", err)
 	}
 
@@ -85,4 +93,11 @@ func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, llm.Us
 	}
 
 	return env.Result, usage, nil
+}
+
+func truncate(b []byte, max int) string {
+	if len(b) <= max {
+		return string(b)
+	}
+	return string(b[:max]) + "..."
 }
