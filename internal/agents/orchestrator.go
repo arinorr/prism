@@ -377,9 +377,18 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR, rctx *ReviewContext) (*dispatch
 
 	total := len(o.roles)
 
+	// Limit concurrent agents to avoid API rate limiting on large PRs.
+	// On prism PR #26 (72 files), 3/7 agents failed when all dispatched
+	// simultaneously. A semaphore of 4 prevents overwhelming the API
+	// while still allowing parallelism.
+	const maxConcurrentAgents = 4
+	sem := make(chan struct{}, maxConcurrentAgents)
+
 	for i := range o.roles {
 		wg.Add(1)
 		go func(r *Role) {
+			sem <- struct{}{}        // acquire
+			defer func() { <-sem }() // release
 			defer wg.Done()
 
 			// Filter files for this agent.
