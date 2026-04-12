@@ -285,9 +285,10 @@ func testRoles() []Role {
 // testSkills returns a skill map where each skill contains the role slug,
 // so the mock can identify which role made the request.
 func testSkills() map[string]string {
+	roles := testRoles()
 	skills := make(map[string]string)
-	for _, r := range testRoles() {
-		skills[r.Slug] = "You are the " + r.Slug + " reviewer."
+	for i := range roles {
+		skills[roles[i].Slug] = "You are the " + roles[i].Slug + " reviewer."
 	}
 	return skills
 }

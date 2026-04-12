@@ -77,7 +77,7 @@ func Build(ctx context.Context, rootDir string, languages []string) (*Index, err
 			return nil
 		}
 
-		src, err := os.ReadFile(path) // #nosec G304 -- path comes from WalkDir
+		src, err := os.ReadFile(path) // #nosec G304 G122 -- path comes from WalkDir on a user-owned repo; symlink traversal is acceptable here
 		if err != nil {
 			return nil
 		}

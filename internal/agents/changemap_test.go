@@ -256,7 +256,7 @@ func TestParseChangedLines_NoHunks(t *testing.T) {
 	}
 }
 
-// --- parseHunkNewStart ---
+// parseHunkNewStart.
 
 func TestParseHunkNewStart(t *testing.T) {
 	t.Parallel()
@@ -284,7 +284,7 @@ func TestParseHunkNewStart(t *testing.T) {
 	}
 }
 
-// --- rangeOverlapsChanges ---
+// rangeOverlapsChanges.
 
 func TestRangeOverlapsChanges(t *testing.T) {
 	t.Parallel()
@@ -315,7 +315,7 @@ func TestRangeOverlapsChanges(t *testing.T) {
 	}
 }
 
-// --- FormatScopeHints ---
+// FormatScopeHints.
 
 func TestFormatScopeHints_Nil(t *testing.T) {
 	t.Parallel()

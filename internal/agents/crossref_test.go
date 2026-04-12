@@ -11,7 +11,7 @@ import (
 	"github.com/arinorr/prism/internal/resolve"
 )
 
-// --- FilterByIndex ---
+// FilterByIndex.
 
 func TestFilterByIndex_KeepsIndexed(t *testing.T) {
 	t.Parallel()
@@ -59,7 +59,7 @@ func TestFilterByIndex_EmptyIndex(t *testing.T) {
 	}
 }
 
-// --- FormatCrossReferences ---
+// FormatCrossReferences.
 
 func TestFormatCrossReferences_Empty(t *testing.T) {
 	t.Parallel()

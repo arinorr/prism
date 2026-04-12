@@ -267,9 +267,9 @@ func RoutingSummary(files []ClassifiedFile, roles []Role) string {
 			continue
 		}
 		var names []string
-		for _, r := range roles {
-			if r.SeeAll || slices.Contains(r.Relevance, cat) {
-				names = append(names, r.Name)
+		for i := range roles {
+			if roles[i].SeeAll || slices.Contains(roles[i].Relevance, cat) {
+				names = append(names, roles[i].Name)
 			}
 		}
 		fmt.Fprintf(&b, "   %d %s file(s) → %s\n", n, cat, strings.Join(names, ", "))
