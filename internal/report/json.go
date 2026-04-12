@@ -44,6 +44,9 @@ func JSON(d *Data) (string, error) {
 		FailedAgents    []string                `json:"failed_agents"`
 		Usage           llm.Usage               `json:"usage"`
 		Duration        string                  `json:"duration,omitempty"`
+		DismissedCount  int                     `json:"dismissed_count"`
+		DowngradedCount int                     `json:"downgraded_count"`
+		VerifierError   string                  `json:"verifier_error,omitempty"`
 	}{
 		PR: prSummary{
 			Number: d.PR.Number,
@@ -59,6 +62,9 @@ func JSON(d *Data) (string, error) {
 		FailedAgents:    failedAgents,
 		Usage:           d.Usage,
 		Duration:        d.Duration,
+		DismissedCount:  d.DismissedCount,
+		DowngradedCount: d.DowngradedCount,
+		VerifierError:   d.VerifierError,
 	}
 
 	data, err := json.MarshalIndent(output, "", "  ")

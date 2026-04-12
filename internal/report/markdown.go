@@ -36,6 +36,15 @@ func Markdown(d *Data) string {
 	b.WriteString(d.Result.Summary)
 	b.WriteString("\n\n")
 
+	// Verification summary.
+	if d.DismissedCount > 0 || d.DowngradedCount > 0 {
+		fmt.Fprintf(&b, "> 🔬 **Verifier:** dismissed %d false positive(s), downgraded %d finding(s)\n\n",
+			d.DismissedCount, d.DowngradedCount)
+	}
+	if d.VerifierError != "" {
+		fmt.Fprintf(&b, "> ⚠️ **Verification error:** %s\n\n", d.VerifierError)
+	}
+
 	// Findings grouped by scope, then by file — use deduped if available.
 	if len(d.Result.DedupedFindings) > 0 {
 		byScope := groupDedupedByScope(d.Result.DedupedFindings)
@@ -52,8 +61,15 @@ func Markdown(d *Data) string {
 						line = fmt.Sprintf("%d", f.Line)
 					}
 					votes := fmt.Sprintf("%d/%d (%.0f%%)", f.VoteCount, f.TotalAgents, f.Consensus()*100)
+					summary := f.Summary
+					switch f.VerificationStatus {
+					case agents.StatusConfirmed:
+						summary = "✅ " + summary
+					case agents.StatusDowngraded:
+						summary = "⬇️ " + summary
+					}
 					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
-						line, severityBadge(f.Risk), f.Category, votes, f.Summary)
+						line, severityBadge(f.Risk), f.Category, votes, summary)
 				}
 				b.WriteString("\n")
 

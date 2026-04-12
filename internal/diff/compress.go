@@ -157,6 +157,21 @@ func extractFilePath(section string) string {
 	return ""
 }
 
+// SplitToMap splits a unified diff into per-file sections keyed by file path.
+// Sections whose path cannot be extracted are logged and skipped.
+func SplitToMap(rawDiff string) map[string]string {
+	sections := splitDiffByFile(rawDiff)
+	m := make(map[string]string, len(sections))
+	for _, section := range sections {
+		path := extractFilePath(section)
+		if path == "" {
+			continue
+		}
+		m[path] = section
+	}
+	return m
+}
+
 // isBinaryDiff returns true if the section is a binary file diff.
 func isBinaryDiff(section string) bool {
 	return strings.Contains(section, "Binary files ") && strings.Contains(section, " differ")

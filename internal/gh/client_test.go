@@ -201,6 +201,35 @@ func TestGetPRDiff_RoutesToGH(t *testing.T) {
 	}
 }
 
+func TestGetPRDiff_RepoNameFromMetadata(t *testing.T) {
+	t.Parallel()
+	callCount := 0
+	client := &Client{
+		useGH: true,
+		run: func(name string, args ...string) ([]byte, error) {
+			callCount++
+			switch callCount {
+			case 1: // gh pr view with headRepository in response
+				return []byte(`{"number":99,"title":"Cross-repo PR","body":"","headRefOid":"def456","files":[],"headRepository":{"name":"other-repo","nameWithOwner":"someone/other-repo"}}`), nil
+			case 2: // gh pr diff
+				return []byte("+ change\n"), nil
+			}
+			return nil, fmt.Errorf("unexpected call %d: should not call git remote", callCount)
+		},
+	}
+
+	pr, err := client.GetPRDiff("https://github.com/someone/other-repo/pull/99")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr.Repo != "other-repo" {
+		t.Errorf("expected repo 'other-repo' from metadata, got %q", pr.Repo)
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 calls (no git remote fallback), got %d", callCount)
+	}
+}
+
 func TestGetPRDiffGH_MetadataError(t *testing.T) {
 	t.Parallel()
 	client := &Client{

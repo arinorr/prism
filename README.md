@@ -44,7 +44,8 @@ Single-pass AI review has blind spots. Prism dispatches 7 specialized Claude age
 ```mermaid
 graph TD
     A["PR Diff"] --> B["Compress & strip noise"]
-    B --> C["7 Claude agents review in parallel"]
+    B --> X["Build symbol index · Classify files"]
+    X --> C["Route per-agent diffs + cross-refs"]
 
     C --> D["Know-It-All"]
     C --> E["Architect"]
@@ -62,13 +63,16 @@ graph TD
     I --> K
     J --> K
 
-    K --> L["Health score · Grade · Verdict"]
+    K --> V["Verify: dismiss false positives"]
+    V --> L["Health score · Grade · Verdict"]
     L --> M["Report"]
 
     style A fill:#ddf4ff,stroke:#0969da,color:#0969da
     style B fill:#f6f8fa,stroke:#d0d7de
+    style X fill:#fbefff,stroke:#8250df,color:#8250df
     style C fill:#ddf4ff,stroke:#0969da,color:#0969da
     style K fill:#fff8c5,stroke:#9a6700,color:#9a6700
+    style V fill:#fbefff,stroke:#8250df,color:#8250df
     style L fill:#dafbe1,stroke:#1a7f37,color:#1a7f37
     style M fill:#dafbe1,stroke:#1a7f37,color:#1a7f37
 ```
@@ -153,10 +157,13 @@ Show help and available options.
 | `--max-retries` | Number of retries per agent on failure (default: `1`) |
 | `--max-budget-usd` | Maximum dollar spend per agent call (e.g. `0.50`) |
 | `--config` | Path to config file (default: `.prism.yml`) |
+| `--verify` | Enable post-dedup verification (Haiku + Opus two-tier) |
+| `--no-verify` | Disable verification |
+| `--verifier-budget` | Max USD for verification (default: 20% of agent cost) |
 | `--no-compress` | Disable diff compression (send raw diff to agents) |
 | `--stdout` | Print report to terminal instead of saving to `results/` |
 | `-y`, `--yes` | Skip confirmation prompts (e.g. large diff warning) |
-| `-v`, `--verbose` | Show prompts, timing, token usage, and response details |
+| `-v`, `--verbose` | Show prompts, timing, per-file routing, token usage |
 | `--dry-run` | Preview what agents would run without calling Claude |
 
 <p align="right"><a href="#prism">back to top</a></p>
@@ -187,6 +194,11 @@ strip_patterns:           # Additional glob patterns to strip from diffs
   - "*.generated.go"
   - "docs/**"
 
+# Verification (two-tier false positive detection)
+verify: true
+verifier_model: opus      # Model for judgment tier (default: opus)
+verifier_budget_usd: 0.10 # Max USD for verification (default: 20% of agent cost)
+
 # Size thresholds (0 to disable)
 diff_warn_bytes: 153600   # Warn at 150 KB (default)
 diff_chunk_bytes: 307200  # Suggest splitting at 300 KB (default)
@@ -210,6 +222,21 @@ diff_chunk_bytes: 307200  # Suggest splitting at 300 KB (default)
 
 > [!NOTE]
 > Agents automatically detect languages in the diff (currently Go and TypeScript/JavaScript) and load language-specific skill modules for deeper, idiomatic feedback.
+
+### Smart Routing
+
+Prism classifies each file in the PR (code, docs, tests, config) and routes per-agent diffs — each agent only sees files relevant to its expertise. A docs-only PR skips Optimizer and Sentinel entirely. Mixed PRs route code files to all agents but README changes only to Know-It-All and Editor.
+
+Cross-category context is injected via the symbol index: when Test Engineer reviews test files, it also receives function signatures of the code being tested.
+
+### Verification
+
+With `--verify`, Prism runs a post-dedup verification phase that gives findings full codebase context via a symbol index:
+
+1. **Haiku tier**: cheap factual check — "Does this function nil-check its argument?" YES/NO/UNSURE
+2. **Opus tier**: judgment call on UNSURE findings only — confirmed / dismissed / downgraded
+
+False positives are removed before scoring. Use `--verifier-budget` to cap verification cost.
 
 <p align="right"><a href="#prism">back to top</a></p>
 

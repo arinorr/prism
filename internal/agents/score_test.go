@@ -40,7 +40,7 @@ func TestComputeHealthScore_Perfect(t *testing.T) {
 	if score.Score != 100 {
 		t.Errorf("expected 100, got %d", score.Score)
 	}
-	if score.Grade != "A+" {
+	if score.Grade != "A" {
 		t.Errorf("expected A+, got %q", score.Grade)
 	}
 	if score.Verdict != VerdictApprove {
@@ -66,8 +66,8 @@ func TestComputeHealthScore_OneCriticalChanged(t *testing.T) {
 	if score.Score != 91 {
 		t.Errorf("expected 91, got %d", score.Score)
 	}
-	if score.Grade != "A" {
-		t.Errorf("expected A, got %q", score.Grade)
+	if score.Grade != "A-" {
+		t.Errorf("expected A-, got %q", score.Grade)
 	}
 }
 
@@ -127,10 +127,12 @@ func TestComputeHealthScore_GradeBoundaries(t *testing.T) {
 		score int
 		grade string
 	}{
-		{100, "A+"}, {95, "A+"}, {94, "A"}, {90, "A"},
-		{89, "B+"}, {80, "B+"}, {79, "B"}, {70, "B"},
-		{69, "C"}, {60, "C"}, {59, "D"}, {40, "D"},
-		{39, "F"}, {0, "F"},
+		{100, "A"}, {93, "A"}, {92, "A-"}, {90, "A-"},
+		{89, "B+"}, {87, "B+"}, {86, "B"}, {83, "B"},
+		{82, "B-"}, {80, "B-"}, {79, "C+"}, {77, "C+"},
+		{76, "C"}, {73, "C"}, {72, "C-"}, {70, "C-"},
+		{69, "D+"}, {67, "D+"}, {66, "D"}, {63, "D"},
+		{62, "D-"}, {60, "D-"}, {59, "F"}, {0, "F"},
 	}
 	for _, tt := range tests {
 		got := scoreToGrade(tt.score)
@@ -164,8 +166,8 @@ func TestComputeHealthScore_MixedFindings(t *testing.T) {
 func TestHealthScore_NoFindings(t *testing.T) {
 	t.Parallel()
 	score := ComputeHealthScore(nil)
-	if score.Score != 100 || score.Grade != "A+" {
-		t.Errorf("no findings: expected 100/A+, got %d/%s", score.Score, score.Grade)
+	if score.Score != 100 || score.Grade != "A" {
+		t.Errorf("no findings: expected 100/A, got %d/%s", score.Score, score.Grade)
 	}
 }
 
@@ -181,10 +183,10 @@ func TestHealthScore_ManyHighConsensusFindings(t *testing.T) {
 	if score.Score != 55 {
 		t.Errorf("5 unanimous criticals: expected 55, got %d", score.Score)
 	}
-	if score.Grade != "D" {
-		t.Errorf("expected grade D, got %q", score.Grade)
+	if score.Grade != "F" {
+		t.Errorf("expected grade F, got %q", score.Grade)
 	}
-	if score.Verdict != VerdictRequestChanges {
+	if score.Verdict != VerdictDiscuss {
 		t.Errorf("expected verdict %q, got %q", VerdictRequestChanges, score.Verdict)
 	}
 }

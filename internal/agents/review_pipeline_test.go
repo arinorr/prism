@@ -285,9 +285,10 @@ func testRoles() []Role {
 // testSkills returns a skill map where each skill contains the role slug,
 // so the mock can identify which role made the request.
 func testSkills() map[string]string {
+	roles := testRoles()
 	skills := make(map[string]string)
-	for _, r := range testRoles() {
-		skills[r.Slug] = "You are the " + r.Slug + " reviewer."
+	for i := range roles {
+		skills[roles[i].Slug] = "You are the " + roles[i].Slug + " reviewer."
 	}
 	return skills
 }
@@ -299,12 +300,12 @@ func TestIntegration_FullReviewPipeline(t *testing.T) {
 	roles := testRoles()
 	orch := &Orchestrator{
 		roles:  roles,
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    perRoleMock(),
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -392,12 +393,12 @@ func TestIntegration_ScopeDistribution(t *testing.T) {
 	t.Parallel()
 	orch := &Orchestrator{
 		roles:  testRoles(),
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    perRoleMock(),
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -455,12 +456,12 @@ func TestIntegration_PartialFailureProducesResults(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles(),
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("partial failure should not error: %v", err)
 	}
@@ -482,12 +483,12 @@ func TestIntegration_CleanPR(t *testing.T) {
 	t.Parallel()
 	orch := &Orchestrator{
 		roles:  testRoles(),
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    &llmtest.Mock{Response: `{"findings": []}`},
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -498,8 +499,8 @@ func TestIntegration_CleanPR(t *testing.T) {
 	if result.HealthScore.Score != 100 {
 		t.Errorf("expected score 100 for clean PR, got %d", result.HealthScore.Score)
 	}
-	if result.HealthScore.Grade != "A+" {
-		t.Errorf("expected grade A+ for clean PR, got %q", result.HealthScore.Grade)
+	if result.HealthScore.Grade != "A" {
+		t.Errorf("expected grade A for clean PR, got %q", result.HealthScore.Grade)
 	}
 }
 
@@ -517,12 +518,12 @@ func TestIntegration_LowConfidenceFindingsFiltered(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles()[:1], // Just one agent to keep it simple.
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -542,12 +543,12 @@ func TestIntegration_VerboseTracksPerAgentUsage(t *testing.T) {
 	roles := testRoles()[:3] // Sentinel, Know-It-All, Architect
 	orch := &Orchestrator{
 		roles:  roles,
-		opts:   &Options{Verbose: true, Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Verbose: true, Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    perRoleMock(),
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -604,12 +605,12 @@ func TestIntegration_UnanimousConsensus(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles(),
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -648,7 +649,7 @@ func TestIntegration_FindingsForFilesNotInPR(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles()[:1],
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
@@ -660,7 +661,7 @@ func TestIntegration_FindingsForFilesNotInPR(t *testing.T) {
 		Files:  []gh.FileChange{{Path: "auth.go"}}, // Only auth.go is in the PR.
 	}
 
-	result, err := orch.Review(pr)
+	result, err := orch.Review(context.Background(), pr)
 	if err != nil {
 		t.Fatalf("review failed: %v", err)
 	}
@@ -687,13 +688,13 @@ func TestIntegration_EmptyDiff(t *testing.T) {
 	mock := &llmtest.Mock{Response: `{"findings":[]}`}
 	orch := &Orchestrator{
 		roles:  testRoles()[:1],
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
 
 	pr := &gh.PR{Number: "1", Title: "Empty PR", Diff: "", Files: nil}
-	result, err := orch.Review(pr)
+	result, err := orch.Review(context.Background(), pr)
 	if err != nil {
 		t.Fatalf("empty diff should not error: %v", err)
 	}
@@ -708,12 +709,12 @@ func TestIntegration_AllAgentsTimeout(t *testing.T) {
 	mock := &llmtest.Mock{Err: context.DeadlineExceeded}
 	orch := &Orchestrator{
 		roles:  testRoles()[:2],
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
 
-	_, err := orch.Review(realisticPR())
+	_, err := orch.Review(context.Background(), realisticPR())
 	if err == nil {
 		t.Fatal("expected error when all agents fail")
 	}
@@ -780,12 +781,12 @@ func TestIntegration_MalformedLLMResponses(t *testing.T) {
 			mock := &llmtest.Mock{Response: tt.response}
 			orch := &Orchestrator{
 				roles:  testRoles()[:1],
-				opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+				opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 				skills: testSkills(),
 				llm:    mock,
 			}
 
-			result, err := orch.Review(realisticPR())
+			result, err := orch.Review(context.Background(), realisticPR())
 			if tt.wantErr {
 				// Malformed response should cause agent failure.
 				// With 1 agent and 0 retries, this means all agents failed.
@@ -821,12 +822,12 @@ func TestIntegration_SuggestionsOnlyForWarningPlusWithLine(t *testing.T) {
 
 	orch := &Orchestrator{
 		roles:  testRoles()[:1],
-		opts:   &Options{Out: io.Discard, ErrOut: io.Discard},
+		opts:   &Options{Out: io.Discard, ErrOut: io.Discard, ExplicitRoles: true},
 		skills: testSkills(),
 		llm:    mock,
 	}
 
-	result, err := orch.Review(realisticPR())
+	result, err := orch.Review(context.Background(), realisticPR())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

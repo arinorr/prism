@@ -55,11 +55,13 @@ type AgentDetail struct {
 // DedupedFinding wraps a Finding with vote metadata from deduplication.
 type DedupedFinding struct {
 	Finding
-	VoteCount    int               `json:"vote_count"`
-	TotalAgents  int               `json:"total_agents"`
-	Voters       []string          `json:"voters"`
-	AgentDetails []AgentDetail     `json:"agent_details"`
-	voterTokens  []map[string]bool // cached tokenized summaries to avoid re-tokenization
+	VoteCount          int                `json:"vote_count"`
+	TotalAgents        int                `json:"total_agents"`
+	Voters             []string           `json:"voters"`
+	AgentDetails       []AgentDetail      `json:"agent_details"`
+	VerificationStatus VerificationStatus `json:"verification_status,omitempty"`
+	VerificationReason string             `json:"verification_reason,omitempty"`
+	voterTokens        []map[string]bool  // cached tokenized summaries to avoid re-tokenization
 }
 
 // Consensus returns the fraction of agents that flagged this issue (0.0-1.0).

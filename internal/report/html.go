@@ -42,6 +42,10 @@ type htmlTemplateData struct {
 	InputTokensK     int
 	OutputTokensK    int
 	CostUSD          string
+	DismissedCount   int
+	DowngradedCount  int
+	HasVerification  bool
+	VerifierError    string
 }
 
 type htmlFileGroup struct {
@@ -53,26 +57,29 @@ type htmlFileGroup struct {
 }
 
 type htmlFinding struct {
-	Risk              agents.Risk
-	RiskClass         string
-	Line              int
-	HasLine           bool
-	Role              string
-	RoleClass         string
-	Summary           string
-	Detail            string
-	HasDetail         bool
-	Category          string
-	CategoryClass     string
-	CodeExample       string
-	HasCodeExample    bool
-	Scope             string
-	AgentDetails      []htmlAgentDetail
-	HasMultipleAgents bool
-	FindingIndex      int
-	VoteCount         int
-	TotalAgents       int
-	ConsensusPercent  int
+	Risk                agents.Risk
+	RiskClass           string
+	Line                int
+	HasLine             bool
+	Role                string
+	RoleClass           string
+	Summary             string
+	Detail              string
+	HasDetail           bool
+	Category            string
+	CategoryClass       string
+	CodeExample         string
+	HasCodeExample      bool
+	Scope               string
+	AgentDetails        []htmlAgentDetail
+	HasMultipleAgents   bool
+	FindingIndex        int
+	VoteCount           int
+	TotalAgents         int
+	ConsensusPercent    int
+	VerificationStatus  string
+	VerificationReason  string
+	HasVerificationInfo bool
 }
 
 type htmlAgentDetail struct {
@@ -224,6 +231,10 @@ func HTML(d *Data) (string, error) {
 		OutputTokensK:    d.Usage.OutputTokens / 1000,
 		TotalTokensK:     d.Usage.TotalTokens() / 1000,
 		CostUSD:          fmt.Sprintf("%.2f", d.Usage.CostUSD),
+		DismissedCount:   d.DismissedCount,
+		DowngradedCount:  d.DowngradedCount,
+		HasVerification:  d.DismissedCount > 0 || d.DowngradedCount > 0,
+		VerifierError:    d.VerifierError,
 	}
 
 	tmpl, err := htmltemplate.New("report").Parse(htmlReportTemplate)
@@ -277,26 +288,29 @@ func buildDedupedFileGroup(g dedupedFileGroup, idx *int) htmlFileGroup {
 		}
 
 		findings = append(findings, htmlFinding{
-			Risk:              f.Risk,
-			RiskClass:         riskClass(f.Risk),
-			Line:              f.Line,
-			HasLine:           f.Line > 0,
-			Role:              f.Role,
-			RoleClass:         agentColorClass(f.Role),
-			Summary:           f.Summary,
-			Detail:            f.Detail,
-			HasDetail:         f.Detail != "",
-			Category:          f.Category,
-			CategoryClass:     categoryClass(f.Category),
-			CodeExample:       f.CodeExample,
-			HasCodeExample:    f.CodeExample != "",
-			Scope:             f.Scope,
-			AgentDetails:      agentDetails,
-			HasMultipleAgents: len(agentDetails) > 1,
-			FindingIndex:      *idx,
-			VoteCount:         f.VoteCount,
-			TotalAgents:       f.TotalAgents,
-			ConsensusPercent:  int(f.Consensus() * 100),
+			Risk:                f.Risk,
+			RiskClass:           riskClass(f.Risk),
+			Line:                f.Line,
+			HasLine:             f.Line > 0,
+			Role:                f.Role,
+			RoleClass:           agentColorClass(f.Role),
+			Summary:             f.Summary,
+			Detail:              f.Detail,
+			HasDetail:           f.Detail != "",
+			Category:            f.Category,
+			CategoryClass:       categoryClass(f.Category),
+			CodeExample:         f.CodeExample,
+			HasCodeExample:      f.CodeExample != "",
+			Scope:               f.Scope,
+			AgentDetails:        agentDetails,
+			HasMultipleAgents:   len(agentDetails) > 1,
+			FindingIndex:        *idx,
+			VoteCount:           f.VoteCount,
+			TotalAgents:         f.TotalAgents,
+			ConsensusPercent:    int(f.Consensus() * 100),
+			VerificationStatus:  string(f.VerificationStatus),
+			VerificationReason:  f.VerificationReason,
+			HasVerificationInfo: f.VerificationStatus != "",
 		})
 		*idx++
 	}
