@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/difflex"
+	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/resolve"
 )
 

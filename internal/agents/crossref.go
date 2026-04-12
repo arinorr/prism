@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/difflex"
+	"github.com/arinorr/prism/internal/parse"
 )
 
 // Cross-reference caps.

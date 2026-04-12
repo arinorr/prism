@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/difflex"
+	"github.com/arinorr/prism/internal/parse"
 )
 
 // SymbolStatus indicates whether a symbol is new, modified, or pre-existing.

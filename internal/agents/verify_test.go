@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/llm"
 	"github.com/arinorr/prism/internal/llm/llmtest"
+	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/resolve"
 )
 

@@ -341,6 +341,7 @@ func TestIntegration_FullReviewPipeline(t *testing.T) {
 	}
 	if sqlInjection == nil {
 		t.Fatal("expected a critical finding for auth/login.go")
+		return
 	}
 	if sqlInjection.VoteCount < 3 {
 		t.Errorf("SQL injection should have 3+ votes (found by sentinel, know-it-all, architect, solver), got %d", sqlInjection.VoteCount)

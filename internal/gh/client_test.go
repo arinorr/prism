@@ -76,6 +76,7 @@ func TestNewClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 	if client.run == nil {
 		t.Error("run should be set")
