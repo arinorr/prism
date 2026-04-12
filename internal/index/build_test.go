@@ -42,7 +42,7 @@ func TestBuild_LargeFileSkipped(t *testing.T) {
 
 	// Create a file larger than maxFileSize.
 	large := make([]byte, maxFileSize+1)
-	copy(large, []byte("package main\nfunc Huge() {}\n"))
+	copy(large, "package main\nfunc Huge() {}\n")
 	if err := os.WriteFile(filepath.Join(dir, "huge.go"), large, 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const unknownValue = "unknown"
+
 // commandRunner executes a command and returns its output.
 type commandRunner func(name string, args ...string) ([]byte, error)
 
@@ -55,7 +57,7 @@ func (r *Repo) Root() string {
 
 // RemoteName extracts the repository name from the origin remote URL.
 // Handles both SSH (git@github.com:owner/repo.git) and HTTPS
-// (https://github.com/owner/repo.git). Falls back to "unknown".
+// (https://github.com/owner/repo.git). Falls back to unknownValue.
 func (r *Repo) RemoteName() string {
 	_, name := r.remoteOwnerAndName()
 	return name
@@ -71,7 +73,7 @@ func (r *Repo) RemoteOwnerRepo() string {
 func (r *Repo) remoteOwnerAndName() (owner, name string) {
 	out, err := r.run("git", "remote", "get-url", "origin")
 	if err != nil {
-		return "unknown", "unknown"
+		return unknownValue, unknownValue
 	}
 	return ParseRemoteURL(strings.TrimSpace(string(out)))
 }
@@ -99,10 +101,10 @@ func ParseRemoteURL(url string) (owner, name string) {
 		if len(parts) == 2 {
 			return parts[0], parts[1]
 		}
-		return "unknown", path
+		return unknownValue, path
 	}
 
-	return "unknown", "unknown"
+	return unknownValue, unknownValue
 }
 
 // DefaultBranch returns "main" or "master" (whichever exists).

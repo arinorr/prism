@@ -173,7 +173,7 @@ func TestExtractCandidates_Dedup(t *testing.T) {
 	}
 }
 
-func assertRefs(t *testing.T, got []SymbolReference, want []SymbolReference) {
+func assertRefs(t *testing.T, got, want []SymbolReference) {
 	t.Helper()
 	if want == nil {
 		want = []SymbolReference{}

@@ -91,7 +91,7 @@ func TestBuildAgentPrompt_OrderMetadataBeforeDiff(t *testing.T) {
 	if titleIdx < 0 || descIdx < 0 || scopeIdx < 0 || crossIdx < 0 || diffIdx < 0 {
 		t.Fatal("expected all sections present")
 	}
-	if !(titleIdx < descIdx && descIdx < scopeIdx && scopeIdx < crossIdx && crossIdx < diffIdx) {
+	if titleIdx >= descIdx || descIdx >= scopeIdx || scopeIdx >= crossIdx || crossIdx >= diffIdx {
 		t.Errorf("sections in wrong order: title(%d) → desc(%d) → scope(%d) → cross-refs(%d) → diff(%d)",
 			titleIdx, descIdx, scopeIdx, crossIdx, diffIdx)
 	}
@@ -105,6 +105,9 @@ func TestBuildAgentPrompt_DiffIsLast(t *testing.T) {
 	prompt := buildAgentPrompt(&Role{}, pr, pctx)
 
 	diffIdx := strings.Index(prompt, "<pr-diff>")
+	if diffIdx < 0 {
+		t.Fatal("expected <pr-diff> in prompt")
+	}
 	afterDiff := prompt[diffIdx:]
 	endTag := strings.Index(afterDiff, "</pr-diff>")
 	remainder := strings.TrimSpace(afterDiff[endTag+len("</pr-diff>"):])

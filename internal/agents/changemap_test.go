@@ -195,7 +195,7 @@ func TestSymbolStatus_Values(t *testing.T) {
 	}
 }
 
-// --- parseChangedLines ---
+// parseChangedLines tests.
 
 func TestParseChangedLines_MultiHunk(t *testing.T) {
 	t.Parallel()

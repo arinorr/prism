@@ -49,7 +49,7 @@ func NewIndex() *Index {
 }
 
 // Add inserts a symbol into the index. Must be called before Freeze.
-func (idx *Index) Add(sym Symbol) {
+func (idx *Index) Add(sym Symbol) { //nolint:gocritic // hugeParam — Symbol is stored by value in maps, pointer would require copy anyway.
 	idx.symbols[sym.Name] = append(idx.symbols[sym.Name], sym)
 	idx.byFile[sym.File] = append(idx.byFile[sym.File], sym)
 }

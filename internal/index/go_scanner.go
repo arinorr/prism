@@ -51,8 +51,7 @@ func (GoScanner) Scan(filename string, src []byte) []Symbol {
 					EndLine:   fset.Position(spec.End()).Line,
 					Kind:      KindType,
 				}
-				switch ts.Type.(type) {
-				case *ast.InterfaceType:
+				if _, ok := ts.Type.(*ast.InterfaceType); ok {
 					sym.Kind = KindInterface
 				}
 				symbols = append(symbols, sym)

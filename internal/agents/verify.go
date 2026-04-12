@@ -77,9 +77,9 @@ func (v *Verifier) Verify(ctx context.Context, findings []DedupedFinding) ([]Ded
 
 	// Pass 1: preload finding files.
 	fileSet := make(map[string]bool)
-	for _, f := range findings {
-		if f.File != "" {
-			fileSet[f.File] = true
+	for i := range findings {
+		if findings[i].File != "" {
+			fileSet[findings[i].File] = true
 		}
 	}
 	findingFiles := make([]string, 0, len(fileSet))
@@ -94,11 +94,11 @@ func (v *Verifier) Verify(ctx context.Context, findings []DedupedFinding) ([]Ded
 
 	// Resolve context for each finding.
 	contexts := make([]*resolve.ResolvedContext, len(findings))
-	for i, f := range findings {
-		if f.File == "" {
+	for i := range findings {
+		if findings[i].File == "" {
 			continue
 		}
-		rc, err := v.resolver.Resolve(f.File, f.Line)
+		rc, err := v.resolver.Resolve(findings[i].File, findings[i].Line)
 		if err != nil {
 			continue // no context available; will pass through
 		}
@@ -107,8 +107,8 @@ func (v *Verifier) Verify(ctx context.Context, findings []DedupedFinding) ([]Ded
 
 	// Group findings by file for batching.
 	byFile := make(map[string][]indexedFinding)
-	for i, f := range findings {
-		byFile[f.File] = append(byFile[f.File], indexedFinding{i, f, contexts[i]})
+	for i := range findings {
+		byFile[findings[i].File] = append(byFile[findings[i].File], indexedFinding{i, findings[i], contexts[i]})
 	}
 
 	// Haiku tier: factual checks.
@@ -150,7 +150,8 @@ func (v *Verifier) Verify(ctx context.Context, findings []DedupedFinding) ([]Ded
 
 	// Opus tier: judgment on uncertain findings.
 	for _, group := range byFile {
-		for _, item := range group {
+		for gi := range group {
+			item := &group[gi]
 			vd := verdicts[item.idx]
 			if vd.Status != StatusConfirmed || vd.Reason != "" {
 				continue // already decided by Haiku (dismissed, confirmed with reason, or budget exceeded)
@@ -165,7 +166,7 @@ func (v *Verifier) Verify(ctx context.Context, findings []DedupedFinding) ([]Ded
 				continue
 			}
 
-			opusVerdict, usage, err := v.runOpusSingle(ctx, item.finding, item.ctx)
+			opusVerdict, usage, err := v.runOpusSingle(ctx, &item.finding, item.ctx)
 			totalUsage = totalUsage.Add(usage)
 			v.spent += usage.CostUSD
 
@@ -181,21 +182,21 @@ func (v *Verifier) Verify(ctx context.Context, findings []DedupedFinding) ([]Ded
 
 	// Apply verdicts to findings.
 	var result []DedupedFinding
-	for i, f := range findings {
+	for i := range findings {
 		vd := verdicts[i]
-		f.VerificationStatus = vd.Status
-		f.VerificationReason = vd.Reason
+		findings[i].VerificationStatus = vd.Status
+		findings[i].VerificationReason = vd.Reason
 
 		switch vd.Status {
 		case StatusDismissed:
 			continue // filter out
 		case StatusDowngraded:
 			if vd.AdjustedRisk.Valid() {
-				f.Risk = vd.AdjustedRisk
+				findings[i].Risk = vd.AdjustedRisk
 			}
 		}
 
-		result = append(result, f)
+		result = append(result, findings[i])
 	}
 
 	return result, totalUsage, nil
@@ -205,7 +206,7 @@ func (v *Verifier) budgetExceeded() bool {
 	return v.budget > 0 && v.spent >= v.budget
 }
 
-// --- Haiku tier ---
+// Haiku tier.
 
 const haikuSystemPrompt = `You are a code analysis fact-checker. You will be given code review findings and the relevant source code context.
 
@@ -238,7 +239,8 @@ func (v *Verifier) runHaikuBatch(ctx context.Context, batch []indexedFinding) ([
 func buildHaikuPrompt(batch []indexedFinding) string {
 	var b strings.Builder
 
-	for i, item := range batch {
+	for i := range batch {
+		item := &batch[i]
 		fmt.Fprintf(&b, "## Finding %d\n", i+1)
 		fmt.Fprintf(&b, "File: %s, Line: %d\n", item.finding.File, item.finding.Line)
 		fmt.Fprintf(&b, "Risk: %s, Category: %s\n", item.finding.Risk, item.finding.Category)
@@ -326,7 +328,7 @@ func parseHaikuResponse(response string, count int) []verdict {
 	return verdicts
 }
 
-// --- Opus tier ---
+// Opus tier.
 
 const opusSystemPrompt = `You are a senior code reviewer verifying findings from an automated review. You have full source code context that the original reviewers did not have.
 
@@ -340,7 +342,7 @@ Respond with a JSON object:
 
 The adjusted_risk field is only required when verdict is "downgraded".`
 
-func (v *Verifier) runOpusSingle(ctx context.Context, finding DedupedFinding, rc *resolve.ResolvedContext) (verdict, llm.Usage, error) {
+func (v *Verifier) runOpusSingle(ctx context.Context, finding *DedupedFinding, rc *resolve.ResolvedContext) (verdict, llm.Usage, error) {
 	prompt := buildOpusPrompt(finding, rc)
 
 	model := ModelTierDeep
@@ -362,7 +364,7 @@ func (v *Verifier) runOpusSingle(ctx context.Context, finding DedupedFinding, rc
 	return vd, usage, nil
 }
 
-func buildOpusPrompt(finding DedupedFinding, rc *resolve.ResolvedContext) string {
+func buildOpusPrompt(finding *DedupedFinding, rc *resolve.ResolvedContext) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "## Finding to Verify\n")

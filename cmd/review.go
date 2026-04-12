@@ -441,8 +441,8 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 	}
 
 	roleNames := make([]string, len(roles))
-	for i, r := range roles {
-		roleNames[i] = r.Name
+	for i := range roles {
+		roleNames[i] = roles[i].Name
 	}
 	data := &report.Data{
 		PR:              pr,
@@ -516,8 +516,8 @@ func printEstimate(diffBytes int, roles []agents.Role) {
 
 	// Group roles by model for cost breakdown.
 	modelCounts := make(map[string]int)
-	for _, r := range roles {
-		model := r.Model
+	for i := range roles {
+		model := roles[i].Model
 		if model == "" {
 			model = agents.ModelTierStandard
 		}
@@ -542,13 +542,13 @@ func printEstimate(diffBytes int, roles []agents.Role) {
 			continue
 		}
 		var names []string
-		for _, r := range roles {
-			m := r.Model
+		for i := range roles {
+			m := roles[i].Model
 			if m == "" {
 				m = agents.ModelTierStandard
 			}
 			if m == model {
-				names = append(names, r.Name)
+				names = append(names, roles[i].Name)
 			}
 		}
 		progress("     %-6s ×%d    %s\n", model, count, strings.Join(names, ", "))

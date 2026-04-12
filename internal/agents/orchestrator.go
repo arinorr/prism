@@ -208,7 +208,8 @@ func NewOrchestrator(roles []Role, opts *Options, backend llm.LLM, languages []s
 	}
 
 	skills := make(map[string]string, len(roles))
-	for _, r := range roles {
+	for i := range roles {
+		r := &roles[i]
 		data, err := readSkillFile(r.SkillFile, exeDir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load skill for %s: %w", r.Name, err)
@@ -325,10 +326,10 @@ func (o *Orchestrator) dryRun(pr *gh.PR) (*ReviewResult, error) {
 	o.logf("Diff size: %d bytes\n\n", len(pr.Diff))
 
 	o.logf("Agents that would run (%d):\n", len(o.roles))
-	for _, r := range o.roles {
-		o.logf("   • %s — %s\n", r.Name, r.Description)
+	for i := range o.roles {
+		o.logf("   • %s — %s\n", o.roles[i].Name, o.roles[i].Description)
 		if o.opts.Verbose {
-			o.logf("     Skill file: %s (%d bytes)\n", r.SkillFile, len(o.skill(&r)))
+			o.logf("     Skill file: %s (%d bytes)\n", o.roles[i].SkillFile, len(o.skill(&o.roles[i])))
 		}
 	}
 
@@ -395,10 +396,11 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR, rctx *ReviewContext) (*dispatch
 			agentFiles := FilterFilesForRole(r, rctx.Files)
 
 			var agentDiff string
-			if len(rctx.Files) == 0 {
+			switch {
+			case len(rctx.Files) == 0:
 				// No routing data (ReviewContext empty) — use full diff.
 				agentDiff = pr.Diff
-			} else if len(agentFiles) == 0 && !o.hasExplicitRoles() {
+			case len(agentFiles) == 0 && !o.hasExplicitRoles():
 				// Routing determined no relevant files — skip agent.
 				mu.Lock()
 				done++
@@ -406,10 +408,10 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR, rctx *ReviewContext) (*dispatch
 				agentUsages = append(agentUsages, AgentUsage{Role: r.Name})
 				mu.Unlock()
 				return
-			} else if len(agentFiles) == 0 {
+			case len(agentFiles) == 0:
 				// --roles set but no matching files — use full diff.
 				agentDiff = pr.Diff
-			} else {
+			default:
 				agentDiff = AssembleDiff(agentFiles)
 			}
 
@@ -604,8 +606,8 @@ func (o *Orchestrator) runVerificationWithResolver(ctx context.Context, result *
 
 	dismissed := preDedupCount - len(verified)
 	downgraded := 0
-	for _, f := range verified {
-		if f.VerificationStatus == StatusDowngraded {
+	for i := range verified {
+		if verified[i].VerificationStatus == StatusDowngraded {
 			downgraded++
 		}
 	}

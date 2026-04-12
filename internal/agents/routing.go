@@ -65,7 +65,7 @@ type AgentPromptContext struct {
 	ScopeHints string
 }
 
-// --- Classification ---
+// Classification.
 
 // classifier is a function that attempts to classify a file.
 // Returns the category and true if matched, or false to try the next classifier.
@@ -179,7 +179,7 @@ func classifyByExtension(_, _, ext string) (PRCategory, bool) {
 	return "", false
 }
 
-// --- Filtering and Assembly ---
+// Filtering and Assembly.
 
 // FilterFilesForRole returns the ClassifiedFiles relevant to a role.
 func FilterFilesForRole(role *Role, files []ClassifiedFile) []ClassifiedFile {
