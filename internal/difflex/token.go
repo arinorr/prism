@@ -1,4 +1,4 @@
-// Package lex provides a lightweight source code tokenizer for extracting
+// Package difflex provides a lightweight source code tokenizer for extracting
 // symbol references from diff text. Based on Thorsten Ball's lexer design
 // from "Writing an Interpreter in Go."
 //
