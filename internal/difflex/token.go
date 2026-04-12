@@ -10,7 +10,7 @@
 // Unicode identifiers are a known v1 limitation — the lexer uses byte-level
 // scanning. Go identifiers require ASCII uppercase for exports, and Unicode
 // identifiers are extremely rare in TypeScript.
-package lex
+package difflex
 
 // TokenType identifies the kind of a lexer token.
 type TokenType int

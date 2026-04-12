@@ -1,4 +1,4 @@
-package index
+package parse
 
 // extToLanguage maps file extensions to language identifiers.
 // This is intentionally duplicated from internal/agents/languages.go

@@ -1,4 +1,4 @@
-package lex
+package difflex
 
 // Lexer tokenizes a single line of source code. Based on Thorsten Ball's
 // lexer design: read character, switch on it, emit token.

@@ -9,7 +9,7 @@ import (
 
 	"github.com/arinorr/prism/internal/diff"
 	"github.com/arinorr/prism/internal/gh"
-	"github.com/arinorr/prism/internal/index"
+	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/resolve"
 )
 
@@ -43,7 +43,7 @@ type ClassifiedFile struct {
 // and passed explicitly to each agent dispatch.
 type ReviewContext struct {
 	Files     []ClassifiedFile
-	Index     *index.Index      // nil if index build failed
+	Index     *parse.Index      // nil if index build failed
 	Resolver  *resolve.Resolver // nil if index build failed
 	ChangeMap *ChangeMap        // nil if index build failed
 }
@@ -206,7 +206,7 @@ func AssembleDiff(files []ClassifiedFile) string {
 
 // BuildReviewContext classifies files, splits the diff, and optionally
 // builds the change map if an index is available.
-func BuildReviewContext(pr *gh.PR, idx *index.Index, resolver *resolve.Resolver) *ReviewContext {
+func BuildReviewContext(pr *gh.PR, idx *parse.Index, resolver *resolve.Resolver) *ReviewContext {
 	fileDiffs := diff.SplitToMap(pr.Diff)
 
 	var files []ClassifiedFile

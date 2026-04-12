@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/arinorr/prism/internal/index"
+	"github.com/arinorr/prism/internal/parse"
 )
 
 // Caps to prevent context blowup.
@@ -34,13 +34,13 @@ type ResolvedContext struct {
 
 // ScopeContext is the source text of the enclosing scope.
 type ScopeContext struct {
-	Symbol index.Symbol
+	Symbol parse.Symbol
 	Text   string
 }
 
 // ReferenceContext is the source text of a referenced symbol definition.
 type ReferenceContext struct {
-	Symbol index.Symbol
+	Symbol parse.Symbol
 	Text   string
 }
 
@@ -48,14 +48,14 @@ type ReferenceContext struct {
 // Call PreloadFiles before Resolve to populate the file cache.
 // Thread-safe: PreloadFiles and Resolve may be called from multiple goroutines.
 type Resolver struct {
-	idx       *index.Index
+	idx       *parse.Index
 	repoRoot  string
 	mu        sync.RWMutex
 	fileCache map[string][]byte
 }
 
 // NewResolver creates a Resolver backed by the given index.
-func NewResolver(idx *index.Index, repoRoot string) *Resolver {
+func NewResolver(idx *parse.Index, repoRoot string) *Resolver {
 	return &Resolver{
 		idx:       idx,
 		repoRoot:  repoRoot,

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/arinorr/prism/internal/index"
+	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/llm"
 	"github.com/arinorr/prism/internal/llm/llmtest"
 	"github.com/arinorr/prism/internal/resolve"
@@ -34,8 +34,8 @@ func process(data any) error {
 		t.Fatal(err)
 	}
 
-	idx := index.NewIndex()
-	scanner := index.GoScanner{}
+	idx := parse.NewIndex()
+	scanner := parse.GoScanner{}
 	syms := scanner.Scan("handler.go", []byte(src))
 	for _, s := range syms {
 		idx.Add(s)

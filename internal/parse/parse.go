@@ -1,7 +1,7 @@
 // Package index builds a symbol lookup table from source files.
 // The index maps symbol names to their locations (file, line range, kind)
 // for O(1) lookup. It is built once from pure Go code — no LLM calls.
-package index
+package parse
 
 import (
 	"sort"

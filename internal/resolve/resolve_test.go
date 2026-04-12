@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/arinorr/prism/internal/index"
+	"github.com/arinorr/prism/internal/parse"
 )
 
 func TestResolver_Resolve(t *testing.T) {
@@ -47,8 +47,8 @@ func ProcessData(cfg Config) []byte {
 	writeFile(t, dir, "process.go", processSrc)
 
 	// Build index.
-	idx := index.NewIndex()
-	goScanner := index.GoScanner{}
+	idx := parse.NewIndex()
+	goScanner := parse.GoScanner{}
 
 	for _, f := range []string{"handler.go", "types.go", "process.go"} {
 		src, _ := os.ReadFile(filepath.Join(dir, f))
@@ -89,7 +89,7 @@ func ProcessData(cfg Config) []byte {
 }
 
 func TestResolver_FileNotPreloaded(t *testing.T) {
-	idx := index.NewIndex()
+	idx := parse.NewIndex()
 	idx.Freeze()
 
 	r := NewResolver(idx, t.TempDir())
@@ -103,7 +103,7 @@ func TestResolver_NoEnclosingScope(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "bare.go", "package main\n\n// just a comment\n")
 
-	idx := index.NewIndex()
+	idx := parse.NewIndex()
 	idx.Freeze()
 
 	r := NewResolver(idx, dir)
@@ -139,8 +139,8 @@ type Config struct{ Port int }
 func Process(c Config) {}
 `)
 
-	idx := index.NewIndex()
-	goScanner := index.GoScanner{}
+	idx := parse.NewIndex()
+	goScanner := parse.GoScanner{}
 	for _, f := range []string{"a.go", "b.go", "c.go"} {
 		src, _ := os.ReadFile(filepath.Join(dir, f))
 		for _, sym := range goScanner.Scan(f, src) {

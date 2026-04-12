@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/arinorr/prism/internal/gh"
-	"github.com/arinorr/prism/internal/index"
+	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/llm"
 	"github.com/arinorr/prism/internal/llm/llmtest"
 	"github.com/arinorr/prism/internal/resolve"
@@ -261,7 +261,7 @@ func TestIntegration_IndexBuild(t *testing.T) {
 	writeRepoFile(t, dir, "main.go", "package main\n\nfunc Main() {}\n")
 	writeRepoFile(t, dir, "lib/util.ts", "export function helper() { return 1; }\n")
 
-	idx, err := index.Build(context.Background(), dir, []string{"go", "typescript"})
+	idx, err := parse.Build(context.Background(), dir, []string{"go", "typescript"})
 	if err != nil {
 		t.Fatal(err)
 	}

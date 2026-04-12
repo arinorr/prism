@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arinorr/prism/internal/index"
+	"github.com/arinorr/prism/internal/parse"
 )
 
 func TestBuildChangeMap_ModifiedFunction(t *testing.T) {
 	t.Parallel()
 
-	idx := index.NewIndex()
-	idx.Add(index.Symbol{Name: "HandleRequest", File: "handler.go", StartLine: 5, EndLine: 15, Kind: index.KindFunc})
+	idx := parse.NewIndex()
+	idx.Add(parse.Symbol{Name: "HandleRequest", File: "handler.go", StartLine: 5, EndLine: 15, Kind: parse.KindFunc})
 	idx.Freeze()
 
 	files := []ClassifiedFile{{
@@ -43,7 +43,7 @@ func TestBuildChangeMap_ModifiedFunction(t *testing.T) {
 func TestBuildChangeMap_NewFunction(t *testing.T) {
 	t.Parallel()
 
-	idx := index.NewIndex()
+	idx := parse.NewIndex()
 	idx.Freeze() // empty index — nothing pre-exists
 
 	files := []ClassifiedFile{{
@@ -73,8 +73,8 @@ func TestBuildChangeMap_NewFunction(t *testing.T) {
 func TestBuildChangeMap_NestedDeclaration(t *testing.T) {
 	t.Parallel()
 
-	idx := index.NewIndex()
-	idx.Add(index.Symbol{Name: "HandleRequest", File: "handler.go", StartLine: 3, EndLine: 10, Kind: index.KindFunc})
+	idx := parse.NewIndex()
+	idx.Add(parse.Symbol{Name: "HandleRequest", File: "handler.go", StartLine: 3, EndLine: 10, Kind: parse.KindFunc})
 	idx.Freeze()
 
 	files := []ClassifiedFile{{
@@ -104,7 +104,7 @@ func TestBuildChangeMap_NestedDeclaration(t *testing.T) {
 func TestBuildChangeMap_AllNewFile(t *testing.T) {
 	t.Parallel()
 
-	idx := index.NewIndex()
+	idx := parse.NewIndex()
 	idx.Freeze()
 
 	files := []ClassifiedFile{{
@@ -137,9 +137,9 @@ func TestBuildChangeMap_AllNewFile(t *testing.T) {
 func TestBuildChangeMap_SameNameDifferentFiles(t *testing.T) {
 	t.Parallel()
 
-	idx := index.NewIndex()
-	idx.Add(index.Symbol{Name: "Init", File: "cmd/server.go", StartLine: 1, EndLine: 5, Kind: index.KindFunc})
-	idx.Add(index.Symbol{Name: "Init", File: "internal/db/db.go", StartLine: 1, EndLine: 5, Kind: index.KindFunc})
+	idx := parse.NewIndex()
+	idx.Add(parse.Symbol{Name: "Init", File: "cmd/server.go", StartLine: 1, EndLine: 5, Kind: parse.KindFunc})
+	idx.Add(parse.Symbol{Name: "Init", File: "internal/db/db.go", StartLine: 1, EndLine: 5, Kind: parse.KindFunc})
 	idx.Freeze()
 
 	files := []ClassifiedFile{
@@ -358,7 +358,7 @@ func TestFormatScopeHints_WithData(t *testing.T) {
 
 func TestBuildChangeMap_EmptyDiff(t *testing.T) {
 	t.Parallel()
-	idx := index.NewIndex()
+	idx := parse.NewIndex()
 	idx.Freeze()
 
 	files := []ClassifiedFile{{Path: "a.go", Category: PRCategoryCode, Diff: ""}}
