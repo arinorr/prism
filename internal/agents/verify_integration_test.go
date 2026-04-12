@@ -17,8 +17,8 @@ import (
 
 // TestIntegration_ReviewWithVerification exercises the full pipeline with
 // verification enabled, using a mock LLM that:
-// - Returns findings from agents
-// - Dismisses one finding via Haiku
+// - Returns findings from agents.
+// - Dismisses one finding via Haiku.
 // - Confirms others.
 func TestIntegration_ReviewWithVerification(t *testing.T) {
 	t.Parallel()
