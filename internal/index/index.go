@@ -3,7 +3,9 @@
 // for O(1) lookup. It is built once from pure Go code — no LLM calls.
 package index
 
-import "sort"
+import (
+	"sort"
+)
 
 // SymbolKind identifies the type of a symbol declaration.
 type SymbolKind string
@@ -92,6 +94,17 @@ func (idx *Index) EnclosingScope(file string, line int) *Symbol {
 // sorted by StartLine.
 func (idx *Index) SymbolsInFile(file string) []Symbol {
 	return idx.byFile[file]
+}
+
+// AllFiles returns all file paths that have symbols in the index,
+// sorted alphabetically for deterministic output.
+func (idx *Index) AllFiles() []string {
+	files := make([]string, 0, len(idx.byFile))
+	for f := range idx.byFile {
+		files = append(files, f)
+	}
+	sort.Strings(files)
+	return files
 }
 
 // Size returns the total number of symbols in the index.
