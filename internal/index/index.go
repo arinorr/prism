@@ -94,6 +94,15 @@ func (idx *Index) SymbolsInFile(file string) []Symbol {
 	return idx.byFile[file]
 }
 
+// AllFiles returns all file paths that have symbols in the index.
+func (idx *Index) AllFiles() []string {
+	files := make([]string, 0, len(idx.byFile))
+	for f := range idx.byFile {
+		files = append(files, f)
+	}
+	return files
+}
+
 // Size returns the total number of symbols in the index.
 func (idx *Index) Size() int {
 	n := 0

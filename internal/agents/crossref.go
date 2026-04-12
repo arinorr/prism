@@ -118,16 +118,17 @@ func ResolveCrossReferences(
 		candidates = candidates[:maxCrossRefs]
 	}
 
-	// Resolve each candidate to its definition text.
-	// Preload the definition files.
-	var defFiles []string
-	for _, c := range candidates {
-		syms := rctx.Index.Lookup(c.ref.Name)
-		if len(syms) > 0 {
-			defFiles = append(defFiles, syms[0].File)
-		}
-	}
-	rctx.Resolver.PreloadFiles(defFiles)
+	// Preload ALL indexed files into the resolver cache.
+	// The resolver reads definition scopes and scans them for secondary
+	// symbol references (e.g., HandleRequest references Config, which lives
+	// in types.go). Those secondary files must be in the cache or the resolver
+	// logs "not in cache, skipping." Rather than trying to predict which files
+	// will be needed (which requires reading the definitions first — chicken
+	// and egg), preload everything the index knows about. For a typical repo
+	// this is a few dozen source files — fast to read and already walked
+	// during index building.
+	allFiles := rctx.Index.AllFiles()
+	rctx.Resolver.PreloadFiles(allFiles)
 
 	var refs []CrossReference
 	for _, c := range candidates {
