@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/arinorr/prism/internal/index"
-	"github.com/arinorr/prism/internal/lex"
+	"github.com/arinorr/prism/internal/difflex"
+	"github.com/arinorr/prism/internal/parse"
 )
 
 // Cross-reference caps.
@@ -17,14 +17,14 @@ const (
 
 // CrossReference is a resolved symbol for context injection.
 type CrossReference struct {
-	Symbol         index.Symbol
+	Symbol         parse.Symbol
 	Text           string // definition source text
 	ReferencedFrom string // which diff file referenced this symbol
 }
 
 // FilterByIndex keeps only candidates whose names exist in the index.
-func FilterByIndex(candidates []lex.SymbolReference, idx *index.Index) []lex.SymbolReference {
-	var filtered []lex.SymbolReference
+func FilterByIndex(candidates []difflex.SymbolReference, idx *parse.Index) []difflex.SymbolReference {
+	var filtered []difflex.SymbolReference
 	for _, c := range candidates {
 		if syms := idx.Lookup(c.Name); len(syms) > 0 {
 			filtered = append(filtered, c)
@@ -66,17 +66,17 @@ func ResolveCrossReferences(
 
 	// Extract and filter candidates from non-code diffs.
 	type rankedCandidate struct {
-		ref  lex.SymbolReference
+		ref  difflex.SymbolReference
 		file string // which non-code file referenced it
 	}
 	var candidates []rankedCandidate
 	seen := make(map[string]bool)
 
 	for _, f := range nonCodeFiles {
-		raw := lex.ExtractCandidates(f.Diff)
+		raw := difflex.ExtractCandidates(f.Diff)
 		filtered := FilterByIndex(raw, rctx.Index)
 		for _, c := range filtered {
-			if c.Kind == lex.RefDeclaration {
+			if c.Kind == difflex.RefDeclaration {
 				continue // declarations aren't references to other code
 			}
 			if seen[c.Name] {
@@ -108,7 +108,7 @@ func ResolveCrossReferences(
 			return ci.InChange // changed first
 		}
 		if ci.Kind != cj.Kind {
-			return ci.Kind == lex.RefCall // calls before types
+			return ci.Kind == difflex.RefCall // calls before types
 		}
 		return false
 	})

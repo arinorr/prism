@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/arinorr/prism/internal/gh"
-	"github.com/arinorr/prism/internal/index"
 	"github.com/arinorr/prism/internal/llm"
+	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/resolve"
 )
 
@@ -258,11 +258,11 @@ func (o *Orchestrator) Review(ctx context.Context, pr *gh.PR) (*ReviewResult, er
 
 	// Build symbol index ONCE from working tree (not compressed diff).
 	// Shared by: routing context, cross-references, scope hints, verification.
-	var idx *index.Index
+	var idx *parse.Index
 	var resolver *resolve.Resolver
 	if o.opts.RepoRoot != "" {
 		var buildErr error
-		idx, buildErr = index.Build(ctx, o.opts.RepoRoot, o.opts.Languages)
+		idx, buildErr = parse.Build(ctx, o.opts.RepoRoot, o.opts.Languages)
 		if buildErr != nil {
 			o.errLogf("   ⚠️  Symbol index failed: %v (routing without cross-refs)\n", buildErr)
 		} else {

@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/arinorr/prism/internal/index"
 	"github.com/arinorr/prism/internal/llm"
 	"github.com/arinorr/prism/internal/llm/llmtest"
+	"github.com/arinorr/prism/internal/parse"
 	"github.com/arinorr/prism/internal/resolve"
 )
 
@@ -80,8 +80,8 @@ func A() error { return nil }
 func B() error { return nil }
 `)
 
-	idx := index.NewIndex()
-	scanner := index.GoScanner{}
+	idx := parse.NewIndex()
+	scanner := parse.GoScanner{}
 	for _, f := range []string{"a.go", "b.go"} {
 		src, _ := os.ReadFile(filepath.Join(dir, f))
 		for _, sym := range scanner.Scan(f, src) {

@@ -1,4 +1,4 @@
-package index
+package parse
 
 import (
 	"go/ast"

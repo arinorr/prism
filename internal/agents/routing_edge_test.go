@@ -14,9 +14,9 @@ func TestBuildReviewContext_NilIndex(t *testing.T) {
 	}
 
 	rctx := BuildReviewContext(pr, nil, nil)
-
 	if rctx == nil {
 		t.Fatal("expected non-nil ReviewContext")
+		return
 	}
 	if rctx.Index != nil {
 		t.Error("expected nil Index")
@@ -63,6 +63,7 @@ func TestBuildReviewContext_EmptyPR(t *testing.T) {
 	rctx := BuildReviewContext(pr, nil, nil)
 	if rctx == nil {
 		t.Fatal("expected non-nil ReviewContext")
+		return
 	}
 	if len(rctx.Files) != 0 {
 		t.Errorf("expected 0 files, got %d", len(rctx.Files))

@@ -246,6 +246,7 @@ func TestNew(t *testing.T) {
 	adapter := New()
 	if adapter == nil {
 		t.Fatal("expected non-nil adapter")
+		return
 	}
 	if adapter.run == nil {
 		t.Fatal("expected run to be set")

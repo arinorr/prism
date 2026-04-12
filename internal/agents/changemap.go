@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arinorr/prism/internal/index"
-	"github.com/arinorr/prism/internal/lex"
+	"github.com/arinorr/prism/internal/difflex"
+	"github.com/arinorr/prism/internal/parse"
 )
 
 // SymbolStatus indicates whether a symbol is new, modified, or pre-existing.
@@ -52,7 +52,7 @@ func (cm *ChangeMap) Status(file, name string) SymbolStatus {
 //  1. For + lines with declaration patterns, mark as added.
 //  2. For indexed symbols whose line range overlaps changed lines, mark as modified.
 //  3. Added symbols are skipped in step 2.
-func BuildChangeMap(files []ClassifiedFile, idx *index.Index) *ChangeMap {
+func BuildChangeMap(files []ClassifiedFile, idx *parse.Index) *ChangeMap {
 	cm := &ChangeMap{
 		Modified: make(map[SymbolKey]bool),
 		Added:    make(map[SymbolKey]bool),
@@ -69,9 +69,9 @@ func BuildChangeMap(files []ClassifiedFile, idx *index.Index) *ChangeMap {
 		}
 
 		// Step 1: Find declarations on + lines → added.
-		candidates := lex.ExtractCandidates(f.Diff)
+		candidates := difflex.ExtractCandidates(f.Diff)
 		for _, c := range candidates {
-			if c.Kind == lex.RefDeclaration && c.InChange {
+			if c.Kind == difflex.RefDeclaration && c.InChange {
 				cm.Added[SymbolKey{File: f.Path, Name: c.Name}] = true
 			}
 		}

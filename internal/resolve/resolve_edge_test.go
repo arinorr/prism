@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arinorr/prism/internal/index"
+	"github.com/arinorr/prism/internal/parse"
 )
 
 func TestResolver_MaxReferences(t *testing.T) {
@@ -29,8 +29,8 @@ func TestResolver_MaxReferences(t *testing.T) {
 		writeFile(t, dir, strings.ToLower(r)+".go", "package main\n\nfunc "+r+"() int { return 0 }\n")
 	}
 
-	idx := index.NewIndex()
-	scanner := index.GoScanner{}
+	idx := parse.NewIndex()
+	scanner := parse.GoScanner{}
 	for _, f := range append(refs, "handler") {
 		name := strings.ToLower(f) + ".go"
 		src, _ := os.ReadFile(filepath.Join(dir, name))
@@ -69,8 +69,8 @@ func TestResolver_ScopeLineCap(t *testing.T) {
 	lines = append(lines, "}")
 	writeFile(t, dir, "long.go", strings.Join(lines, "\n"))
 
-	idx := index.NewIndex()
-	scanner := index.GoScanner{}
+	idx := parse.NewIndex()
+	scanner := parse.GoScanner{}
 	src, _ := os.ReadFile(filepath.Join(dir, "long.go"))
 	for _, sym := range scanner.Scan("long.go", src) {
 		idx.Add(sym)
@@ -106,14 +106,14 @@ func Handler() {
 `
 	writeFile(t, dir, "handler.go", handlerSrc)
 
-	idx := index.NewIndex()
-	scanner := index.GoScanner{}
+	idx := parse.NewIndex()
+	scanner := parse.GoScanner{}
 	src, _ := os.ReadFile(filepath.Join(dir, "handler.go"))
 	for _, sym := range scanner.Scan("handler.go", src) {
 		idx.Add(sym)
 	}
 	// Add a symbol in a file that doesn't exist on disk.
-	idx.Add(index.Symbol{Name: "Missing", File: "missing.go", StartLine: 1, EndLine: 3, Kind: index.KindFunc})
+	idx.Add(parse.Symbol{Name: "Missing", File: "missing.go", StartLine: 1, EndLine: 3, Kind: parse.KindFunc})
 	idx.Freeze()
 
 	r := NewResolver(idx, dir)
@@ -136,7 +136,7 @@ func TestResolver_PreloadIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.go", "package main\nfunc A() {}\n")
 
-	idx := index.NewIndex()
+	idx := parse.NewIndex()
 	idx.Freeze()
 
 	r := NewResolver(idx, dir)
@@ -145,7 +145,7 @@ func TestResolver_PreloadIdempotent(t *testing.T) {
 }
 
 func TestResolver_CollectReferenceFiles_Empty(t *testing.T) {
-	idx := index.NewIndex()
+	idx := parse.NewIndex()
 	idx.Freeze()
 
 	r := NewResolver(idx, t.TempDir())
@@ -159,8 +159,8 @@ func TestResolver_LineOutOfRange(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "small.go", "package main\nfunc Tiny() {}\n")
 
-	idx := index.NewIndex()
-	scanner := index.GoScanner{}
+	idx := parse.NewIndex()
+	scanner := parse.GoScanner{}
 	src, _ := os.ReadFile(filepath.Join(dir, "small.go"))
 	for _, sym := range scanner.Scan("small.go", src) {
 		idx.Add(sym)
