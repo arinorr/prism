@@ -322,7 +322,7 @@ func HandleRequest() {}
 // TestResolveCrossReferences_SecondaryRefsPreloaded verifies that the
 // preload-all-files strategy resolves secondary references. A test file
 // calls HandleRequest, which references Config (in a separate file).
-// Without preloading all indexed files, Config's file would be "not in cache."
+// Without preloading all indexed files, Config's file would be "not in cache".
 func TestResolveCrossReferences_SecondaryRefsPreloaded(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
