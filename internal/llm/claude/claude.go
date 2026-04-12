@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/arinorr/prism/internal/llm"
 )
@@ -15,9 +17,24 @@ type commandRunner func(ctx context.Context, name string, args ...string) ([]byt
 
 func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204 -- binary is hardcoded "claude"
+	// Unset CLAUDECODE so prism can be run from within a Claude Code session.
+	// Without this, the Claude CLI refuses to start: "cannot be launched inside
+	// another Claude Code session."
+	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
 	// CombinedOutput captures both stdout and stderr so error messages
 	// from the Claude CLI (rate limits, auth failures, etc.) are preserved.
 	return cmd.CombinedOutput()
+}
+
+// filterEnv returns env without any variable matching the given prefix.
+func filterEnv(env []string, prefix string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix+"=") {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }
 
 // Adapter implements llm.LLM using the Claude CLI (`claude --print`).
