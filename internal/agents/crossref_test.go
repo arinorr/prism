@@ -319,6 +319,103 @@ func HandleRequest() {}
 	}
 }
 
+// TestResolveCrossReferences_SecondaryRefsPreloaded verifies that the
+// preload-all-files strategy resolves secondary references. A test file
+// calls HandleRequest, which references Config (in a separate file).
+// Without preloading all indexed files, Config's file would be "not in cache."
+func TestResolveCrossReferences_SecondaryRefsPreloaded(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// handler.go defines HandleRequest which uses Config.
+	writeTestSourceFile(t, dir, "handler.go", `package main
+
+func HandleRequest(cfg Config) error {
+	if cfg.Port == 0 {
+		return fmt.Errorf("no port")
+	}
+	return nil
+}
+`)
+	// types.go defines Config — a secondary reference.
+	writeTestSourceFile(t, dir, "types.go", `package main
+
+type Config struct {
+	Host string
+	Port int
+}
+`)
+
+	// Build index from both files.
+	idx := index.NewIndex()
+	scanner := index.GoScanner{}
+	for _, f := range []string{"handler.go", "types.go"} {
+		src, _ := os.ReadFile(filepath.Join(dir, f))
+		for _, sym := range scanner.Scan(f, src) {
+			idx.Add(sym)
+		}
+	}
+	idx.Freeze()
+
+	resolver := resolve.NewResolver(idx, dir)
+
+	rctx := &ReviewContext{
+		Index:    idx,
+		Resolver: resolver,
+	}
+
+	// Test file diff that calls HandleRequest.
+	testFiles := []ClassifiedFile{{
+		Path:     "handler_test.go",
+		Category: PRCategoryTests,
+		Diff:     "+\terr := HandleRequest(cfg)\n+\tassert.NoError(t, err)\n",
+	}}
+
+	refs := ResolveCrossReferences(testFiles, rctx)
+
+	// HandleRequest should be resolved with its definition text.
+	found := false
+	for _, ref := range refs {
+		if ref.Symbol.Name == "HandleRequest" {
+			found = true
+			// The definition text should include "Config" because the resolver
+			// can now read types.go (preloaded via AllFiles).
+			if !strings.Contains(ref.Text, "Config") {
+				t.Error("expected HandleRequest definition to reference Config (secondary ref should be preloaded)")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected HandleRequest in cross-references")
+	}
+}
+
+// TestAllFiles_Deterministic verifies AllFiles returns sorted, deterministic output.
+func TestAllFiles_Deterministic(t *testing.T) {
+	t.Parallel()
+	idx := index.NewIndex()
+	idx.Add(index.Symbol{Name: "C", File: "c.go", Kind: index.KindFunc})
+	idx.Add(index.Symbol{Name: "A", File: "a.go", Kind: index.KindFunc})
+	idx.Add(index.Symbol{Name: "B", File: "b.go", Kind: index.KindFunc})
+	idx.Freeze()
+
+	files := idx.AllFiles()
+	if len(files) != 3 {
+		t.Fatalf("expected 3 files, got %d", len(files))
+	}
+	if files[0] != "a.go" || files[1] != "b.go" || files[2] != "c.go" {
+		t.Errorf("expected sorted [a.go b.go c.go], got %v", files)
+	}
+
+	// Run again — should be identical.
+	files2 := idx.AllFiles()
+	for i := range files {
+		if files[i] != files2[i] {
+			t.Errorf("AllFiles not deterministic: run1[%d]=%s, run2[%d]=%s", i, files[i], i, files2[i])
+		}
+	}
+}
+
 func writeTestSourceFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	full := filepath.Join(dir, name)
