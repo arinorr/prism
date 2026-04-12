@@ -95,7 +95,7 @@ func TestFormatCrossReferences_ProducesValidBlock(t *testing.T) {
 	}
 }
 
-// --- ResolveCrossReferences ---
+// ResolveCrossReferences.
 
 func TestResolveCrossReferences_NilContext(t *testing.T) {
 	t.Parallel()
