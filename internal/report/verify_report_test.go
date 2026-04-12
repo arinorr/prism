@@ -128,7 +128,7 @@ func TestHTML_VerificationFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(output) == 0 {
+	if output == "" {
 		t.Error("expected non-empty HTML output")
 	}
 	// HTML should render without error even with verification data.

@@ -38,7 +38,7 @@ func ExtractCandidates(diffText string) []SymbolReference {
 			continue
 		}
 
-		inChange := len(line) > 0 && (line[0] == '+' || line[0] == '-')
+		inChange := line != "" && (line[0] == '+' || line[0] == '-')
 		clean := stripDiffPrefix(line)
 		if clean == "" {
 			continue
@@ -87,7 +87,7 @@ func shouldSkipDiffLine(line string) bool {
 
 // stripDiffPrefix removes the +/-/space diff prefix from a line.
 func stripDiffPrefix(line string) string {
-	if len(line) == 0 {
+	if line == "" {
 		return ""
 	}
 	if line[0] == '+' || line[0] == '-' || line[0] == ' ' {

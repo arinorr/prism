@@ -62,9 +62,10 @@ func Markdown(d *Data) string {
 					}
 					votes := fmt.Sprintf("%d/%d (%.0f%%)", f.VoteCount, f.TotalAgents, f.Consensus()*100)
 					summary := f.Summary
-					if f.VerificationStatus == agents.StatusConfirmed {
+					switch f.VerificationStatus {
+					case agents.StatusConfirmed:
 						summary = "✅ " + summary
-					} else if f.VerificationStatus == agents.StatusDowngraded {
+					case agents.StatusDowngraded:
 						summary = "⬇️ " + summary
 					}
 					fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",

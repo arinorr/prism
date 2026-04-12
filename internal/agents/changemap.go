@@ -149,7 +149,7 @@ func parseChangedLines(diffText string) map[int]bool {
 			continue
 		}
 
-		if len(line) == 0 {
+		if line == "" {
 			newLine++
 			continue
 		}
@@ -179,7 +179,7 @@ func parseHunkNewStart(hunkHeader string) int {
 	}
 	rest := hunkHeader[idx+1:]
 	var n int
-	fmt.Sscanf(rest, "%d", &n)
+	_, _ = fmt.Sscanf(rest, "%d", &n)
 	return n
 }
 

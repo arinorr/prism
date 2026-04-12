@@ -22,11 +22,11 @@ func CloneShallow(ownerRepo, ref string) (*Repo, func(), error) {
 	// #nosec G204 -- ownerRepo comes from GitHub API, ref from gh pr view
 	cmd := exec.Command("gh", "repo", "clone", ownerRepo, dir, "--", "--depth", "1", "--branch", ref)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return nil, nil, fmt.Errorf("cloning %s at %s: %w\n%s", ownerRepo, ref, err, string(out))
 	}
 
-	cleanup := func() { os.RemoveAll(dir) }
+	cleanup := func() { _ = os.RemoveAll(dir) }
 	return &Repo{root: dir, run: defaultRunner}, cleanup, nil
 }
 

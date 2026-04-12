@@ -86,7 +86,7 @@ func Process(data string) error {
 
 	roles := testRoles()
 	orch := &Orchestrator{
-		roles:  roles,
+		roles: roles,
 		opts: &Options{
 			Out:           io.Discard,
 			ErrOut:        io.Discard,

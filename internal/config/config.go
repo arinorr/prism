@@ -14,21 +14,21 @@ import (
 // Pointer fields (MaxRetries) use nil to distinguish "not set" from
 // an explicit zero value, which is meaningful (e.g. 0 retries = disabled).
 type Config struct {
-	Roles            []string `yaml:"roles"`
-	Model            string   `yaml:"model"`
-	Format           string   `yaml:"format"`
-	AgentTimeout     string   `yaml:"agent_timeout"`
-	MaxRetries       *int     `yaml:"max_retries"`
-	MaxBudgetUSD     float64  `yaml:"max_budget_usd"`
-	DiffContextLines *int     `yaml:"diff_context_lines"` // nil = use default (1), -1 = keep all
-	Debate           bool     `yaml:"debate"`
-	NoCompress       bool     `yaml:"no_compress"`
-	StripPatterns    []string `yaml:"strip_patterns"`
+	Roles             []string `yaml:"roles"`
+	Model             string   `yaml:"model"`
+	Format            string   `yaml:"format"`
+	AgentTimeout      string   `yaml:"agent_timeout"`
+	MaxRetries        *int     `yaml:"max_retries"`
+	MaxBudgetUSD      float64  `yaml:"max_budget_usd"`
+	DiffContextLines  *int     `yaml:"diff_context_lines"` // nil = use default (1), -1 = keep all
+	Debate            bool     `yaml:"debate"`
+	NoCompress        bool     `yaml:"no_compress"`
+	StripPatterns     []string `yaml:"strip_patterns"`
 	DiffWarnBytes     int      `yaml:"diff_warn_bytes"`
 	DiffChunkBytes    int      `yaml:"diff_chunk_bytes"`
-	Verify            *bool    `yaml:"verify"`               // nil = not set (default false)
-	VerifierModel     string   `yaml:"verifier_model"`       // model for Opus verification tier
-	VerifierBudgetUSD float64  `yaml:"verifier_budget_usd"`  // max USD for verification (0 = auto)
+	Verify            *bool    `yaml:"verify"`              // nil = not set (default false)
+	VerifierModel     string   `yaml:"verifier_model"`      // model for Opus verification tier
+	VerifierBudgetUSD float64  `yaml:"verifier_budget_usd"` // max USD for verification (0 = auto)
 }
 
 // IntPtr returns a pointer to the given int. Convenience for config construction.

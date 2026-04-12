@@ -19,9 +19,9 @@ import (
 
 // Caps to prevent context blowup.
 const (
-	maxReferences    = 10 // max referenced definitions per finding
-	maxDefLines      = 50 // max lines per referenced definition
-	maxScopeLines    = 150 // max lines for an enclosing scope
+	maxReferences = 10  // max referenced definitions per finding
+	maxDefLines   = 50  // max lines per referenced definition
+	maxScopeLines = 150 // max lines for an enclosing scope
 )
 
 // ResolvedContext holds the code context needed to verify a finding.

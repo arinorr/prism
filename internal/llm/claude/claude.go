@@ -95,9 +95,9 @@ func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, llm.Us
 	return env.Result, usage, nil
 }
 
-func truncate(b []byte, max int) string {
-	if len(b) <= max {
+func truncate(b []byte, maxLen int) string {
+	if len(b) <= maxLen {
 		return string(b)
 	}
-	return string(b[:max]) + "..."
+	return string(b[:maxLen]) + "..."
 }

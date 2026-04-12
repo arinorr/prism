@@ -98,12 +98,12 @@ func (c *Client) getPRDiffGH(prRef string) (*PR, error) {
 	}
 
 	var meta struct {
-		Number     int    `json:"number"`
-		Title      string `json:"title"`
-		Body       string `json:"body"`
-		HeadRefOid string `json:"headRefOid"`
+		Number      int    `json:"number"`
+		Title       string `json:"title"`
+		Body        string `json:"body"`
+		HeadRefOid  string `json:"headRefOid"`
 		HeadRefName string `json:"headRefName"`
-		Files      []struct {
+		Files       []struct {
 			Path      string `json:"path"`
 			Additions int    `json:"additions"`
 			Deletions int    `json:"deletions"`

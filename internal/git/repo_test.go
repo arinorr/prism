@@ -89,9 +89,9 @@ func TestRepo_DefaultBranch_Mock(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		branches  map[string]bool
-		want      string
+		name     string
+		branches map[string]bool
+		want     string
 	}{
 		{"main exists", map[string]bool{"main": true}, "main"},
 		{"only master", map[string]bool{"master": true}, "master"},

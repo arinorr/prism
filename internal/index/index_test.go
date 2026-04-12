@@ -18,11 +18,11 @@ func TestIndex_EnclosingScope(t *testing.T) {
 		line int
 		want string
 	}{
-		{5, "outer"},   // inside outer but before inner
-		{15, "inner"},  // inside inner (tightest)
-		{30, "outer"},  // inside outer but after inner
-		{57, "other"},  // inside other
-		{100, ""},      // outside all
+		{5, "outer"},  // inside outer but before inner
+		{15, "inner"}, // inside inner (tightest)
+		{30, "outer"}, // inside outer but after inner
+		{57, "other"}, // inside other
+		{100, ""},     // outside all
 	}
 
 	for _, tt := range tests {
@@ -144,6 +144,6 @@ func TestBuild_Cancellation(t *testing.T) {
 
 	_, err := Build(ctx, t.TempDir(), []string{"go"})
 	if err == nil {
-		t.Error("expected error from cancelled context, got nil")
+		t.Error("expected error from canceled context, got nil")
 	}
 }

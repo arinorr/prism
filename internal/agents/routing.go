@@ -43,9 +43,9 @@ type ClassifiedFile struct {
 // and passed explicitly to each agent dispatch.
 type ReviewContext struct {
 	Files     []ClassifiedFile
-	Index     *index.Index       // nil if index build failed
-	Resolver  *resolve.Resolver  // nil if index build failed
-	ChangeMap *ChangeMap         // nil if index build failed
+	Index     *index.Index      // nil if index build failed
+	Resolver  *resolve.Resolver // nil if index build failed
+	ChangeMap *ChangeMap        // nil if index build failed
 }
 
 // SymbolStatus returns the change status of a symbol, nil-safe.

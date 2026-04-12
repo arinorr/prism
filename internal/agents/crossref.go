@@ -11,7 +11,7 @@ import (
 
 // Cross-reference caps.
 const (
-	maxCrossRefs    = 5
+	maxCrossRefs     = 5
 	maxCrossRefLines = 30
 )
 

@@ -130,7 +130,7 @@ func TestVerify_BudgetStopsEarly(t *testing.T) {
 	findings := make([]DedupedFinding, 10)
 	for i := range findings {
 		findings[i] = DedupedFinding{
-			Finding: Finding{File: "handler.go", Line: i + 1, Risk: RiskWarning, Summary: fmt.Sprintf("issue %d", i)},
+			Finding:   Finding{File: "handler.go", Line: i + 1, Risk: RiskWarning, Summary: fmt.Sprintf("issue %d", i)},
 			VoteCount: 1, TotalAgents: 7,
 		}
 	}
