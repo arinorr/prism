@@ -2,10 +2,20 @@ package cmd
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 )
 
-const version = "0.1.0"
+const version = "1.0.0"
+
+// skillsFS holds the embedded skills directory. Set by main via SetSkillsFS.
+var skillsFS fs.FS
+
+// SetSkillsFS sets the embedded filesystem containing skill files.
+// Called from main before Execute.
+func SetSkillsFS(f fs.FS) {
+	skillsFS = f
+}
 
 // Execute parses the command-line arguments and runs the appropriate subcommand.
 func Execute() error {
@@ -55,5 +65,10 @@ Options:
   -y, --yes        Skip confirmation prompt (auto-confirm estimate)
   -v, --verbose    Show detailed output (prompts, timing, raw responses)
   --dry-run        Show what would happen without calling Claude
-  --estimate       Show estimated token usage and cost, then exit`)
+  --estimate       Show estimated token usage and cost, then exit
+  --cheap          Run all agents on Haiku (~$0.10/review)
+  --verify         Enable post-dedup finding verification (Haiku + Opus)
+  --no-verify      Disable verification
+  --cross-refs     Enable cross-category reference injection
+  --scope-hints    Enable scope hints (modified/added/existing symbols)`)
 }

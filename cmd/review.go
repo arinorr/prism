@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -56,6 +57,9 @@ type reviewOptions struct {
 	retriesFlag        int
 	budgetFlag         float64
 	verifierBudgetFlag float64
+	cheap              bool // --cheap: run all agents on Haiku
+	crossRefs          bool // --cross-refs: enable cross-category references
+	scopeHints         bool // --scope-hints: enable scope hints
 	noCompress         bool
 	configPath         string
 }
@@ -101,6 +105,12 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 			opts.verify = true
 		case "--no-verify":
 			opts.noVerify = true
+		case "--cheap":
+			opts.cheap = true
+		case "--cross-refs":
+			opts.crossRefs = true
+		case "--scope-hints":
+			opts.scopeHints = true
 		case "--no-compress":
 			opts.noCompress = true
 		case "--stdout":
@@ -281,6 +291,11 @@ func progressln(args ...any) {
 }
 
 func runReview(args []string) error {
+	// Pre-flight: check required tools are installed.
+	if _, err := exec.LookPath("claude"); err != nil {
+		return fmt.Errorf("claude CLI not found. Install Claude Code first: https://claude.ai/download")
+	}
+
 	opts, err := parseReviewArgs(args)
 	if err != nil {
 		return err
@@ -337,7 +352,7 @@ func runReview(args []string) error {
 	compressedPR := *pr
 	compressedPR.Diff = compressed
 
-	// Show estimate (always to stderr). In --estimate mode, print and exit.
+	// Show detailed estimate in verbose/estimate mode.
 	if opts.verbose || opts.estimate {
 		printEstimate(len(compressed), roles)
 	}
@@ -387,13 +402,20 @@ func runReview(args []string) error {
 		progress("   ⚠️  Repo resolution: %v (using local)\n", repoErr)
 	}
 
+	// --cheap overrides all models to Haiku (~$0.10/review).
+	effectiveModel := merged.Model
+	if opts.cheap {
+		effectiveModel = agents.ModelTierFast
+		progress("💰 Cheap mode: all agents using Haiku\n")
+	}
+
 	// Dispatch agents. Orchestrator progress goes to stderr.
 	llmBackend := claude.New()
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
 		Verbose:           opts.verbose,
 		DryRun:            opts.dryRun,
 		Debate:            opts.debate || merged.Debate,
-		Model:             merged.Model,
+		Model:             effectiveModel,
 		AgentTimeout:      merged.TimeoutDuration(),
 		MaxRetries:        merged.MaxRetriesVal(),
 		MaxBudgetUSD:      merged.MaxBudgetUSD,
@@ -403,9 +425,11 @@ func runReview(args []string) error {
 		RepoRoot:          repoRoot,
 		Languages:         languages,
 		ExplicitRoles:     opts.rolesFlag != "",
+		CrossRefs:         opts.crossRefs,
+		ScopeHints:        opts.scopeHints,
 		Out:               os.Stderr,
 		ErrOut:            os.Stderr,
-	}, llmBackend, languages)
+	}, llmBackend, languages, skillsFS)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
 	}
@@ -658,6 +682,7 @@ func printConfirmBreakdown(diffBytes int, roles []agents.Role, modelOverride str
 	progress("   Models: %s | Verify: %s\n", modelSummary(roles, modelOverride), verifyState)
 	progress("   💰 Estimated cost: ~$%.2f (%d agents)\n", estimateCost(diffBytes, roles, modelOverride), len(roles))
 }
+
 
 // printEstimate shows projected token usage based on diff size and roles.
 func printEstimate(diffBytes int, roles []agents.Role) {
