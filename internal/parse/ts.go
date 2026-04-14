@@ -61,7 +61,7 @@ func isJS(filename string) bool {
 // walkTSNode recursively walks the tree-sitter AST and extracts symbol declarations.
 func walkTSNode(node *sitter.Node, src []byte, file string, symbols *[]Symbol, currentClass string) {
 	switch node.Type() {
-	case "function_declaration":
+	case "function_declaration", "generator_function_declaration":
 		if name := nodeFieldContent(node, "name", src); name != "" {
 			*symbols = append(*symbols, Symbol{
 				Name:      name,
