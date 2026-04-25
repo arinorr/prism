@@ -15,6 +15,7 @@ import (
 // an explicit zero value, which is meaningful (e.g. 0 retries = disabled).
 type Config struct {
 	Roles             []string `yaml:"roles"`
+	Tier              string   `yaml:"tier"`                // tier preset: quick, standard, deep, thorough
 	Model             string   `yaml:"model"`
 	Format            string   `yaml:"format"`
 	AgentTimeout      string   `yaml:"agent_timeout"`
@@ -26,7 +27,8 @@ type Config struct {
 	StripPatterns     []string `yaml:"strip_patterns"`
 	DiffWarnBytes     int      `yaml:"diff_warn_bytes"`
 	DiffChunkBytes    int      `yaml:"diff_chunk_bytes"`
-	Verify            *bool    `yaml:"verify"`              // nil = not set (default false)
+	CrossRefs         *bool    `yaml:"cross_refs"`          // nil = use tier default
+	Verify            *bool    `yaml:"verify"`              // nil = use tier default
 	VerifierModel     string   `yaml:"verifier_model"`      // model for Opus verification tier
 	VerifierBudgetUSD float64  `yaml:"verifier_budget_usd"` // max USD for verification (0 = auto)
 }
@@ -123,6 +125,12 @@ func mergeInto(dst, src *Config) {
 	}
 	if src.DiffChunkBytes > 0 {
 		dst.DiffChunkBytes = src.DiffChunkBytes
+	}
+	if src.Tier != "" {
+		dst.Tier = src.Tier
+	}
+	if src.CrossRefs != nil {
+		dst.CrossRefs = src.CrossRefs
 	}
 	if src.Verify != nil {
 		dst.Verify = src.Verify

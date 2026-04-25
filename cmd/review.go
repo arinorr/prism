@@ -38,6 +38,14 @@ var newGHClient = func() (prClient, error) {
 	return gh.NewClient()
 }
 
+// boolFlag tracks whether a boolean flag was explicitly set on the CLI.
+// This distinguishes "not passed" (set=false) from "--no-verify" (set=true, value=false),
+// so unset flags don't overwrite tier or config defaults.
+type boolFlag struct {
+	value bool
+	set   bool
+}
+
 // reviewOptions holds parsed CLI flags for the review command.
 type reviewOptions struct {
 	prRef              string
@@ -46,20 +54,18 @@ type reviewOptions struct {
 	dryRun             bool
 	estimate           bool
 	debate             bool
-	verify             bool // --verify: enable verification
-	noVerify           bool // --no-verify: explicitly disable
 	toStdout           bool
 	yes                bool
 	rolesFlag          string
 	formatFlag         string
 	modelFlag          string
+	tierFlag           string
 	timeoutFlag        string
 	retriesFlag        int
 	budgetFlag         float64
 	verifierBudgetFlag float64
-	cheap              bool // --cheap: run all agents on Haiku
-	crossRefs          bool // --cross-refs: enable cross-category references
-	scopeHints         bool // --scope-hints: enable scope hints
+	crossRefs          boolFlag
+	verify             boolFlag
 	noCompress         bool
 	configPath         string
 }
@@ -102,21 +108,21 @@ func parseReviewArgs(args []string) (*reviewOptions, error) {
 		case "--yes", "-y":
 			opts.yes = true
 		case "--verify":
-			opts.verify = true
+			opts.verify = boolFlag{value: true, set: true}
 		case "--no-verify":
-			opts.noVerify = true
-		case "--cheap":
-			opts.cheap = true
+			opts.verify = boolFlag{value: false, set: true}
 		case "--cross-refs":
-			opts.crossRefs = true
-		case "--scope-hints":
-			opts.scopeHints = true
+			opts.crossRefs = boolFlag{value: true, set: true}
+		case "--no-cross-refs":
+			opts.crossRefs = boolFlag{value: false, set: true}
 		case "--no-compress":
 			opts.noCompress = true
 		case "--stdout":
 			opts.toStdout = true
 		default:
-			if v, ok := parseStringFlag(args, &i, "--roles"); ok {
+			if v, ok := parseStringFlag(args, &i, "--tier"); ok {
+				opts.tierFlag = v
+			} else if v, ok := parseStringFlag(args, &i, "--roles"); ok {
 				opts.rolesFlag = v
 			} else if v, ok := parseStringFlag(args, &i, "--format"); ok {
 				opts.formatFlag = v
@@ -163,17 +169,12 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 		return config.Config{}, fmt.Errorf("failed to load config: %w", cfgErr)
 	}
 	cliCfg := config.Config{
+		Tier:              opts.tierFlag,
 		Model:             opts.modelFlag,
 		Format:            opts.formatFlag,
 		AgentTimeout:      opts.timeoutFlag,
 		MaxBudgetUSD:      opts.budgetFlag,
 		VerifierBudgetUSD: opts.verifierBudgetFlag,
-	}
-	if opts.verify {
-		cliCfg.Verify = config.BoolPtr(true)
-	}
-	if opts.noVerify {
-		cliCfg.Verify = config.BoolPtr(false)
 	}
 	if opts.retriesFlag >= 0 {
 		cliCfg.MaxRetries = config.IntPtr(opts.retriesFlag)
@@ -186,6 +187,52 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 	}
 	def := config.Default()
 	return config.Merge(&def, &fileCfg, &cliCfg), nil
+}
+
+// resolveTier applies the three-step last-write-wins resolution:
+// 1. Determine tier (CLI --tier > config tier > default deep).
+// 2. Expand tier into ReviewConfig defaults.
+// 3. Apply config file field overrides, then CLI flag overrides.
+func resolveTier(merged *config.Config, opts *reviewOptions) (agents.ReviewConfig, error) {
+	// Step 1: pick tier — CLI wins over config wins over default.
+	tier := agents.TierDeep
+	if merged.Tier != "" {
+		tier = agents.Tier(merged.Tier)
+	}
+	if opts.tierFlag != "" {
+		tier = agents.Tier(opts.tierFlag)
+	}
+	if !tier.Valid() {
+		return agents.ReviewConfig{}, fmt.Errorf("unknown tier %q (available: quick, standard, deep, thorough)", tier)
+	}
+
+	// Step 2: expand tier into defaults.
+	rc := tier.Defaults()
+
+	// Step 3: apply overrides. Model is already resolved by config.Merge
+	// (CLI > config > default), so we apply it directly. CrossRefs and
+	// Verify use pointer bools / boolFlags so unset values don't clobber
+	// the tier defaults.
+	if merged.Model != "" {
+		rc.Model = merged.Model
+	}
+	if merged.CrossRefs != nil {
+		rc.CrossRefs = *merged.CrossRefs
+		rc.ScopeHints = *merged.CrossRefs
+	}
+	if merged.Verify != nil {
+		rc.Verify = *merged.Verify
+	}
+	// CLI boolFlags override config (last write wins).
+	if opts.crossRefs.set {
+		rc.CrossRefs = opts.crossRefs.value
+		rc.ScopeHints = opts.crossRefs.value
+	}
+	if opts.verify.set {
+		rc.Verify = opts.verify.value
+	}
+
+	return rc, nil
 }
 
 // validFormats lists the accepted values for --format.
@@ -348,10 +395,10 @@ func runReview(args []string) error {
 		}
 	}
 
-	// Determine verification settings.
-	shouldVerify := merged.VerifyEnabled() || opts.verify
-	if opts.noVerify {
-		shouldVerify = false
+	// --- Tier resolution: tier defaults → config overrides → CLI flags ---
+	rc, err := resolveTier(&merged, opts)
+	if err != nil {
+		return err
 	}
 
 	// Resolve repo root for symbol indexing. Handles cross-repo PRs by
@@ -365,31 +412,24 @@ func runReview(args []string) error {
 		progress("   ⚠️  Repo resolution: %v (using local)\n", repoErr)
 	}
 
-	// --cheap overrides all models to Haiku (~$0.10/review).
-	effectiveModel := merged.Model
-	if opts.cheap {
-		effectiveModel = agents.ModelTierFast
-		progress("💰 Cheap mode: all agents using Haiku\n")
-	}
-
 	// Dispatch agents. Orchestrator progress goes to stderr.
 	llmBackend := claude.New()
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
 		Verbose:           opts.verbose,
 		DryRun:            opts.dryRun,
 		Debate:            opts.debate || merged.Debate,
-		Model:             effectiveModel,
+		Model:             rc.Model,
 		AgentTimeout:      merged.TimeoutDuration(),
 		MaxRetries:        merged.MaxRetriesVal(),
 		MaxBudgetUSD:      merged.MaxBudgetUSD,
-		Verify:            shouldVerify,
+		Verify:            rc.Verify,
 		VerifierModel:     merged.VerifierModel,
 		VerifierBudgetUSD: merged.VerifierBudgetUSD,
 		RepoRoot:          repoRoot,
 		Languages:         languages,
 		ExplicitRoles:     opts.rolesFlag != "",
-		CrossRefs:         opts.crossRefs,
-		ScopeHints:        opts.scopeHints,
+		CrossRefs:         rc.CrossRefs,
+		ScopeHints:        rc.ScopeHints,
 		Out:               os.Stderr,
 		ErrOut:            os.Stderr,
 	}, llmBackend, languages, skillsFS)
