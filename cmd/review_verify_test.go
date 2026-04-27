@@ -4,14 +4,14 @@ import "testing"
 
 func TestParseReviewArgs_VerifyFlag(t *testing.T) {
 	tests := []struct {
-		name       string
-		args       []string
-		wantVerify bool
-		wantNoVer  bool
+		name      string
+		args      []string
+		wantValue bool
+		wantSet   bool
 	}{
-		{"--verify", []string{"--verify", "123"}, true, false},
+		{"--verify", []string{"--verify", "123"}, true, true},
 		{"--no-verify", []string{"--no-verify", "123"}, false, true},
-		{"both (no-verify wins)", []string{"--verify", "--no-verify", "123"}, true, true},
+		{"last wins (no-verify)", []string{"--verify", "--no-verify", "123"}, false, true},
 		{"neither", []string{"123"}, false, false},
 	}
 
@@ -21,11 +21,11 @@ func TestParseReviewArgs_VerifyFlag(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if opts.verify != tt.wantVerify {
-				t.Errorf("verify = %v, want %v", opts.verify, tt.wantVerify)
+			if opts.verify.value != tt.wantValue {
+				t.Errorf("verify.value = %v, want %v", opts.verify.value, tt.wantValue)
 			}
-			if opts.noVerify != tt.wantNoVer {
-				t.Errorf("noVerify = %v, want %v", opts.noVerify, tt.wantNoVer)
+			if opts.verify.set != tt.wantSet {
+				t.Errorf("verify.set = %v, want %v", opts.verify.set, tt.wantSet)
 			}
 		})
 	}
