@@ -1,3 +1,6 @@
+> [!CAUTION]
+> **This project is experimental.** It is provided as-is with no guarantees. Use at your own risk.
+
 <div align="center">
 
 # Prism
