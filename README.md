@@ -13,6 +13,9 @@
 
 ---
 
+> [!CAUTION]
+> This project is an experiment and is provided as-is. Use at your own risk.
+
 Single-pass AI review has blind spots. Prism dispatches 7 specialized Claude agents in parallel, deduplicates their findings by consensus, computes a health score, and delivers a single report with everything that matters.
 
 ## Table of Contents
