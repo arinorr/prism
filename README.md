@@ -1,5 +1,8 @@
 <div align="center">
 
+> [!CAUTION]
+> This project is an experiment and is provided as-is. Use at your own risk.
+
 # Prism
 
 *There are problems lurking in your codebase — you just haven't looked through the right lens yet.*
@@ -12,9 +15,6 @@
 </div>
 
 ---
-
-> [!CAUTION]
-> This project is an experiment and is provided as-is. Use at your own risk.
 
 Single-pass AI review has blind spots. Prism dispatches 7 specialized Claude agents in parallel, deduplicates their findings by consensus, computes a health score, and delivers a single report with everything that matters.
 
