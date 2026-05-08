@@ -124,6 +124,20 @@ func TestOutputPath_PadsZeros(t *testing.T) {
 	}
 }
 
+// TestOutputPath_OwnerRepoDisambiguation: passing "owner/repo" preserves both
+// halves (slash → "-") so two repos with the same short name don't collide
+// under results/. Without this, sanitizeFilename's URL-path handling would
+// strip everything before the last "/", leaving just the bare repo name.
+func TestOutputPath_OwnerRepoDisambiguation(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 8, 12, 34, 0, 0, time.UTC)
+	got := outputPath("arinorr/prism", "42", "md", now)
+	want := filepath.Join("results", "arinorr-prism-pr-42", "260508-1234-arinorr-prism-pr-42.md")
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
 // TestConfigDefault_IncludesMarkdownAndHTML pins the default format to write
 // both markdown and HTML files. Generating both is free (no extra API calls,
 // just a second render pass over the same Data struct), and users get both
@@ -146,13 +160,13 @@ func TestOutputResults_WritesAllRequestedFormats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pr := &gh.PR{Number: "42", Title: "Test", Repo: "myrepo", Files: []gh.FileChange{{Path: "a.go"}}}
+	pr := &gh.PR{Number: "42", Title: "Test", Repo: "myrepo", OwnerRepo: "owner/myrepo", Files: []gh.FileChange{{Path: "a.go"}}}
 	opts := &reviewOptions{formatFlag: "md,html,json"}
 	if err := outputResults(opts, pr, testResult(), []agents.Role{{Name: "Test"}}, 0, "md,html,json"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	entries, err := os.ReadDir(filepath.Join("results", "myrepo-pr-42"))
+	entries, err := os.ReadDir(filepath.Join("results", "owner-myrepo-pr-42"))
 	if err != nil {
 		t.Fatalf("failed to read results dir: %v", err)
 	}
@@ -219,12 +233,12 @@ func TestOutputResults_PlainInMultiFormatWritesToFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pr := &gh.PR{Number: "42", Title: "Test", Repo: "myrepo", Files: []gh.FileChange{{Path: "a.go"}}}
+	pr := &gh.PR{Number: "42", Title: "Test", Repo: "myrepo", OwnerRepo: "owner/myrepo", Files: []gh.FileChange{{Path: "a.go"}}}
 	opts := &reviewOptions{formatFlag: "md,plain"}
 	if err := outputResults(opts, pr, testResult(), []agents.Role{{Name: "Test"}}, 0, "md,plain"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	entries, err := os.ReadDir(filepath.Join("results", "myrepo-pr-42"))
+	entries, err := os.ReadDir(filepath.Join("results", "owner-myrepo-pr-42"))
 	if err != nil {
 		t.Fatalf("failed to read results dir: %v", err)
 	}

@@ -468,8 +468,13 @@ func runReview(args []string) error {
 // outputPath returns the on-disk path for a report. Filenames use vault-style
 // YYMMDD-HHMM- prefix so reports sort chronologically and slot in alongside
 // notes/plans/research that follow the same convention.
-func outputPath(repo, prNum, ext string, now time.Time) string {
-	repo = sanitizeFilename(repo)
+//
+// The caller passes pr.OwnerRepo ("owner/repo") so two repos with the same
+// short name don't collide in results/. The slash is mapped to "-" before
+// sanitizeFilename runs, since sanitizeFilename otherwise strips everything
+// before the last "/" (it's also used for URL-style PR refs).
+func outputPath(ownerRepo, prNum, ext string, now time.Time) string {
+	repo := sanitizeFilename(strings.ReplaceAll(ownerRepo, "/", "-"))
 	prNum = sanitizeFilename(prNum)
 	timestamp := now.Format("060102-1504")
 	dir := filepath.Join(defaultResultsDir, fmt.Sprintf("%s-pr-%s", repo, prNum))
@@ -539,7 +544,7 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 			fmt.Print(output)
 			continue
 		}
-		if err := writeToFile(output, outputPath(pr.Repo, pr.Number, ext, now)); err != nil {
+		if err := writeToFile(output, outputPath(pr.OwnerRepo, pr.Number, ext, now)); err != nil {
 			return err
 		}
 	}
