@@ -3,9 +3,13 @@ package cmd
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/arinorr/prism/internal/agents"
+	"github.com/arinorr/prism/internal/config"
 	"github.com/arinorr/prism/internal/gh"
 )
 
@@ -94,6 +98,87 @@ func TestRunReview_StdoutStderrSeparation(t *testing.T) {
 
 	if strings.Contains(stdout, "🔍") {
 		t.Errorf("stdout should not contain progress emojis, got %q", stdout[:min(len(stdout), 200)])
+	}
+}
+
+// TestOutputPath_VaultStyleTimestamp verifies the new vault-style filename:
+// YYMMDD-HHMM prefix matches the format used everywhere else in the user's
+// vault, so reports from prism slot in alongside notes/plans/research.
+func TestOutputPath_VaultStyleTimestamp(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 8, 12, 34, 0, 0, time.UTC)
+	got := outputPath("myrepo", "42", "md", now)
+	want := filepath.Join("results", "myrepo-pr-42", "260508-1234-myrepo-pr-42.md")
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+func TestOutputPath_PadsZeros(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	got := outputPath("repo", "1", "html", now)
+	want := filepath.Join("results", "repo-pr-1", "260101-0000-repo-pr-1.html")
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+// TestConfigDefault_IncludesMarkdownAndHTML pins the default format to write
+// both markdown and HTML files. Generating both is free (no extra API calls,
+// just a second render pass over the same Data struct), and users get both
+// the editable source-of-truth (md) and the polished view (html).
+func TestConfigDefault_IncludesMarkdownAndHTML(t *testing.T) {
+	t.Parallel()
+	def := config.Default()
+	if def.Format != "md,html" {
+		t.Errorf("default format should be 'md,html', got %q", def.Format)
+	}
+}
+
+// TestOutputResults_WritesAllRequestedFormats checks the comma-separated
+// --format md,html,json case writes one file per requested format.
+// Not t.Parallel() because os.Chdir mutates process-global state.
+func TestOutputResults_WritesAllRequestedFormats(t *testing.T) {
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	pr := &gh.PR{Number: "42", Title: "Test", Repo: "myrepo", Files: []gh.FileChange{{Path: "a.go"}}}
+	opts := &reviewOptions{formatFlag: "md,html,json"}
+	if err := outputResults(opts, pr, testResult(), []agents.Role{{Name: "Test"}}, 0, "md,html,json"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join("results", "myrepo-pr-42"))
+	if err != nil {
+		t.Fatalf("failed to read results dir: %v", err)
+	}
+	gotExts := map[string]bool{}
+	for _, e := range entries {
+		if i := strings.LastIndex(e.Name(), "."); i >= 0 {
+			gotExts[e.Name()[i+1:]] = true
+		}
+	}
+	for _, ext := range []string{"md", "html", "json"} {
+		if !gotExts[ext] {
+			t.Errorf("expected a .%s file in results dir, got entries: %v", ext, entries)
+		}
+	}
+}
+
+func TestOutputResults_StdoutWithMultiFormatErrors(t *testing.T) {
+	t.Parallel()
+	pr := &gh.PR{Number: "42", Title: "Test", Repo: "myrepo"}
+	opts := &reviewOptions{formatFlag: "md,html", toStdout: true}
+	err := outputResults(opts, pr, testResult(), []agents.Role{{Name: "Test"}}, 0, "md,html")
+	if err == nil {
+		t.Fatal("expected error for --stdout with multiple formats")
+	}
+	if !strings.Contains(err.Error(), "stdout") {
+		t.Errorf("expected error mentioning stdout, got: %v", err)
 	}
 }
 

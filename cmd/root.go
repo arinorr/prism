@@ -40,8 +40,10 @@ Options:
   --comment        Post suggestions as inline PR comments (requires gh cli)
   --roles          Comma-separated list of roles to use (default: all)
                    Available: know-it-all,architect,solver,editor,optimizer,sentinel,test-engineer
-  --format         Output format: plain, md, html, json (default: html)
-                   Reports are saved to results/ directory
+  --format         Output format(s), comma-separated (default: md,html)
+                   Available: plain, md, html, json
+                   Examples: --format md  |  --format md,html,json
+                   Reports saved with vault-style YYMMDD-HHMM- prefix
   --model          Claude model to use (e.g. sonnet, opus, haiku)
   --timeout        Per-agent timeout as a Go duration (default: 5m)
   --max-retries    Number of retries per agent on failure (default: 1)

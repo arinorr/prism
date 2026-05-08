@@ -38,9 +38,13 @@ func IntPtr(n int) *int { return &n }
 func BoolPtr(b bool) *bool { return &b }
 
 // Default returns a Config with sensible defaults.
+//
+// Format is comma-separated so writing both markdown and HTML by default
+// is free (formats render from the same in-memory Data — no extra LLM calls).
+// Markdown is the editable source-of-truth; HTML is the polished view.
 func Default() Config {
 	return Config{
-		Format:         "html",
+		Format:         "md,html",
 		AgentTimeout:   "5m",
 		MaxRetries:     IntPtr(1),
 		DiffWarnBytes:  153600, // 150 KB

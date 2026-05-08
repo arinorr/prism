@@ -188,6 +188,22 @@ var validFormats = map[string]bool{
 	"json":     true,
 }
 
+// parseFormats splits a --format value on commas and returns the trimmed,
+// non-empty entries. "md,html" → ["md","html"]. "" → nil.
+func parseFormats(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := parts[:0]
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // validateOptions performs fast, cheap validation of CLI flags so we can fail
 // before spending tokens on LLM calls or network requests.
 func validateOptions(opts *reviewOptions, merged *config.Config) error {
@@ -196,8 +212,10 @@ func validateOptions(opts *reviewOptions, merged *config.Config) error {
 	if format == "" {
 		format = merged.Format
 	}
-	if !validFormats[format] {
-		return fmt.Errorf("invalid format: %q (available: plain, md, html, json)", format)
+	for _, f := range parseFormats(format) {
+		if !validFormats[f] {
+			return fmt.Errorf("invalid format: %q (available: plain, md, html, json)", f)
+		}
 	}
 
 	// Validate CLI timeout parses as a Go duration.
@@ -309,6 +327,18 @@ func runReview(args []string) error {
 		return nil
 	}
 
+	// Determine verification settings up-front so the breakdown can show them.
+	shouldVerify := merged.VerifyEnabled() || opts.verify
+	if opts.noVerify {
+		shouldVerify = false
+	}
+
+	// Brief breakdown before the prompt so the user knows what they're paying
+	// for. Verbose mode already showed the full printEstimate, so skip there.
+	if !opts.verbose {
+		printConfirmBreakdown(len(compressed), roles, merged.Model, shouldVerify)
+	}
+
 	// In non-interactive mode (CI), fail hard on very large diffs
 	// to avoid burning tokens on reviews that won't be effective.
 	sizeResult := sizecheck.Check(len(compressed), merged.DiffWarnBytes, merged.DiffChunkBytes)
@@ -325,12 +355,6 @@ func runReview(args []string) error {
 		if answer == "n" || answer == "no" {
 			return fmt.Errorf("review canceled")
 		}
-	}
-
-	// Determine verification settings.
-	shouldVerify := merged.VerifyEnabled() || opts.verify
-	if opts.noVerify {
-		shouldVerify = false
 	}
 
 	// Resolve repo root for symbol indexing. Handles cross-repo PRs by
@@ -433,11 +457,59 @@ func runReview(args []string) error {
 	return nil
 }
 
+// outputPath returns the on-disk path for a report. Filenames use vault-style
+// YYMMDD-HHMM- prefix so reports sort chronologically and slot in alongside
+// notes/plans/research that follow the same convention.
+func outputPath(repo, prNum, ext string, now time.Time) string {
+	repo = sanitizeFilename(repo)
+	prNum = sanitizeFilename(prNum)
+	timestamp := now.Format("060102-1504")
+	dir := filepath.Join(defaultResultsDir, fmt.Sprintf("%s-pr-%s", repo, prNum))
+	return filepath.Join(dir, fmt.Sprintf("%s-%s-pr-%s.%s", timestamp, repo, prNum, ext))
+}
+
+// renderFormat builds the rendered report for a single format. Each format
+// pulls from the same in-memory Data, so generating multiple formats is free
+// (no extra LLM calls — just additional render passes).
+func renderFormat(format string, data *report.Data, summary string) (output, ext string, err error) {
+	ext = format
+	if ext == "markdown" {
+		ext = "md"
+	}
+	switch format {
+	case "plain":
+		return summary + "\n", "txt", nil
+	case "md", "markdown":
+		return report.Markdown(data), "md", nil
+	case "html":
+		out, err := report.HTML(data)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to generate HTML report: %w", err)
+		}
+		return out, "html", nil
+	case "json":
+		out, err := report.JSON(data)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to generate JSON report: %w", err)
+		}
+		return out, "json", nil
+	default:
+		return "", "", fmt.Errorf("unknown format: %s (available: md, html, json, plain)", format)
+	}
+}
+
 // outputResults handles format selection, report generation, and file output.
+// When formatFlag contains comma-separated formats (e.g. "md,html"), one file
+// is written per format from the same in-memory Data — no additional API cost.
 func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, roles []agents.Role, elapsed time.Duration, formatFlag string) error {
-	if formatFlag == "" {
+	formats := parseFormats(formatFlag)
+	if len(formats) == 0 {
 		fmt.Println(result.Summary)
 		return nil
+	}
+
+	if opts.toStdout && len(formats) > 1 {
+		return fmt.Errorf("--stdout requires a single format, got %d (%s)", len(formats), strings.Join(formats, ","))
 	}
 
 	roleNames := make([]string, len(roles))
@@ -455,45 +527,25 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 		VerifierError:   result.VerifierError,
 	}
 
-	var output string
-	ext := formatFlag
-	if ext == "markdown" {
-		ext = "md"
-	}
-
-	switch formatFlag {
-	case "plain":
-		fmt.Println(result.Summary)
-		return nil
-	case "md", "markdown":
-		output = report.Markdown(data)
-	case "html":
-		var htmlErr error
-		output, htmlErr = report.HTML(data)
-		if htmlErr != nil {
-			return fmt.Errorf("failed to generate HTML report: %w", htmlErr)
+	now := time.Now()
+	for _, f := range formats {
+		output, ext, err := renderFormat(f, data, result.Summary)
+		if err != nil {
+			return err
 		}
-	case "json":
-		var jsonErr error
-		output, jsonErr = report.JSON(data)
-		if jsonErr != nil {
-			return fmt.Errorf("failed to generate JSON report: %w", jsonErr)
+		if f == "plain" {
+			fmt.Print(output)
+			continue
 		}
-	default:
-		return fmt.Errorf("unknown format: %s (available: md, html, json)", formatFlag)
+		if opts.toStdout {
+			fmt.Print(output)
+			continue
+		}
+		if err := writeToFile(output, outputPath(pr.Repo, pr.Number, ext, now)); err != nil {
+			return err
+		}
 	}
-
-	if opts.toStdout {
-		fmt.Print(output)
-		return nil
-	}
-
-	repo := sanitizeFilename(pr.Repo)
-	prNum := sanitizeFilename(pr.Number)
-	timestamp := time.Now().Format("2006-01-02_3-04pm")
-	dir := filepath.Join(defaultResultsDir, fmt.Sprintf("%s-pr-%s", repo, prNum))
-	outPath := filepath.Join(dir, fmt.Sprintf("%s-pr-%s-%s.%s", repo, prNum, timestamp, ext))
-	return writeToFile(output, outPath)
+	return nil
 }
 
 // Estimation constants calibrated against Claude Sonnet (April 2026).
@@ -506,6 +558,81 @@ const (
 	// expectedOutputTokens is the average output per agent (findings JSON).
 	expectedOutputTokens = 1000
 )
+
+// capitalize uppercases the first ASCII byte. Used for model name display
+// (haiku/sonnet/opus → Haiku/Sonnet/Opus); strings.Title is deprecated.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	if s[0] >= 'a' && s[0] <= 'z' {
+		return string(s[0]-32) + s[1:]
+	}
+	return s
+}
+
+// estimateCost returns the projected USD cost for a review.
+func estimateCost(diffBytes int, roles []agents.Role, modelOverride string) float64 {
+	tokensPerAgent := diffBytes/bytesPerToken + promptOverheadTokens
+	modelCounts := make(map[string]int)
+	for i := range roles {
+		m := modelOverride
+		if m == "" {
+			m = roles[i].Model
+		}
+		if m == "" {
+			m = agents.ModelTierStandard
+		}
+		modelCounts[m]++
+	}
+	var cost float64
+	for model, count := range modelCounts {
+		pricing := llm.ModelPricing(model)
+		cost += pricing.EstimateCost(tokensPerAgent*count, expectedOutputTokens*count)
+	}
+	return cost
+}
+
+// modelSummary describes the agent model assignment in one short phrase
+// suitable for the pre-prompt breakdown line.
+func modelSummary(roles []agents.Role, modelOverride string) string {
+	if modelOverride != "" {
+		return "all " + capitalize(modelOverride)
+	}
+	seen := map[string]bool{}
+	for i := range roles {
+		m := roles[i].Model
+		if m == "" {
+			m = agents.ModelTierStandard
+		}
+		seen[m] = true
+	}
+	if len(seen) == 1 {
+		for m := range seen {
+			return "all " + strings.Title(m) // #nosec G104 -- ASCII model names
+		}
+	}
+	// Multiple models — show in a stable order.
+	var parts []string
+	for _, m := range []string{agents.ModelTierFast, agents.ModelTierStandard, agents.ModelTierDeep} {
+		if seen[m] {
+			parts = append(parts, strings.Title(m)) // #nosec G104 -- ASCII model names
+		}
+	}
+	return "per-role (" + strings.Join(parts, "/") + ")"
+}
+
+// printConfirmBreakdown prints a short pre-prompt summary so the user knows
+// what they're about to spend tokens on (which agents/models, whether the
+// verifier runs, and the dollar estimate).
+func printConfirmBreakdown(diffBytes int, roles []agents.Role, modelOverride string, verify bool) {
+	verifyState := "off"
+	if verify {
+		verifyState = "on"
+	}
+	progress("   Models: %s | Verify: %s\n", modelSummary(roles, modelOverride), verifyState)
+	progress("   💰 Estimated cost: ~$%.2f (%d agents)\n", estimateCost(diffBytes, roles, modelOverride), len(roles))
+}
 
 // printEstimate shows projected token usage based on diff size and roles.
 func printEstimate(diffBytes int, roles []agents.Role) {
