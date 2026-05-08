@@ -188,14 +188,15 @@ var validFormats = map[string]bool{
 	"json":     true,
 }
 
-// parseFormats splits a --format value on commas and returns the trimmed,
-// non-empty entries. "md,html" → ["md","html"]. "" → nil.
+// parseFormats splits a --format value on commas, trims whitespace from each
+// entry, and returns non-empty results. "md, html " → ["md","html"]. "" → nil.
+// Empty entries from "md,,html" are dropped silently (forgiving UX).
 func parseFormats(s string) []string {
 	if s == "" {
 		return nil
 	}
 	parts := strings.Split(s, ",")
-	out := parts[:0]
+	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
@@ -212,10 +213,16 @@ func validateOptions(opts *reviewOptions, merged *config.Config) error {
 	if format == "" {
 		format = merged.Format
 	}
-	for _, f := range parseFormats(format) {
+	formats := parseFormats(format)
+	for _, f := range formats {
 		if !validFormats[f] {
 			return fmt.Errorf("invalid format: %q (available: plain, md, html, json)", f)
 		}
+	}
+	// --stdout is a single-destination output; reject combos here so we fail
+	// before any LLM dispatch rather than after the orchestrator runs.
+	if opts.toStdout && len(formats) > 1 {
+		return fmt.Errorf("--stdout requires a single format, got %d (%s)", len(formats), strings.Join(formats, ","))
 	}
 
 	// Validate CLI timeout parses as a Go duration.
@@ -334,8 +341,9 @@ func runReview(args []string) error {
 	}
 
 	// Brief breakdown before the prompt so the user knows what they're paying
-	// for. Verbose mode already showed the full printEstimate, so skip there.
-	if !opts.verbose {
+	// for. Verbose mode already printed the full printEstimate above; --estimate
+	// returned earlier — so this only fires for the default (non-verbose) path.
+	if !opts.verbose && !opts.estimate {
 		printConfirmBreakdown(len(compressed), roles, merged.Model, shouldVerify)
 	}
 
@@ -472,10 +480,6 @@ func outputPath(repo, prNum, ext string, now time.Time) string {
 // pulls from the same in-memory Data, so generating multiple formats is free
 // (no extra LLM calls — just additional render passes).
 func renderFormat(format string, data *report.Data, summary string) (output, ext string, err error) {
-	ext = format
-	if ext == "markdown" {
-		ext = "md"
-	}
 	switch format {
 	case "plain":
 		return summary + "\n", "txt", nil
@@ -508,10 +512,6 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 		return nil
 	}
 
-	if opts.toStdout && len(formats) > 1 {
-		return fmt.Errorf("--stdout requires a single format, got %d (%s)", len(formats), strings.Join(formats, ","))
-	}
-
 	roleNames := make([]string, len(roles))
 	for i := range roles {
 		roleNames[i] = roles[i].Name
@@ -527,15 +527,13 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 		VerifierError:   result.VerifierError,
 	}
 
+	// Single time.Now() so all formats from one review share the same
+	// YYMMDD-HHMM filename prefix.
 	now := time.Now()
 	for _, f := range formats {
 		output, ext, err := renderFormat(f, data, result.Summary)
 		if err != nil {
 			return err
-		}
-		if f == "plain" {
-			fmt.Print(output)
-			continue
 		}
 		if opts.toStdout {
 			fmt.Print(output)
@@ -559,8 +557,9 @@ const (
 	expectedOutputTokens = 1000
 )
 
-// capitalize uppercases the first ASCII byte. Used for model name display
-// (haiku/sonnet/opus → Haiku/Sonnet/Opus); strings.Title is deprecated.
+// capitalize uppercases the first byte if it's ASCII [a-z], else returns s
+// unchanged. ASCII-only — do not use for arbitrary user input. Intended for
+// fixed model names like haiku/sonnet/opus → Haiku/Sonnet/Opus.
 func capitalize(s string) string {
 	if s == "" {
 		return s
@@ -609,14 +608,14 @@ func modelSummary(roles []agents.Role, modelOverride string) string {
 	}
 	if len(seen) == 1 {
 		for m := range seen {
-			return "all " + strings.Title(m) // #nosec G104 -- ASCII model names
+			return "all " + capitalize(m)
 		}
 	}
 	// Multiple models — show in a stable order.
 	var parts []string
 	for _, m := range []string{agents.ModelTierFast, agents.ModelTierStandard, agents.ModelTierDeep} {
 		if seen[m] {
-			parts = append(parts, strings.Title(m)) // #nosec G104 -- ASCII model names
+			parts = append(parts, capitalize(m))
 		}
 	}
 	return "per-role (" + strings.Join(parts, "/") + ")"

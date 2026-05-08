@@ -169,16 +169,75 @@ func TestOutputResults_WritesAllRequestedFormats(t *testing.T) {
 	}
 }
 
-func TestOutputResults_StdoutWithMultiFormatErrors(t *testing.T) {
+// TestValidateOptions_StdoutWithMultiFormatErrors checks that --stdout +
+// multi-format fails fast in validateOptions (which runs before any GitHub
+// fetch or LLM call), not in outputResults (which would burn tokens first).
+func TestValidateOptions_StdoutWithMultiFormatErrors(t *testing.T) {
 	t.Parallel()
-	pr := &gh.PR{Number: "42", Title: "Test", Repo: "myrepo"}
 	opts := &reviewOptions{formatFlag: "md,html", toStdout: true}
-	err := outputResults(opts, pr, testResult(), []agents.Role{{Name: "Test"}}, 0, "md,html")
+	merged := &config.Config{}
+	err := validateOptions(opts, merged)
 	if err == nil {
 		t.Fatal("expected error for --stdout with multiple formats")
 	}
 	if !strings.Contains(err.Error(), "stdout") {
 		t.Errorf("expected error mentioning stdout, got: %v", err)
+	}
+}
+
+// TestRunReview_StdoutMultiFormatFailsFast verifies that the --stdout +
+// multi-format error fires before fetchPR runs, so it never reaches the
+// orchestrator. The mock client tracks whether it was called.
+func TestRunReview_StdoutMultiFormatFailsFast(t *testing.T) {
+	called := false
+	orig := newGHClient
+	newGHClient = func() (prClient, error) {
+		called = true
+		return &mockClient{pr: &gh.PR{Number: "42"}}, nil
+	}
+	t.Cleanup(func() { newGHClient = orig })
+
+	err := runReview([]string{"42", "--stdout", "--format", "md,html"})
+	if err == nil {
+		t.Fatal("expected error for --stdout with multiple formats")
+	}
+	if !strings.Contains(err.Error(), "stdout") {
+		t.Errorf("expected stdout-related error, got: %v", err)
+	}
+	if called {
+		t.Error("validateOptions should fail before GH client is constructed")
+	}
+}
+
+// TestOutputResults_PlainInMultiFormatWritesToFile verifies that "plain"
+// inside a comma-separated format list writes to a .txt file like other
+// formats, instead of always going to stdout.
+func TestOutputResults_PlainInMultiFormatWritesToFile(t *testing.T) {
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	pr := &gh.PR{Number: "42", Title: "Test", Repo: "myrepo", Files: []gh.FileChange{{Path: "a.go"}}}
+	opts := &reviewOptions{formatFlag: "md,plain"}
+	if err := outputResults(opts, pr, testResult(), []agents.Role{{Name: "Test"}}, 0, "md,plain"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join("results", "myrepo-pr-42"))
+	if err != nil {
+		t.Fatalf("failed to read results dir: %v", err)
+	}
+	gotExts := map[string]bool{}
+	for _, e := range entries {
+		if i := strings.LastIndex(e.Name(), "."); i >= 0 {
+			gotExts[e.Name()[i+1:]] = true
+		}
+	}
+	for _, ext := range []string{"md", "txt"} {
+		if !gotExts[ext] {
+			t.Errorf("expected a .%s file in results dir, got entries: %v", ext, entries)
+		}
 	}
 }
 
