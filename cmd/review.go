@@ -342,8 +342,8 @@ func runReview(args []string) error {
 
 	// Brief breakdown before the prompt so the user knows what they're paying
 	// for. Verbose mode already printed the full printEstimate above; --estimate
-	// returned earlier — so this only fires for the default (non-verbose) path.
-	if !opts.verbose && !opts.estimate {
+	// returned earlier, so this only fires on the default path.
+	if !opts.verbose {
 		printConfirmBreakdown(len(compressed), roles, merged.Model, shouldVerify)
 	}
 
@@ -466,19 +466,29 @@ func runReview(args []string) error {
 }
 
 // outputPath returns the on-disk path for a report. Filenames use vault-style
-// YYMMDD-HHMM- prefix so reports sort chronologically and slot in alongside
-// notes/plans/research that follow the same convention.
+// YYMMDD-HHMMSS prefix so reports sort chronologically alongside notes/plans
+// and reruns within the same minute don't overwrite each other.
 //
-// The caller passes pr.OwnerRepo ("owner/repo") so two repos with the same
-// short name don't collide in results/. The slash is mapped to "-" before
-// sanitizeFilename runs, since sanitizeFilename otherwise strips everything
-// before the last "/" (it's also used for URL-style PR refs).
+// ownerRepo is "owner/repo" when the gh-CLI path is available, falling back
+// to the bare repo name in the git-only path. The slash is mapped to "-"
+// before sanitizeFilename runs, since sanitizeFilename otherwise strips
+// everything before the last "/" (it's also used for URL-style PR refs).
 func outputPath(ownerRepo, prNum, ext string, now time.Time) string {
 	repo := sanitizeFilename(strings.ReplaceAll(ownerRepo, "/", "-"))
 	prNum = sanitizeFilename(prNum)
-	timestamp := now.Format("060102-1504")
+	timestamp := now.Format("060102-150405")
 	dir := filepath.Join(defaultResultsDir, fmt.Sprintf("%s-pr-%s", repo, prNum))
 	return filepath.Join(dir, fmt.Sprintf("%s-%s-pr-%s.%s", timestamp, repo, prNum, ext))
+}
+
+// prRepoIdent returns the best identifier for a PR's repo for filename use:
+// "owner/repo" if available (gh-CLI path), else the bare repo name (git-only
+// fallback path, where pr.OwnerRepo is empty).
+func prRepoIdent(pr *gh.PR) string {
+	if pr.OwnerRepo != "" {
+		return pr.OwnerRepo
+	}
+	return pr.Repo
 }
 
 // renderFormat builds the rendered report for a single format. Each format
@@ -544,7 +554,7 @@ func outputResults(opts *reviewOptions, pr *gh.PR, result *agents.ReviewResult, 
 			fmt.Print(output)
 			continue
 		}
-		if err := writeToFile(output, outputPath(pr.OwnerRepo, pr.Number, ext, now)); err != nil {
+		if err := writeToFile(output, outputPath(prRepoIdent(pr), pr.Number, ext, now)); err != nil {
 			return err
 		}
 	}

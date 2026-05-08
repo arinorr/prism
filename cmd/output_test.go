@@ -101,14 +101,13 @@ func TestRunReview_StdoutStderrSeparation(t *testing.T) {
 	}
 }
 
-// TestOutputPath_VaultStyleTimestamp verifies the new vault-style filename:
-// YYMMDD-HHMM prefix matches the format used everywhere else in the user's
-// vault, so reports from prism slot in alongside notes/plans/research.
+// TestOutputPath_VaultStyleTimestamp verifies the vault-style filename
+// includes YYMMDD-HHMMSS — reruns within the same minute can't collide.
 func TestOutputPath_VaultStyleTimestamp(t *testing.T) {
 	t.Parallel()
-	now := time.Date(2026, 5, 8, 12, 34, 0, 0, time.UTC)
+	now := time.Date(2026, 5, 8, 12, 34, 56, 0, time.UTC)
 	got := outputPath("myrepo", "42", "md", now)
-	want := filepath.Join("results", "myrepo-pr-42", "260508-1234-myrepo-pr-42.md")
+	want := filepath.Join("results", "myrepo-pr-42", "260508-123456-myrepo-pr-42.md")
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
 	}
@@ -118,9 +117,21 @@ func TestOutputPath_PadsZeros(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	got := outputPath("repo", "1", "html", now)
-	want := filepath.Join("results", "repo-pr-1", "260101-0000-repo-pr-1.html")
+	want := filepath.Join("results", "repo-pr-1", "260101-000000-repo-pr-1.html")
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+// TestOutputPath_TwoRunsSameMinuteDontCollide guards the user-reported bug:
+// two reviews started within 60s of each other previously overwrote each
+// other's reports. Second-resolution timestamps prevent that.
+func TestOutputPath_TwoRunsSameMinuteDontCollide(t *testing.T) {
+	t.Parallel()
+	t1 := time.Date(2026, 5, 8, 12, 34, 10, 0, time.UTC)
+	t2 := time.Date(2026, 5, 8, 12, 34, 50, 0, time.UTC)
+	if outputPath("repo", "1", "md", t1) == outputPath("repo", "1", "md", t2) {
+		t.Error("paths within the same minute must differ at second resolution")
 	}
 }
 
@@ -130,11 +141,27 @@ func TestOutputPath_PadsZeros(t *testing.T) {
 // strip everything before the last "/", leaving just the bare repo name.
 func TestOutputPath_OwnerRepoDisambiguation(t *testing.T) {
 	t.Parallel()
-	now := time.Date(2026, 5, 8, 12, 34, 0, 0, time.UTC)
+	now := time.Date(2026, 5, 8, 12, 34, 56, 0, time.UTC)
 	got := outputPath("arinorr/prism", "42", "md", now)
-	want := filepath.Join("results", "arinorr-prism-pr-42", "260508-1234-arinorr-prism-pr-42.md")
+	want := filepath.Join("results", "arinorr-prism-pr-42", "260508-123456-arinorr-prism-pr-42.md")
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+// TestPrRepoIdent_FallsBackToRepo guards a regression we shipped: the
+// git-only client path (no `gh` CLI installed) populates pr.Repo but leaves
+// pr.OwnerRepo empty. Without the fallback, those reports went to
+// results/unknown-pr-42/ instead of using the detected repo name.
+func TestPrRepoIdent_FallsBackToRepo(t *testing.T) {
+	t.Parallel()
+	withOwner := &gh.PR{Repo: "myrepo", OwnerRepo: "owner/myrepo"}
+	if got := prRepoIdent(withOwner); got != "owner/myrepo" {
+		t.Errorf("with OwnerRepo set: expected 'owner/myrepo', got %q", got)
+	}
+	gitOnly := &gh.PR{Repo: "myrepo"} // OwnerRepo unset (git-only fallback)
+	if got := prRepoIdent(gitOnly); got != "myrepo" {
+		t.Errorf("git-only path: expected 'myrepo' fallback, got %q", got)
 	}
 }
 
