@@ -347,10 +347,44 @@ func progressln(args ...any) {
 	fmt.Fprintln(os.Stderr, args...)
 }
 
+// claudeCLIFallbackPaths lists install locations to probe when "claude"
+// isn't on $PATH. Claude Code's installer puts the binary at
+// ~/.claude/local/claude on macOS/Linux by default.
+func claudeCLIFallbackPaths() []string {
+	paths := []string{"/usr/local/bin/claude"}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append([]string{filepath.Join(home, ".claude", "local", "claude")}, paths...)
+	}
+	return paths
+}
+
+// resolveClaudeCLI returns a path to the claude binary that exec.Command can
+// invoke. Tries $PATH first, then known install locations. Returns an
+// actionable error listing every path checked when nothing is found.
+func resolveClaudeCLI() (string, error) {
+	if path, err := exec.LookPath("claude"); err == nil {
+		return path, nil
+	}
+	fallbacks := claudeCLIFallbackPaths()
+	for _, p := range fallbacks {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("claude CLI not found.\n"+
+		"Checked: $PATH, %s\n"+
+		"Install Claude Code: https://claude.ai/download\n"+
+		"Or add an existing install to $PATH.",
+		strings.Join(fallbacks, ", "))
+}
+
 func runReview(args []string, skillsFS fs.FS) error {
-	// Pre-flight: check required tools are installed.
-	if _, err := exec.LookPath("claude"); err != nil {
-		return fmt.Errorf("claude CLI not found. Install Claude Code first: https://claude.ai/download")
+	// Pre-flight: resolve the claude CLI path. Probe $PATH first, then common
+	// install locations (Claude Code installs to ~/.claude/local/ by default,
+	// which isn't always on $PATH).
+	claudePath, err := resolveClaudeCLI()
+	if err != nil {
+		return err
 	}
 
 	opts, err := parseReviewArgs(args)
@@ -462,7 +496,7 @@ func runReview(args []string, skillsFS fs.FS) error {
 	}
 
 	// Dispatch agents. Orchestrator progress goes to stderr.
-	llmBackend := claude.New()
+	llmBackend := claude.New(claudePath)
 	orchestrator, orchErr := agents.NewOrchestrator(roles, &agents.Options{
 		Verbose:           opts.verbose,
 		DryRun:            opts.dryRun,

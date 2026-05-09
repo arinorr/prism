@@ -39,17 +39,21 @@ func filterEnv(env []string, prefix string) []string {
 
 // Adapter implements llm.LLM using the Claude CLI (`claude --print`).
 type Adapter struct {
-	run commandRunner
+	run  commandRunner
+	path string
 }
 
-// New creates a new Claude CLI adapter.
-func New() *Adapter {
-	return &Adapter{run: defaultRunner}
+// New creates a new Claude CLI adapter. path is the resolved path to the
+// claude binary (either bare "claude" for PATH lookup, or an absolute path
+// from probing common install locations).
+func New(path string) *Adapter {
+	return &Adapter{run: defaultRunner, path: path}
 }
 
 // newWithRunner creates an adapter with a custom command runner (for testing).
+// Tests assert the binary name passed through; default to "claude".
 func newWithRunner(run commandRunner) *Adapter {
-	return &Adapter{run: run}
+	return &Adapter{run: run, path: "claude"}
 }
 
 // cliEnvelope is the full JSON response from `claude --print --output-format json`.
@@ -85,7 +89,7 @@ func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, llm.Us
 
 	args = append(args, "-p", req.UserPrompt)
 
-	out, err := a.run(ctx, "claude", args...)
+	out, err := a.run(ctx, a.path, args...)
 	if err != nil {
 		// If the command produced output before failing, it may contain
 		// an error message from the Claude CLI. Include it in the error.

@@ -243,12 +243,15 @@ func TestParseEnvelope_Invalid(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	t.Parallel()
-	adapter := New()
+	adapter := New("claude")
 	if adapter == nil {
 		t.Fatal("expected non-nil adapter")
 		return
 	}
 	if adapter.run == nil {
 		t.Fatal("expected run to be set")
+	}
+	if adapter.path != "claude" {
+		t.Errorf("path = %q, want %q", adapter.path, "claude")
 	}
 }
