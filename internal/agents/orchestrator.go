@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -152,6 +152,11 @@ type Options struct {
 	RepoRoot          string   // working tree root for symbol index
 	Languages         []string // detected languages for index building
 	ExplicitRoles     bool     // true when --roles was explicitly set by the user
+	CrossRefs         bool     // enable cross-category reference injection
+	ScopeHints        bool     // enable scope hints (modified/added/existing symbols)
+	// SkillsFS is the embedded filesystem of skill files (typically from
+	// main's go:embed). Nil falls back to reading from disk (for tests / dev).
+	SkillsFS fs.FS
 	// Out receives progress messages (agent status, timing). Defaults to os.Stdout.
 	Out io.Writer
 	// ErrOut receives error/warning messages. Defaults to os.Stderr.
@@ -197,20 +202,17 @@ func (o *Orchestrator) errLogf(format string, args ...any) {
 }
 
 // NewOrchestrator creates a new orchestrator with the given roles, LLM backend,
-// and detected languages.
+// and detected languages. Skill files are loaded from opts.SkillsFS (typically
+// the binary's go:embed FS), with a disk fallback if SkillsFS is nil.
+//
 // All skill files are loaded eagerly so the map is immutable during review.
 // Language-specific modules (e.g. skills/know-it-all/typescript.md) are
 // appended to the base skill when the corresponding language is detected.
 func NewOrchestrator(roles []Role, opts *Options, backend llm.LLM, languages []string) (*Orchestrator, error) {
-	exeDir := ""
-	if exePath, err := os.Executable(); err == nil {
-		exeDir = filepath.Dir(exePath)
-	}
-
 	skills := make(map[string]string, len(roles))
 	for i := range roles {
 		r := &roles[i]
-		data, err := readSkillFile(r.SkillFile, exeDir)
+		data, err := readSkillFile(r.SkillFile, opts.SkillsFS)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load skill for %s: %w", r.Name, err)
 		}
@@ -221,7 +223,7 @@ func NewOrchestrator(roles []Role, opts *Options, backend llm.LLM, languages []s
 		// Append language-specific modules if they exist.
 		for _, lang := range languages {
 			langPath := languageSkillPath(r.SkillFile, lang)
-			langData, langErr := readSkillFile(langPath, exeDir) // #nosec G304 -- paths derived from compile-time constants in roles.go + detected language strings
+			langData, langErr := readSkillFile(langPath, opts.SkillsFS)
 			if langErr != nil {
 				continue // Module doesn't exist for this role+language — that's fine.
 			}
@@ -239,13 +241,17 @@ func NewOrchestrator(roles []Role, opts *Options, backend llm.LLM, languages []s
 	}, nil
 }
 
-// readSkillFile tries to read a skill file, falling back to exe-relative path.
-func readSkillFile(path, exeDir string) ([]byte, error) {
-	data, err := os.ReadFile(path) // #nosec G304 -- paths are compile-time constants from roles.go, never user input
-	if err != nil && exeDir != "" {
-		data, err = os.ReadFile(filepath.Join(exeDir, path)) // #nosec G304 -- same as above, fallback to exe-relative path
+// readSkillFile reads a skill file from the embedded FS first, falling back to disk.
+func readSkillFile(path string, embedded fs.FS) ([]byte, error) {
+	// Try embedded FS first (go:embed from the binary).
+	if embedded != nil {
+		data, err := fs.ReadFile(embedded, path)
+		if err == nil {
+			return data, nil
+		}
 	}
-	return data, err
+	// Fall back to disk (for development / testing).
+	return os.ReadFile(path) // #nosec G304 -- paths are compile-time constants from roles.go
 }
 
 // Review runs all agents in parallel and synthesizes their feedback.
@@ -415,13 +421,16 @@ func (o *Orchestrator) dispatchAgents(pr *gh.PR, rctx *ReviewContext) (*dispatch
 				agentDiff = AssembleDiff(agentFiles)
 			}
 
-			// Resolve cross-category context.
-			crossRefs := ResolveCrossReferences(agentFiles, rctx)
-			crossRefText := FormatCrossReferences(crossRefs)
+			// Resolve cross-category context (opt-in).
+			crossRefText := ""
+			if o.opts.CrossRefs {
+				crossRefs := ResolveCrossReferences(agentFiles, rctx)
+				crossRefText = FormatCrossReferences(crossRefs)
+			}
 
-			// Build scope hints.
+			// Build scope hints (opt-in).
 			scopeHints := ""
-			if rctx.ChangeMap != nil {
+			if o.opts.ScopeHints && rctx.ChangeMap != nil {
 				scopeHints = rctx.ChangeMap.FormatScopeHints()
 			}
 

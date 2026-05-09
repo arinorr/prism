@@ -78,7 +78,7 @@ func TestRunReview_StdoutStderrSeparation(t *testing.T) {
 	os.Stdout = stdoutW
 	os.Stderr = stderrW
 
-	_ = runReview([]string{"42", "--dry-run", "--format", "json", "--stdout"})
+	_ = runReview([]string{"42", "--dry-run", "--format", "json", "--stdout"}, nil)
 
 	_ = stdoutW.Close()
 	_ = stderrW.Close()
@@ -238,7 +238,7 @@ func TestRunReview_StdoutMultiFormatFailsFast(t *testing.T) {
 	}
 	t.Cleanup(func() { newGHClient = orig })
 
-	err := runReview([]string{"42", "--stdout", "--format", "md,html"})
+	err := runReview([]string{"42", "--stdout", "--format", "md,html"}, nil)
 	if err == nil {
 		t.Fatal("expected error for --stdout with multiple formats")
 	}
@@ -299,7 +299,7 @@ func TestRunReview_DefaultQuieterThanVerbose(t *testing.T) {
 	_, sw1, _ := os.Pipe()
 	os.Stdout = sw1
 
-	_ = runReview([]string{"42", "--dry-run"})
+	_ = runReview([]string{"42", "--dry-run"}, nil)
 
 	_ = w1.Close()
 	_ = sw1.Close()
@@ -316,7 +316,7 @@ func TestRunReview_DefaultQuieterThanVerbose(t *testing.T) {
 	_, sw2, _ := os.Pipe()
 	os.Stdout = sw2
 
-	_ = runReview([]string{"42", "--dry-run", "--verbose"})
+	_ = runReview([]string{"42", "--dry-run", "--verbose"}, nil)
 
 	_ = w2.Close()
 	_ = sw2.Close()

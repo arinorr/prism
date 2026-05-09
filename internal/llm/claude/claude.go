@@ -39,17 +39,21 @@ func filterEnv(env []string, prefix string) []string {
 
 // Adapter implements llm.LLM using the Claude CLI (`claude --print`).
 type Adapter struct {
-	run commandRunner
+	run  commandRunner
+	path string
 }
 
-// New creates a new Claude CLI adapter.
-func New() *Adapter {
-	return &Adapter{run: defaultRunner}
+// New creates a new Claude CLI adapter. path is the resolved path to the
+// claude binary (either bare "claude" for PATH lookup, or an absolute path
+// from probing common install locations).
+func New(path string) *Adapter {
+	return &Adapter{run: defaultRunner, path: path}
 }
 
 // newWithRunner creates an adapter with a custom command runner (for testing).
+// Tests assert the binary name passed through; default to "claude".
 func newWithRunner(run commandRunner) *Adapter {
-	return &Adapter{run: run}
+	return &Adapter{run: run, path: "claude"}
 }
 
 // cliEnvelope is the full JSON response from `claude --print --output-format json`.
@@ -68,8 +72,18 @@ type cliEnvelope struct {
 // Complete sends a prompt to Claude via the CLI and returns the response text
 // along with token usage metrics.
 func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, llm.Usage, error) {
-	// Always use JSON output to get usage metrics.
-	args := []string{"--print", "--output-format", "json"}
+	// Always use JSON output to get usage metrics. Disable MCP servers and
+	// built-in tools: prism agents are pure prompt-in / JSON-out (they emit
+	// findings as JSON, never need to shell out or edit files). Disabling
+	// avoids shipping tool definitions in every request — saves tokens, avoids
+	// MCP server startup latency per call, and immunizes agent calls from any
+	// invalid tool schema in the user's MCP config.
+	args := []string{
+		"--print",
+		"--output-format", "json",
+		"--strict-mcp-config", // ignore all user-level MCP servers
+		"--tools", "",         // disable all built-in tools (Bash, Edit, etc.)
+	}
 
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
@@ -85,7 +99,7 @@ func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, llm.Us
 
 	args = append(args, "-p", req.UserPrompt)
 
-	out, err := a.run(ctx, "claude", args...)
+	out, err := a.run(ctx, a.path, args...)
 	if err != nil {
 		// If the command produced output before failing, it may contain
 		// an error message from the Claude CLI. Include it in the error.

@@ -2,13 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 )
 
-const version = "0.1.0"
+const version = "1.0.0"
 
 // Execute parses the command-line arguments and runs the appropriate subcommand.
-func Execute() error {
+// skillsFS is the embedded filesystem of skill files (from main's go:embed).
+func Execute(skillsFS fs.FS) error {
 	if len(os.Args) < 2 {
 		printUsage()
 		return nil
@@ -16,7 +18,7 @@ func Execute() error {
 
 	switch os.Args[1] {
 	case "review":
-		return runReview(os.Args[2:])
+		return runReview(os.Args[2:], skillsFS)
 	case "version":
 		fmt.Printf("prism %s\n", version)
 		return nil
@@ -37,6 +39,17 @@ Usage:
   prism help                       Show this help
 
 Options:
+  --tier           Tier preset: quick, standard, deep, thorough (default: deep)
+                     quick     — fast scan, all Haiku ($0.05-$0.20)
+                     standard  — balanced, all Sonnet ($0.30-$1.00)
+                     deep      — per-role models + codebase context ($1.00-$3.00)
+                     thorough  — deep + false positive filtering ($1.50-$4.00)
+                   Tiers set defaults for the flags below. Explicit flags adjust.
+  --model          Model for all agents: haiku, sonnet, opus (default: per tier)
+  --cross-refs     Enable codebase cross-references (default: per tier)
+  --no-cross-refs  Disable codebase cross-references
+  --verify         Enable false positive filtering (default: per tier)
+  --no-verify      Disable false positive filtering
   --comment        Post suggestions as inline PR comments (requires gh cli)
   --roles          Comma-separated list of roles to use (default: all)
                    Available: know-it-all,architect,solver,editor,optimizer,sentinel,test-engineer
@@ -44,7 +57,6 @@ Options:
                    Available: plain, md, html, json
                    Examples: --format md  |  --format md,html,json
                    Reports saved with vault-style YYMMDD-HHMM- prefix
-  --model          Claude model to use (e.g. sonnet, opus, haiku)
   --timeout        Per-agent timeout as a Go duration (default: 5m)
   --max-retries    Number of retries per agent on failure (default: 1)
   --max-budget-usd Maximum dollar spend per agent call (e.g. 0.50)

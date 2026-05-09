@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/arinorr/prism/internal/gh"
@@ -307,14 +308,15 @@ func TestNewOrchestrator_MultipleLanguages(t *testing.T) {
 	}
 }
 
-func TestReadSkillFile_DirectPath(t *testing.T) {
+func TestReadSkillFile_FromDisk(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "skill.md")
 	if err := os.WriteFile(path, []byte("content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	data, err := readSkillFile(path, "")
+	// No embedded FS — reads from disk.
+	data, err := readSkillFile(path, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -323,29 +325,42 @@ func TestReadSkillFile_DirectPath(t *testing.T) {
 	}
 }
 
-func TestReadSkillFile_FallbackToExeDir(t *testing.T) {
+func TestReadSkillFile_FromEmbeddedFS(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	skillDir := filepath.Join(dir, "skills")
-	if err := os.MkdirAll(skillDir, 0o755); err != nil {
-		t.Fatal(err)
+	// Create an in-memory FS with a skill file.
+	embedded := fstest.MapFS{
+		"skills/test.md": &fstest.MapFile{Data: []byte("embedded content")},
 	}
-	if err := os.WriteFile(filepath.Join(skillDir, "test.md"), []byte("fallback"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Direct path won't work, but exeDir fallback should.
-	data, err := readSkillFile("skills/test.md", dir)
+	data, err := readSkillFile("skills/test.md", embedded)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(data) != "fallback" {
-		t.Errorf("expected 'fallback', got %q", string(data))
+	if string(data) != "embedded content" {
+		t.Errorf("expected 'embedded content', got %q", string(data))
+	}
+}
+
+func TestReadSkillFile_EmbeddedFallsToDisk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "disk-only.md")
+	if err := os.WriteFile(path, []byte("from disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Embedded FS doesn't have this file — should fall back to disk.
+	embedded := fstest.MapFS{}
+	data, err := readSkillFile(path, embedded)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != "from disk" {
+		t.Errorf("expected 'from disk', got %q", string(data))
 	}
 }
 
 func TestReadSkillFile_NotFound(t *testing.T) {
 	t.Parallel()
-	_, err := readSkillFile("/nonexistent.md", "/also/nonexistent")
+	_, err := readSkillFile("/nonexistent.md", nil)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
