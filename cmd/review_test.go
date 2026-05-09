@@ -356,7 +356,7 @@ func TestExecute_Version(t *testing.T) {
 	defer func() { os.Args = origArgs }()
 
 	os.Args = []string{"prism", "version"}
-	err := Execute()
+	err := Execute(nil)
 	if err != nil {
 		t.Errorf("expected no error for 'version', got: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestExecute_Help(t *testing.T) {
 
 	for _, arg := range []string{"help", "--help", "-h"} {
 		os.Args = []string{"prism", arg}
-		err := Execute()
+		err := Execute(nil)
 		if err != nil {
 			t.Errorf("expected no error for %q, got: %v", arg, err)
 		}
@@ -380,7 +380,7 @@ func TestExecute_NoArgs(t *testing.T) {
 	defer func() { os.Args = origArgs }()
 
 	os.Args = []string{"prism"}
-	err := Execute()
+	err := Execute(nil)
 	if err != nil {
 		t.Errorf("expected no error for no args (prints usage), got: %v", err)
 	}
@@ -509,21 +509,21 @@ func TestOutputResults_HandlesCommentNoSuggestions(t *testing.T) {
 
 func TestRunReview_InvalidPRRef(t *testing.T) {
 	// Flag injection attempt — should be caught by ValidatePRRef.
-	err := runReview([]string{"--exec=evil"})
+	err := runReview([]string{"--exec=evil"}, nil)
 	if err == nil {
 		t.Fatal("expected error for flag injection ref")
 	}
 }
 
 func TestRunReview_BadRolesFromEquals(t *testing.T) {
-	err := runReview([]string{"42", "--roles=bogus"})
+	err := runReview([]string{"42", "--roles=bogus"}, nil)
 	if err == nil {
 		t.Fatal("expected error for bad roles")
 	}
 }
 
 func TestRunReview_MissingPRRef(t *testing.T) {
-	err := runReview([]string{"--verbose"})
+	err := runReview([]string{"--verbose"}, nil)
 	if err == nil {
 		t.Fatal("expected error when no PR ref given")
 	}
@@ -532,7 +532,7 @@ func TestRunReview_MissingPRRef(t *testing.T) {
 func TestRunReview_UnknownFormatViaEquals(t *testing.T) {
 	// This will fail at the gh.NewClient/GetPRDiff step, not the format step,
 	// because it tries to fetch the PR first. But it exercises more of runReview.
-	err := runReview([]string{"99999", "--format=xml"})
+	err := runReview([]string{"99999", "--format=xml"}, nil)
 	// Will fail fetching PR, which is fine — we're testing path coverage.
 	if err == nil {
 		t.Skip("unexpectedly succeeded")
@@ -541,14 +541,14 @@ func TestRunReview_UnknownFormatViaEquals(t *testing.T) {
 
 func TestRunReview_DryRunFormat(t *testing.T) {
 	// Dry run with format — will fail at gh client, but exercises parsing.
-	err := runReview([]string{"99999", "--dry-run", "--format", "json"})
+	err := runReview([]string{"99999", "--dry-run", "--format", "json"}, nil)
 	if err == nil {
 		t.Skip("unexpectedly succeeded")
 	}
 }
 
 func TestRunReview_NoArgs(t *testing.T) {
-	err := runReview([]string{})
+	err := runReview([]string{}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -558,7 +558,7 @@ func TestRunReview_NoArgs(t *testing.T) {
 }
 
 func TestRunReview_UnknownFlag(t *testing.T) {
-	err := runReview([]string{"42", "--bogus"})
+	err := runReview([]string{"42", "--bogus"}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -568,7 +568,7 @@ func TestRunReview_UnknownFlag(t *testing.T) {
 }
 
 func TestRunReview_BadRoles(t *testing.T) {
-	err := runReview([]string{"42", "--roles", "nonexistent"})
+	err := runReview([]string{"42", "--roles", "nonexistent"}, nil)
 	if err == nil {
 		t.Fatal("expected error for bad roles")
 	}
@@ -740,7 +740,7 @@ func TestExecute_UnknownCommand(t *testing.T) {
 	defer func() { os.Args = origArgs }()
 
 	os.Args = []string{"prism", "nonexistent"}
-	err := Execute()
+	err := Execute(nil)
 	if err == nil {
 		t.Fatal("expected error for unknown command")
 	}
@@ -766,7 +766,7 @@ func TestRunReview_ConfigWithValidRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Will fail at GetPRDiff, but exercises config loading + role parsing + merge.
-	err := runReview([]string{"99999", "--config", cfgPath})
+	err := runReview([]string{"99999", "--config", cfgPath}, nil)
 	if err == nil {
 		t.Skip("unexpectedly succeeded")
 	}
@@ -774,14 +774,14 @@ func TestRunReview_ConfigWithValidRoles(t *testing.T) {
 
 func TestRunReview_WithModelAndTimeout(t *testing.T) {
 	// Exercises config merge path with CLI overrides.
-	err := runReview([]string{"99999", "--model", "haiku", "--timeout", "1m", "--max-retries", "2"})
+	err := runReview([]string{"99999", "--model", "haiku", "--timeout", "1m", "--max-retries", "2"}, nil)
 	if err == nil {
 		t.Skip("unexpectedly succeeded")
 	}
 }
 
 func TestRunReview_WithYesFlag(t *testing.T) {
-	err := runReview([]string{"99999", "--yes"})
+	err := runReview([]string{"99999", "--yes"}, nil)
 	if err == nil {
 		t.Skip("unexpectedly succeeded")
 	}
@@ -793,7 +793,7 @@ func TestRunReview_ConfigWithBadRoles(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("roles:\n  - nonexistent\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := runReview([]string{"42", "--config", cfgPath})
+	err := runReview([]string{"42", "--config", cfgPath}, nil)
 	if err == nil {
 		t.Fatal("expected error for bad roles in config")
 	}
@@ -808,7 +808,7 @@ func TestRunReview_BadConfig(t *testing.T) {
 	if err := os.WriteFile(badConfig, []byte("roles: [not closed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := runReview([]string{"42", "--config", badConfig})
+	err := runReview([]string{"42", "--config", badConfig}, nil)
 	if err == nil {
 		t.Fatal("expected error for bad config")
 	}
@@ -891,7 +891,7 @@ func TestRunReview_FullPipelineWithMockClient(t *testing.T) {
 
 	// This will fail at the orchestrator (skill files not found from test binary)
 	// but exercises config loading, role parsing, size check, and language detection.
-	err := runReview([]string{"42", "--dry-run", "--yes"})
+	err := runReview([]string{"42", "--dry-run", "--yes"}, nil)
 	// Dry run succeeds even without real skill files since it doesn't call claude.
 	// But it will fail loading skills. Either way, we exercise the path.
 	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
@@ -902,7 +902,7 @@ func TestRunReview_FullPipelineWithMockClient(t *testing.T) {
 func TestRunReview_MockClientGetPRDiffError(t *testing.T) {
 	withMockClient(t, nil, os.ErrNotExist)
 
-	err := runReview([]string{"42"})
+	err := runReview([]string{"42"}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -921,7 +921,7 @@ func TestRunReview_LargeDiffWithYes(t *testing.T) {
 	}, nil)
 
 	// --yes skips the confirmation prompt; --dry-run avoids needing skill files.
-	err := runReview([]string{"42", "--yes", "--dry-run"})
+	err := runReview([]string{"42", "--yes", "--dry-run"}, nil)
 	// Will fail at skill loading, but the estimate + confirmation skip path is exercised.
 	if err != nil && !strings.Contains(err.Error(), "failed to load skill") {
 		t.Fatalf("unexpected error: %v", err)
@@ -996,7 +996,7 @@ func TestRunReview_InvalidFormatFailsFast(t *testing.T) {
 		Files:  []gh.FileChange{{Path: "main.go", Status: "modified"}},
 	}, nil)
 
-	err := runReview([]string{"42", "--format", "xml"})
+	err := runReview([]string{"42", "--format", "xml"}, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid format")
 	}
@@ -1025,7 +1025,7 @@ func TestRunReview_EstimateExitsEarly(t *testing.T) {
 	}, nil)
 
 	// --estimate should exit before calling any agents.
-	err := runReview([]string{"42", "--estimate", "--yes"})
+	err := runReview([]string{"42", "--estimate", "--yes"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1070,7 +1070,7 @@ func TestRunReview_ShowsConfigBreakdownBeforePrompt(t *testing.T) {
 	_, sw, _ := os.Pipe()
 	os.Stdout = sw
 
-	_ = runReview([]string{"42", "--dry-run", "--yes"})
+	_ = runReview([]string{"42", "--dry-run", "--yes"}, nil)
 
 	_ = w.Close()
 	_ = sw.Close()

@@ -169,7 +169,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: skillPath}}
-	orch, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, nil, nil)
+	orch, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestNewOrchestrator_LoadsSkills(t *testing.T) {
 func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 	t.Parallel()
 	roles := []Role{{Name: "Bad", Slug: "bad", SkillFile: "/nonexistent/path.md"}}
-	_, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, nil, nil)
+	_, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing skill file")
 	}
@@ -196,7 +196,7 @@ func TestNewOrchestrator_MissingSkillFile(t *testing.T) {
 
 func TestNewOrchestrator_EmptyRoles(t *testing.T) {
 	t.Parallel()
-	orch, err := NewOrchestrator([]Role{}, &Options{}, &llmtest.Mock{}, nil, nil)
+	orch, err := NewOrchestrator([]Role{}, &Options{}, &llmtest.Mock{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestNewOrchestrator_WithLanguageModule(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, []string{"typescript"}, nil)
+	orch, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, []string{"typescript"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestNewOrchestrator_LanguageModuleMissing(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, []string{"rust"}, nil)
+	orch, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, []string{"rust"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestNewOrchestrator_MultipleLanguages(t *testing.T) {
 	}
 
 	roles := []Role{{Name: "Test", Slug: "test", SkillFile: basePath}}
-	orch, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, []string{"go", "typescript"}, nil)
+	orch, err := NewOrchestrator(roles, &Options{}, &llmtest.Mock{}, []string{"go", "typescript"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

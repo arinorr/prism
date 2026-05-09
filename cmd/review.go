@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -346,7 +347,7 @@ func progressln(args ...any) {
 	fmt.Fprintln(os.Stderr, args...)
 }
 
-func runReview(args []string) error {
+func runReview(args []string, skillsFS fs.FS) error {
 	// Pre-flight: check required tools are installed.
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI not found. Install Claude Code first: https://claude.ai/download")
@@ -478,9 +479,10 @@ func runReview(args []string) error {
 		ExplicitRoles:     opts.rolesFlag != "",
 		CrossRefs:         rc.CrossRefs,
 		ScopeHints:        rc.ScopeHints,
+		SkillsFS:          skillsFS,
 		Out:               os.Stderr,
 		ErrOut:            os.Stderr,
-	}, llmBackend, languages, skillsFS)
+	}, llmBackend, languages)
 	if orchErr != nil {
 		return fmt.Errorf("failed to initialize orchestrator: %w", orchErr)
 	}

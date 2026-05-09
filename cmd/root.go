@@ -8,17 +8,9 @@ import (
 
 const version = "1.0.0"
 
-// skillsFS holds the embedded skills directory. Set by main via SetSkillsFS.
-var skillsFS fs.FS
-
-// SetSkillsFS sets the embedded filesystem containing skill files.
-// Called from main before Execute.
-func SetSkillsFS(f fs.FS) {
-	skillsFS = f
-}
-
 // Execute parses the command-line arguments and runs the appropriate subcommand.
-func Execute() error {
+// skillsFS is the embedded filesystem of skill files (from main's go:embed).
+func Execute(skillsFS fs.FS) error {
 	if len(os.Args) < 2 {
 		printUsage()
 		return nil
@@ -26,7 +18,7 @@ func Execute() error {
 
 	switch os.Args[1] {
 	case "review":
-		return runReview(os.Args[2:])
+		return runReview(os.Args[2:], skillsFS)
 	case "version":
 		fmt.Printf("prism %s\n", version)
 		return nil

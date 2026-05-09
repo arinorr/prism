@@ -154,6 +154,9 @@ type Options struct {
 	ExplicitRoles     bool     // true when --roles was explicitly set by the user
 	CrossRefs         bool     // enable cross-category reference injection
 	ScopeHints        bool     // enable scope hints (modified/added/existing symbols)
+	// SkillsFS is the embedded filesystem of skill files (typically from
+	// main's go:embed). Nil falls back to reading from disk (for tests / dev).
+	SkillsFS fs.FS
 	// Out receives progress messages (agent status, timing). Defaults to os.Stdout.
 	Out io.Writer
 	// ErrOut receives error/warning messages. Defaults to os.Stderr.
@@ -199,17 +202,17 @@ func (o *Orchestrator) errLogf(format string, args ...any) {
 }
 
 // NewOrchestrator creates a new orchestrator with the given roles, LLM backend,
-// and detected languages. skillsFS is an embedded filesystem containing skill
-// files (from go:embed). If nil, falls back to reading from disk.
+// and detected languages. Skill files are loaded from opts.SkillsFS (typically
+// the binary's go:embed FS), with a disk fallback if SkillsFS is nil.
 //
 // All skill files are loaded eagerly so the map is immutable during review.
 // Language-specific modules (e.g. skills/know-it-all/typescript.md) are
 // appended to the base skill when the corresponding language is detected.
-func NewOrchestrator(roles []Role, opts *Options, backend llm.LLM, languages []string, skillsFS fs.FS) (*Orchestrator, error) {
+func NewOrchestrator(roles []Role, opts *Options, backend llm.LLM, languages []string) (*Orchestrator, error) {
 	skills := make(map[string]string, len(roles))
 	for i := range roles {
 		r := &roles[i]
-		data, err := readSkillFile(r.SkillFile, skillsFS)
+		data, err := readSkillFile(r.SkillFile, opts.SkillsFS)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load skill for %s: %w", r.Name, err)
 		}
@@ -220,7 +223,7 @@ func NewOrchestrator(roles []Role, opts *Options, backend llm.LLM, languages []s
 		// Append language-specific modules if they exist.
 		for _, lang := range languages {
 			langPath := languageSkillPath(r.SkillFile, lang)
-			langData, langErr := readSkillFile(langPath, skillsFS)
+			langData, langErr := readSkillFile(langPath, opts.SkillsFS)
 			if langErr != nil {
 				continue // Module doesn't exist for this role+language — that's fine.
 			}
