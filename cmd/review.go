@@ -178,14 +178,25 @@ func loadAndMergeConfig(opts *reviewOptions) (config.Config, error) {
 	return config.Merge(&def, &fileCfg, &cliCfg), nil
 }
 
+// Format names accepted by --format, both as user input and as ext suffixes
+// on rendered files. Centralized so `goconst` doesn't trip on repetition.
+const (
+	formatPlain    = "plain"
+	formatMD       = "md"
+	formatMarkdown = "markdown"
+	formatHTML     = "html"
+	formatJSON     = "json"
+	formatTxt      = "txt" // ext used for plain output written to file
+)
+
 // validFormats lists the accepted values for --format.
 var validFormats = map[string]bool{
-	"":         true,
-	"plain":    true,
-	"md":       true,
-	"markdown": true,
-	"html":     true,
-	"json":     true,
+	"":             true,
+	formatPlain:    true,
+	formatMD:       true,
+	formatMarkdown: true,
+	formatHTML:     true,
+	formatJSON:     true,
 }
 
 // parseFormats splits a --format value on commas, trims whitespace from each
@@ -496,22 +507,22 @@ func prRepoIdent(pr *gh.PR) string {
 // (no extra LLM calls — just additional render passes).
 func renderFormat(format string, data *report.Data, summary string) (output, ext string, err error) {
 	switch format {
-	case "plain":
-		return summary + "\n", "txt", nil
-	case "md", "markdown":
-		return report.Markdown(data), "md", nil
-	case "html":
+	case formatPlain:
+		return summary + "\n", formatTxt, nil
+	case formatMD, formatMarkdown:
+		return report.Markdown(data), formatMD, nil
+	case formatHTML:
 		out, err := report.HTML(data)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to generate HTML report: %w", err)
 		}
-		return out, "html", nil
-	case "json":
+		return out, formatHTML, nil
+	case formatJSON:
 		out, err := report.JSON(data)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to generate JSON report: %w", err)
 		}
-		return out, "json", nil
+		return out, formatJSON, nil
 	default:
 		return "", "", fmt.Errorf("unknown format: %s (available: md, html, json, plain)", format)
 	}
