@@ -11,8 +11,8 @@ import (
 func TestDefault(t *testing.T) {
 	t.Parallel()
 	d := Default()
-	if d.Format != "html" {
-		t.Errorf("expected format 'html', got %q", d.Format)
+	if d.Format != "md,html" {
+		t.Errorf("expected format 'md,html', got %q", d.Format)
 	}
 	if d.AgentTimeout != "5m" {
 		t.Errorf("expected timeout '5m', got %q", d.AgentTimeout)

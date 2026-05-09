@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -940,7 +941,7 @@ func TestValidateOptions_ValidFormats(t *testing.T) {
 
 func TestValidateOptions_InvalidFormat(t *testing.T) {
 	t.Parallel()
-	for _, f := range []string{"md,html", "xml", "csv"} {
+	for _, f := range []string{"xml", "csv"} {
 		opts := &reviewOptions{formatFlag: f}
 		merged := &config.Config{}
 		err := validateOptions(opts, merged)
@@ -1041,4 +1042,75 @@ func TestPrintEstimate(t *testing.T) {
 	printEstimate(10000, roles)
 	printEstimate(0, roles[:1])
 	printEstimate(500000, roles)
+}
+
+// TestRunReview_ShowsConfigBreakdownBeforePrompt verifies that the user sees
+// what models/features will run before being asked to confirm a spend. Without
+// this breakdown the prompt is just a yes/no with no context about cost drivers.
+func TestRunReview_ShowsConfigBreakdownBeforePrompt(t *testing.T) {
+	withMockClient(t, &gh.PR{
+		Number: "42",
+		Title:  "Test PR",
+		Repo:   "myrepo",
+		Diff:   "diff --git a/main.go b/main.go\n+package main\n",
+		Files:  []gh.FileChange{{Path: "main.go", Status: "modified"}},
+	}, nil)
+
+	// Chdir so any results/ written by a successful dry-run lands in tempdir.
+	origWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	oldStdout := os.Stdout
+	_, sw, _ := os.Pipe()
+	os.Stdout = sw
+
+	_ = runReview([]string{"42", "--dry-run", "--yes"})
+
+	_ = w.Close()
+	_ = sw.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	stderr := buf.String()
+
+	for _, want := range []string{"Models:", "Verify:", "Estimated cost:"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("expected stderr to contain %q before review runs, got:\n%s", want, stderr)
+		}
+	}
+}
+
+func TestValidateOptions_AcceptsCommaSeparatedFormats(t *testing.T) {
+	t.Parallel()
+	for _, f := range []string{"md,html", "md,html,json", "html,json", "md,html,plain"} {
+		opts := &reviewOptions{formatFlag: f}
+		merged := &config.Config{}
+		if err := validateOptions(opts, merged); err != nil {
+			t.Errorf("expected no error for format %q, got: %v", f, err)
+		}
+	}
+}
+
+func TestValidateOptions_RejectsCommaSeparatedWithBadEntry(t *testing.T) {
+	t.Parallel()
+	for _, f := range []string{"md,xml", "html,csv", "md,html,bogus"} {
+		opts := &reviewOptions{formatFlag: f}
+		merged := &config.Config{}
+		err := validateOptions(opts, merged)
+		if err == nil {
+			t.Errorf("expected error for format %q (one entry is invalid)", f)
+			continue
+		}
+		if !strings.Contains(err.Error(), "invalid format") {
+			t.Errorf("expected 'invalid format' in error for %q, got: %v", f, err)
+		}
+	}
 }

@@ -233,7 +233,10 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          # Pinned to avoid moving-target lint failures: `latest` pulls a new
+          # release on every CI run, and newer goconst/gocritic defaults can
+          # silently break PRs that were green the day before. Bump on purpose.
+          version: v2.10.1
 
   security:
     name: Security
