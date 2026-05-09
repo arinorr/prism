@@ -72,8 +72,18 @@ type cliEnvelope struct {
 // Complete sends a prompt to Claude via the CLI and returns the response text
 // along with token usage metrics.
 func (a *Adapter) Complete(ctx context.Context, req llm.Request) (string, llm.Usage, error) {
-	// Always use JSON output to get usage metrics.
-	args := []string{"--print", "--output-format", "json"}
+	// Always use JSON output to get usage metrics. Disable MCP servers and
+	// built-in tools: prism agents are pure prompt-in / JSON-out (they emit
+	// findings as JSON, never need to shell out or edit files). Disabling
+	// avoids shipping tool definitions in every request — saves tokens, avoids
+	// MCP server startup latency per call, and immunizes agent calls from any
+	// invalid tool schema in the user's MCP config.
+	args := []string{
+		"--print",
+		"--output-format", "json",
+		"--strict-mcp-config", // ignore all user-level MCP servers
+		"--tools", "",         // disable all built-in tools (Bash, Edit, etc.)
+	}
 
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
