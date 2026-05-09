@@ -64,7 +64,11 @@ func TestTier_Defaults(t *testing.T) {
 	}
 }
 
-func TestTier_Defaults_UnknownFallsToDeep(t *testing.T) {
+// TestTier_Defaults_UnknownReturnsDeep documents the defense-in-depth
+// fallback behavior of Tier.Defaults() for unknown tier values. In the
+// production path, resolveTier rejects unknown tiers before Defaults() is
+// reached, so this fallback is only reachable via direct callers.
+func TestTier_Defaults_UnknownReturnsDeep(t *testing.T) {
 	got := Tier("unknown").Defaults()
 	want := TierDeep.Defaults()
 	if got != want {
@@ -89,7 +93,10 @@ func TestTier_Description(t *testing.T) {
 	}
 }
 
-func TestTier_Description_UnknownFallsToDeep(t *testing.T) {
+// TestTier_Description_UnknownReturnsDeep documents the defense-in-depth
+// fallback behavior of Tier.Description() for unknown tier values. See
+// TestTier_Defaults_UnknownReturnsDeep for the same caveat.
+func TestTier_Description_UnknownReturnsDeep(t *testing.T) {
 	got := Tier("unknown").Description()
 	want := TierDeep.Description()
 	if got != want {

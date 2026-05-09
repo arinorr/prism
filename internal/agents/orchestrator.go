@@ -199,13 +199,12 @@ func (o *Orchestrator) errLogf(format string, args ...any) {
 }
 
 // NewOrchestrator creates a new orchestrator with the given roles, LLM backend,
-// and detected languages.
+// and detected languages. skillsFS is an embedded filesystem containing skill
+// files (from go:embed). If nil, falls back to reading from disk.
+//
 // All skill files are loaded eagerly so the map is immutable during review.
 // Language-specific modules (e.g. skills/know-it-all/typescript.md) are
 // appended to the base skill when the corresponding language is detected.
-// NewOrchestrator creates a new orchestrator with the given roles, LLM backend,
-// and detected languages. skillsFS is an embedded filesystem containing skill
-// files (from go:embed). If nil, falls back to reading from disk.
 func NewOrchestrator(roles []Role, opts *Options, backend llm.LLM, languages []string, skillsFS fs.FS) (*Orchestrator, error) {
 	skills := make(map[string]string, len(roles))
 	for i := range roles {

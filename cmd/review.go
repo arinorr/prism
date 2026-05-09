@@ -227,6 +227,9 @@ func resolveTier(merged *config.Config, opts *reviewOptions) (agents.ReviewConfi
 	if merged.Model != "" {
 		rc.Model = merged.Model
 	}
+	// ScopeHints intentionally tracks CrossRefs — they are conceptually one
+	// "codebase context" toggle and are exposed as a single --cross-refs CLI
+	// flag (see tier.go ReviewConfig.ScopeHints comment).
 	if merged.CrossRefs != nil {
 		rc.CrossRefs = *merged.CrossRefs
 		rc.ScopeHints = *merged.CrossRefs
@@ -298,6 +301,12 @@ func validateOptions(opts *reviewOptions, merged *config.Config) error {
 		if _, err := time.ParseDuration(opts.timeoutFlag); err != nil {
 			return fmt.Errorf("invalid timeout: %q (must be a Go duration like 30s, 2m, 1h)", opts.timeoutFlag)
 		}
+	}
+
+	// Validate --tier early so a typo fails before the PR fetch.
+	// resolveTier still validates merged.Tier (file config) at runtime.
+	if opts.tierFlag != "" && !agents.Tier(opts.tierFlag).Valid() {
+		return fmt.Errorf("unknown tier %q (available: quick, standard, deep, thorough)", opts.tierFlag)
 	}
 
 	return nil
