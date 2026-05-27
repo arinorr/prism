@@ -241,6 +241,39 @@ func TestParseEnvelope_Invalid(t *testing.T) {
 	}
 }
 
+// TestComplete_DisablesToolsAndMCP ensures every agent call carries the
+// flags that suppress tools + MCP server registration. A regression here
+// would make prism vulnerable to invalid schemas in a user's MCP config
+// (which would 400 the entire API request) and waste tokens shipping tool
+// definitions agents never use.
+func TestComplete_DisablesToolsAndMCP(t *testing.T) {
+	t.Parallel()
+	adapter := newWithRunner(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		hasStrictMCP := false
+		toolsIdx := -1
+		for i, a := range args {
+			if a == "--strict-mcp-config" {
+				hasStrictMCP = true
+			}
+			if a == "--tools" {
+				toolsIdx = i
+			}
+		}
+		if !hasStrictMCP {
+			t.Error("expected --strict-mcp-config to be passed (disables user MCP servers)")
+		}
+		if toolsIdx == -1 || toolsIdx+1 >= len(args) || args[toolsIdx+1] != "" {
+			t.Errorf(`expected --tools "" to disable all built-in tools, got args=%v`, args)
+		}
+		return envelope("ok"), nil
+	})
+
+	_, _, err := adapter.Complete(context.Background(), llm.Request{UserPrompt: "test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestNew(t *testing.T) {
 	t.Parallel()
 	adapter := New()
