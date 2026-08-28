@@ -37,7 +37,7 @@ func Build(ctx context.Context, rootDir string, languages []string) (*Index, err
 
 	scanners := map[string]LanguageScanner{
 		"go":         GoScanner{},
-		"typescript": TSScanner{},
+		"typescript": NewTSScanner(),
 	}
 
 	idx := NewIndex()

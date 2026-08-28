@@ -43,7 +43,7 @@ export async function fetchData(url: string): Promise<Data> {
 }
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("app.ts", src)
 
 	// We expect: handleRequest, UserService, findById, delete,
@@ -100,7 +100,7 @@ function multi() {
 }
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("end.ts", src)
 
 	if len(symbols) != 2 {
@@ -130,7 +130,7 @@ function real() {
 }
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("comments.ts", src)
 
 	if len(symbols) != 1 {
@@ -153,7 +153,7 @@ export default class App {
 }
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("default.ts", src)
 
 	if len(symbols) < 2 {

@@ -24,7 +24,7 @@ export class Inner {
 }
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("nested.ts", src)
 
 	names := map[string]bool{}
@@ -50,7 +50,7 @@ export let mutable = () => {
 };
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("arrows.ts", src)
 
 	expected := []string{"simple", "withParams", "noExport", "mutable"}
@@ -77,7 +77,7 @@ func TestTSScanner_AbstractClass(t *testing.T) {
 }
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("abstract.ts", src)
 
 	if len(symbols) < 1 {
@@ -98,7 +98,7 @@ export function process(): Result {
 }
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("multiline.ts", src)
 
 	if len(symbols) != 2 {
@@ -124,7 +124,7 @@ function other() {
 }
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("strings.ts", src)
 
 	if len(symbols) != 2 {
@@ -136,7 +136,7 @@ function other() {
 }
 
 func TestTSScanner_EmptyFile(t *testing.T) {
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("empty.ts", []byte("// just a comment\n"))
 	if len(symbols) != 0 {
 		t.Errorf("expected 0 symbols, got %d", len(symbols))
@@ -150,7 +150,7 @@ func TestTSScanner_ConstructorSkipped(t *testing.T) {
 }
 `)
 
-	scanner := TSScanner{}
+	scanner := NewTSScanner()
 	symbols := scanner.Scan("ctor.ts", src)
 
 	for _, s := range symbols {

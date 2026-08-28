@@ -1,218 +1,172 @@
 package parse
 
 import (
-	"regexp"
+	"context"
+	"path/filepath"
 	"strings"
+
+	sitter "github.com/smacker/go-tree-sitter"
+	"github.com/smacker/go-tree-sitter/javascript"
+	"github.com/smacker/go-tree-sitter/typescript/typescript"
 )
 
 // TSScanner extracts symbol declarations from TypeScript and JavaScript files
-// using line-by-line regex matching with brace counting for end-line detection.
-// It is intentionally approximate: false negatives are acceptable (missing some
-// symbols), false positives are not (wrong line ranges).
-type TSScanner struct{}
+// using tree-sitter for proper AST-based parsing. This replaces the previous
+// regex + brace counting approach which missed arrow functions in objects,
+// nested declarations, destructured exports, and more.
+type TSScanner struct {
+	tsParser *sitter.Parser
+	jsParser *sitter.Parser
+}
 
-var (
-	// Top-level declarations.
-	reFuncDecl  = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)`)
-	reClassDecl = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(\w+)`)
-	reIfaceDecl = regexp.MustCompile(`^(?:export\s+)?interface\s+(\w+)`)
-	reTypeDecl  = regexp.MustCompile(`^(?:export\s+)?type\s+(\w+)\s*[=<]`)
-	reArrowDecl = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:\([^)]*\)|[^=])*\s*=>`)
-	// Method declarations inside a class body.
-	reMethodDecl = regexp.MustCompile(`^\s+(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:async\s+)?(\w+)\s*\(`)
-)
+// NewTSScanner creates a TSScanner with tree-sitter parsers for TypeScript and JavaScript.
+func NewTSScanner() *TSScanner {
+	ts := sitter.NewParser()
+	ts.SetLanguage(typescript.GetLanguage())
+	js := sitter.NewParser()
+	js.SetLanguage(javascript.GetLanguage())
+	return &TSScanner{tsParser: ts, jsParser: js}
+}
 
-func (TSScanner) Scan(filename string, src []byte) []Symbol {
-	lines := strings.Split(string(src), "\n")
+func (s *TSScanner) Scan(filename string, src []byte) []Symbol {
+	parser := s.tsParser
+	if isJS(filename) {
+		parser = s.jsParser
+	}
+
+	tree, err := parser.ParseCtx(context.Background(), nil, src)
+	if err != nil || tree == nil {
+		return nil
+	}
+	root := tree.RootNode()
+	if root == nil {
+		return nil
+	}
+
 	var symbols []Symbol
+	walkTSNode(root, src, filename, &symbols, "")
+	return symbols
+}
 
-	inBlockComment := false
-	var classStack []int // indices into symbols for open class declarations
+// isJS returns true if the filename has a JavaScript extension.
+func isJS(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".js", ".jsx", ".mjs", ".cjs":
+		return true
+	}
+	return false
+}
 
-	for i, line := range lines {
-		lineNum := i + 1
-		trimmed := strings.TrimSpace(line)
-
-		// Track block comments to avoid matching braces inside them.
-		if inBlockComment {
-			if idx := strings.Index(trimmed, "*/"); idx >= 0 {
-				inBlockComment = false
-				trimmed = trimmed[idx+2:]
-			} else {
-				continue
-			}
-		}
-		if idx := strings.Index(trimmed, "/*"); idx >= 0 {
-			if !strings.Contains(trimmed[idx:], "*/") {
-				inBlockComment = true
-			}
-		}
-
-		// Skip single-line comments.
-		if strings.HasPrefix(trimmed, "//") {
-			continue
-		}
-
-		// Try matching declarations (order matters: class before method).
-		if m := reFuncDecl.FindStringSubmatch(trimmed); m != nil {
-			symbols = append(symbols, Symbol{
-				Name:      m[1],
-				File:      filename,
-				StartLine: lineNum,
-				EndLine:   lineNum, // updated by brace counting
+// walkTSNode recursively walks the tree-sitter AST and extracts symbol declarations.
+func walkTSNode(node *sitter.Node, src []byte, file string, symbols *[]Symbol, currentClass string) {
+	switch node.Type() {
+	case "function_declaration", "generator_function_declaration":
+		if name := nodeFieldContent(node, "name", src); name != "" {
+			*symbols = append(*symbols, Symbol{
+				Name:      name,
+				File:      file,
+				StartLine: int(node.StartPoint().Row) + 1,
+				EndLine:   int(node.EndPoint().Row) + 1,
 				Kind:      KindFunc,
 			})
-		} else if m := reClassDecl.FindStringSubmatch(trimmed); m != nil {
-			symbols = append(symbols, Symbol{
-				Name:      m[1],
-				File:      filename,
-				StartLine: lineNum,
-				EndLine:   lineNum,
+		}
+
+	case "class_declaration", "abstract_class_declaration":
+		name := nodeFieldContent(node, "name", src)
+		if name != "" {
+			*symbols = append(*symbols, Symbol{
+				Name:      name,
+				File:      file,
+				StartLine: int(node.StartPoint().Row) + 1,
+				EndLine:   int(node.EndPoint().Row) + 1,
 				Kind:      KindClass,
 			})
-			classStack = append(classStack, len(symbols)-1)
-		} else if m := reIfaceDecl.FindStringSubmatch(trimmed); m != nil {
-			symbols = append(symbols, Symbol{
-				Name:      m[1],
-				File:      filename,
-				StartLine: lineNum,
-				EndLine:   lineNum,
+		}
+		// Walk children with class context for method detection.
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			walkTSNode(node.NamedChild(i), src, file, symbols, name)
+		}
+		return // don't walk children again below
+
+	case "interface_declaration":
+		if name := nodeFieldContent(node, "name", src); name != "" {
+			*symbols = append(*symbols, Symbol{
+				Name:      name,
+				File:      file,
+				StartLine: int(node.StartPoint().Row) + 1,
+				EndLine:   int(node.EndPoint().Row) + 1,
 				Kind:      KindInterface,
 			})
-		} else if m := reTypeDecl.FindStringSubmatch(trimmed); m != nil {
-			symbols = append(symbols, Symbol{
-				Name:      m[1],
-				File:      filename,
-				StartLine: lineNum,
-				EndLine:   lineNum,
+		}
+
+	case "type_alias_declaration":
+		if name := nodeFieldContent(node, "name", src); name != "" {
+			*symbols = append(*symbols, Symbol{
+				Name:      name,
+				File:      file,
+				StartLine: int(node.StartPoint().Row) + 1,
+				EndLine:   int(node.EndPoint().Row) + 1,
 				Kind:      KindType,
 			})
-		} else if m := reArrowDecl.FindStringSubmatch(trimmed); m != nil {
-			symbols = append(symbols, Symbol{
-				Name:      m[1],
-				File:      filename,
-				StartLine: lineNum,
-				EndLine:   lineNum,
-				Kind:      KindFunc,
-			})
-		} else if len(classStack) > 0 {
-			// Inside a class: check for method declarations.
-			if m := reMethodDecl.FindStringSubmatch(line); m != nil {
-				name := m[1]
-				// Skip keywords that look like methods.
-				if name != "if" && name != "for" && name != "while" && name != "switch" && name != "catch" && name != "constructor" {
-					classIdx := classStack[len(classStack)-1]
-					symbols = append(symbols, Symbol{
-						Name:      m[1],
-						File:      filename,
-						StartLine: lineNum,
-						EndLine:   lineNum,
-						Kind:      KindMethod,
-						Receiver:  symbols[classIdx].Name,
+		}
+
+	case "method_definition":
+		if name := nodeFieldContent(node, "name", src); name != "" {
+			// Skip constructor.
+			if name != "constructor" {
+				*symbols = append(*symbols, Symbol{
+					Name:      name,
+					File:      file,
+					StartLine: int(node.StartPoint().Row) + 1,
+					EndLine:   int(node.EndPoint().Row) + 1,
+					Kind:      KindMethod,
+					Receiver:  currentClass,
+				})
+			}
+		}
+
+	case "lexical_declaration":
+		// Handle: const/let/var name = (...) => { ... }
+		// These are arrow function declarations.
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			decl := node.NamedChild(i)
+			if decl.Type() == "variable_declarator" {
+				nameNode := decl.ChildByFieldName("name")
+				valueNode := decl.ChildByFieldName("value")
+				if nameNode != nil && valueNode != nil && valueNode.Type() == "arrow_function" {
+					*symbols = append(*symbols, Symbol{
+						Name:      nameNode.Content(src),
+						File:      file,
+						StartLine: int(node.StartPoint().Row) + 1,
+						EndLine:   int(node.EndPoint().Row) + 1,
+						Kind:      KindFunc,
 					})
 				}
 			}
 		}
+
+	case "export_statement":
+		// Walk into export to find the actual declaration.
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			child := node.NamedChild(i)
+			walkTSNode(child, src, file, symbols, currentClass)
+		}
+		return // don't walk children again below
 	}
 
-	// Second pass: use brace counting to find EndLine for each symbol.
-	resolveEndLines(lines, symbols)
-
-	return symbols
-}
-
-// resolveEndLines uses brace counting to determine the EndLine for each symbol.
-// For each symbol, it starts scanning from its StartLine and tracks brace depth.
-// EndLine is set when the depth returns to the pre-declaration level.
-func resolveEndLines(lines []string, symbols []Symbol) {
-	for i := range symbols {
-		sym := &symbols[i]
-		if sym.Kind == KindType {
-			// Type aliases are typically single-line; scan for semicolon or end of line.
-			sym.EndLine = findTypeEnd(lines, sym.StartLine-1)
-			continue
-		}
-
-		depth := 0
-		started := false
-		inBlockComment := false
-
-		for j := sym.StartLine - 1; j < len(lines); j++ {
-			line := lines[j]
-
-			for k := 0; k < len(line); k++ {
-				if inBlockComment {
-					if k+1 < len(line) && line[k] == '*' && line[k+1] == '/' {
-						inBlockComment = false
-						k++ // skip '/'
-					}
-					continue
-				}
-
-				ch := line[k]
-				switch {
-				case k+1 < len(line) && ch == '/' && line[k+1] == '/':
-					// Rest of line is comment.
-					k = len(line)
-				case k+1 < len(line) && ch == '/' && line[k+1] == '*':
-					inBlockComment = true
-					k++ // skip '*'
-				case ch == '\'' || ch == '"' || ch == '`':
-					// Skip string literals.
-					k = skipString(line, k, ch)
-				case ch == '{':
-					depth++
-					started = true
-				case ch == '}':
-					depth--
-					if started && depth <= 0 {
-						sym.EndLine = j + 1
-						goto nextSymbol
-					}
-				}
-			}
-		}
-	nextSymbol:
+	// Recurse into children.
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		walkTSNode(node.NamedChild(i), src, file, symbols, currentClass)
 	}
 }
 
-// findTypeEnd finds the end line for a type alias declaration.
-// It scans forward from the start line looking for the end of the type
-// expression (handles multi-line union/intersection types).
-func findTypeEnd(lines []string, startIdx int) int {
-	depth := 0
-	for i := startIdx; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		for _, ch := range line {
-			switch ch {
-			case '{', '(':
-				depth++
-			case '}', ')':
-				depth--
-			}
-		}
-		// Type ends when we're back to depth 0 and the line doesn't end with | or &.
-		if depth <= 0 && !strings.HasSuffix(line, "|") && !strings.HasSuffix(line, "&") {
-			return i + 1
-		}
+// nodeFieldContent returns the text content of a named field on a node,
+// or empty string if the field doesn't exist.
+func nodeFieldContent(node *sitter.Node, field string, src []byte) string {
+	child := node.ChildByFieldName(field)
+	if child == nil {
+		return ""
 	}
-	return startIdx + 1
-}
-
-// skipString advances past a string literal starting at position start.
-func skipString(line string, start int, quote byte) int {
-	if quote == '`' {
-		// Template literals can span lines; just skip to end of current line.
-		return len(line) - 1
-	}
-	for i := start + 1; i < len(line); i++ {
-		if line[i] == '\\' {
-			i++ // skip escaped character
-			continue
-		}
-		if line[i] == quote {
-			return i
-		}
-	}
-	return len(line) - 1
+	return child.Content(src)
 }
